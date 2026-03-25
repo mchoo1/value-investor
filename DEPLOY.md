@@ -1,62 +1,56 @@
-# Deploy Value Investor App — Free & Public
-
-Two ways to access the app from your phone anywhere:
+# Deploy Value Investor App — Free
 
 ---
 
-## Option A: Same WiFi (instant, zero setup)
+## Option A: Same WiFi (instant, no setup)
 
-1. Double-click `start.bat` on your PC
-2. Look for the `PHONE / TABLET` line — it shows your local IP, e.g. `http://192.168.1.5:5001`
-3. Open that URL on your phone (must be on the same WiFi as your PC)
-
-**Limitation:** Only works when your PC is on and on the same network.
+1. Run `start.bat` on your PC
+2. Look for the **PHONE / TABLET** line — e.g. `http://192.168.1.5:5001`
+3. Open that on your phone while on the same WiFi
 
 ---
 
-## Option B: Render — 100% free, public internet
+## Option B: Vercel + Neon (100% free, public internet)
 
-No credit card needed. App is accessible from any device, anywhere.
+No credit card needed. Works from any device, any network.
 
-### Step 1 — Push to GitHub
+### Step 1 — Free Postgres database (Neon)
 
-Run `setup_github.bat` in the `ValueInvestor` folder.
-It will ask you to create a GitHub repo and paste the URL. Follow the on-screen steps.
+1. Go to **https://neon.tech** → sign up free (GitHub login works)
+2. Create a new project, name it `value-investor`
+3. Copy the **Connection string** — looks like:
+   `postgresql://user:password@ep-xxx.neon.tech/neondb?sslmode=require`
 
-> Requires Git for Windows: https://git-scm.com/download/win
+### Step 2 — Deploy on Vercel
 
-### Step 2 — Deploy on Render
+1. Go to **https://vercel.com** → sign in with GitHub (free)
+2. Click **Add New → Project**
+3. Import your `mchoo1/value-investor` repo
+4. Before deploying, add an **Environment Variable**:
+   - Name: `DATABASE_URL`
+   - Value: paste the Neon connection string from Step 1
+5. Click **Deploy** — takes ~2 minutes
+6. Vercel gives you a URL like `https://value-investor-xxx.vercel.app`
 
-1. Go to https://render.com and sign in with GitHub (free)
-2. Click **New +** → **Web Service**
-3. Connect your `value-investor` GitHub repo
-4. Render reads `render.yaml` automatically — no manual config needed
-5. Click **Deploy** — takes ~3 minutes
-6. You get a permanent URL like: `https://value-investor.onrender.com`
-
-### Step 3 — Bookmark on your phone
-
-Done! Open it from any device, any network.
+**Bookmark that URL on your phone — done!**
 
 ---
-
-## Keeping your data safe
-
-The `render.yaml` sets up a persistent disk at `/var/data` — your portfolio, watchlist, and thesis data survive redeployments.
 
 ## Updating the app
 
+After any code change:
 ```
 git add .
 git commit -m "Update"
 git push
 ```
-
-Render auto-redeploys within ~2 minutes.
+Vercel auto-redeploys in ~1 minute.
 
 ---
 
-## Free tier notes
+## How data is stored
 
-- **Render free tier:** App sleeps after 15 min of inactivity. First visit after sleep takes ~30 sec to wake. No credit card needed.
-- **Railway:** Also free ($5/month credit, no credit card). Does not sleep. Use `railway.json` (already included) if you prefer Railway over Render.
+- **Local (`start.bat`):** SQLite file in the `data/` folder on your PC
+- **Vercel:** Neon Postgres database (free 512MB — more than enough)
+
+The app detects which one to use automatically via the `DATABASE_URL` environment variable.

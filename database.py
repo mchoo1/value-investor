@@ -1,145 +1,276 @@
 """
-SQLite database setup and helpers.
-All user data (thesis, portfolio, watchlist) is stored locally.
+Database helpers — works with SQLite locally and Postgres on Vercel/cloud.
+
+Set DATABASE_URL env var (postgres://...) to use Postgres.
+Otherwise falls back to local SQLite.
 """
-import sqlite3
+import os
 import json
+import sqlite3
 from datetime import datetime
 
-import os as _os
-_BASE = _os.path.dirname(_os.path.abspath(__file__))
-# DATA_DIR env var allows Railway / cloud to redirect to a persistent volume
-_DATA_DIR = _os.environ.get("DATA_DIR", _os.path.join(_BASE, "data"))
-_os.makedirs(_DATA_DIR, exist_ok=True)
-DB_PATH = _os.path.join(_DATA_DIR, "valueinvestor.db")
+# ── Backend detection ────────────────────────────────────────────
+_DATABASE_URL = os.environ.get("DATABASE_URL", "")
+_USE_PG = bool(_DATABASE_URL)
+
+# SQLite path (used when DATABASE_URL is not set)
+_BASE = os.path.dirname(os.path.abspath(__file__))
+_DATA_DIR = os.environ.get("DATA_DIR", os.path.join(_BASE, "data"))
+os.makedirs(_DATA_DIR, exist_ok=True)
+DB_PATH = os.path.join(_DATA_DIR, "valueinvestor.db")
 
 
+# ── Connection helpers ───────────────────────────────────────────
 def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+    if _USE_PG:
+        import psycopg2
+        import psycopg2.extras
+        conn = psycopg2.connect(_DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
+        return conn
+    else:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        return conn
 
 
+def _sql(q):
+    """Convert SQLite-style SQL to Postgres when needed."""
+    if not _USE_PG:
+        return q
+    return (q
+            .replace("?", "%s")
+            .replace("INTEGER PRIMARY KEY AUTOINCREMENT", "SERIAL PRIMARY KEY")
+            .replace("INSERT OR REPLACE", "INSERT")
+            .replace("last_insert_rowid()", "lastval()"))
+
+
+def _rows(cursor):
+    """Fetch all rows as plain dicts."""
+    rows = cursor.fetchall()
+    if not rows:
+        return []
+    if isinstance(rows[0], dict):          # psycopg2 RealDictRow
+        return [dict(r) for r in rows]
+    if hasattr(rows[0], "keys"):           # sqlite3.Row
+        return [dict(r) for r in rows]
+    # Fallback: zip column names
+    cols = [d[0] for d in cursor.description]
+    return [dict(zip(cols, r)) for r in rows]
+
+
+# ── Schema ───────────────────────────────────────────────────────
 def init_db():
     conn = get_db()
     c = conn.cursor()
 
-    # Watchlist
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS watchlist (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            ticker TEXT NOT NULL UNIQUE,
-            name TEXT,
-            market TEXT DEFAULT 'US',
-            added_date TEXT,
-            notes TEXT
-        )
-    """)
-
-    # Portfolio positions
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS portfolio (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            ticker TEXT NOT NULL,
-            name TEXT,
-            entry_price REAL,
-            shares REAL,
-            entry_date TEXT,
-            target_price REAL,
-            stop_loss REAL,
-            status TEXT DEFAULT 'open',  -- open / closed
-            exit_price REAL,
-            exit_date TEXT,
-            notes TEXT
-        )
-    """)
-
-    # Investment thesis
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS thesis (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            ticker TEXT NOT NULL,
-            title TEXT,
-            created_date TEXT,
-            updated_date TEXT,
-            investment_case TEXT,
-            moat_type TEXT,
-            moat_rating TEXT,
-            revenue_growth_assumption REAL,
-            margin_assumption REAL,
-            wacc_assumption REAL,
-            terminal_growth REAL,
-            intrinsic_value REAL,
-            margin_of_safety REAL,
-            buy_trigger TEXT,
-            sell_trigger TEXT,
-            risk_factors TEXT,
-            current_price REAL,
-            status TEXT DEFAULT 'active'  -- active / closed / monitoring
-        )
-    """)
-
-    # Weekly thesis reviews
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS weekly_review (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            thesis_id INTEGER,
-            ticker TEXT,
-            review_date TEXT,
-            current_price REAL,
-            target_price REAL,
-            price_change_pct REAL,
-            thesis_intact INTEGER DEFAULT 1,  -- 1=yes, 0=no
-            revenue_on_track INTEGER DEFAULT 1,
-            margin_on_track INTEGER DEFAULT 1,
-            new_developments TEXT,
-            assumption_changes TEXT,
-            action TEXT DEFAULT 'hold',  -- buy/hold/sell/watch
-            confidence INTEGER DEFAULT 3,  -- 1-5
-            notes TEXT,
-            FOREIGN KEY (thesis_id) REFERENCES thesis(id)
-        )
-    """)
-
-    # Screener saved results
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS screener_results (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            run_date TEXT,
-            market TEXT,
-            filters TEXT,
-            results TEXT
-        )
-    """)
-
-    # ── Migrations: add snapshot columns if not present ──────────
-    existing_cols = {row[1] for row in c.execute("PRAGMA table_info(thesis)")}
-    for col, col_type in [
-        ("entry_pe",             "REAL"),
-        ("entry_roe",            "REAL"),
-        ("entry_revenue_growth", "REAL"),
-        ("entry_net_margin",     "REAL"),
-        ("entry_market_cap",     "REAL"),
-        ("target_price",         "REAL"),
-        ("bear_target",          "REAL"),
-        ("bull_target",          "REAL"),
-    ]:
-        if col not in existing_cols:
-            c.execute(f"ALTER TABLE thesis ADD COLUMN {col} {col_type}")
+    if _USE_PG:
+        # Postgres schema
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS watchlist (
+                id SERIAL PRIMARY KEY,
+                ticker TEXT NOT NULL UNIQUE,
+                name TEXT,
+                market TEXT DEFAULT 'US',
+                added_date TEXT,
+                notes TEXT
+            )
+        """)
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS portfolio (
+                id SERIAL PRIMARY KEY,
+                ticker TEXT NOT NULL,
+                name TEXT,
+                entry_price REAL,
+                shares REAL,
+                entry_date TEXT,
+                target_price REAL,
+                stop_loss REAL,
+                status TEXT DEFAULT 'open',
+                exit_price REAL,
+                exit_date TEXT,
+                notes TEXT
+            )
+        """)
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS thesis (
+                id SERIAL PRIMARY KEY,
+                ticker TEXT NOT NULL,
+                title TEXT,
+                created_date TEXT,
+                updated_date TEXT,
+                investment_case TEXT,
+                moat_type TEXT,
+                moat_rating TEXT,
+                revenue_growth_assumption REAL,
+                margin_assumption REAL,
+                wacc_assumption REAL,
+                terminal_growth REAL,
+                intrinsic_value REAL,
+                margin_of_safety REAL,
+                buy_trigger TEXT,
+                sell_trigger TEXT,
+                risk_factors TEXT,
+                current_price REAL,
+                status TEXT DEFAULT 'active',
+                entry_pe REAL,
+                entry_roe REAL,
+                entry_revenue_growth REAL,
+                entry_net_margin REAL,
+                entry_market_cap REAL,
+                target_price REAL,
+                bear_target REAL,
+                bull_target REAL
+            )
+        """)
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS weekly_review (
+                id SERIAL PRIMARY KEY,
+                thesis_id INTEGER,
+                ticker TEXT,
+                review_date TEXT,
+                current_price REAL,
+                target_price REAL,
+                price_change_pct REAL,
+                thesis_intact INTEGER DEFAULT 1,
+                revenue_on_track INTEGER DEFAULT 1,
+                margin_on_track INTEGER DEFAULT 1,
+                new_developments TEXT,
+                assumption_changes TEXT,
+                action TEXT DEFAULT 'hold',
+                confidence INTEGER DEFAULT 3,
+                notes TEXT,
+                FOREIGN KEY (thesis_id) REFERENCES thesis(id)
+            )
+        """)
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS screener_results (
+                id SERIAL PRIMARY KEY,
+                run_date TEXT,
+                market TEXT,
+                filters TEXT,
+                results TEXT
+            )
+        """)
+    else:
+        # SQLite schema
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS watchlist (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticker TEXT NOT NULL UNIQUE,
+                name TEXT,
+                market TEXT DEFAULT 'US',
+                added_date TEXT,
+                notes TEXT
+            )
+        """)
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS portfolio (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticker TEXT NOT NULL,
+                name TEXT,
+                entry_price REAL,
+                shares REAL,
+                entry_date TEXT,
+                target_price REAL,
+                stop_loss REAL,
+                status TEXT DEFAULT 'open',
+                exit_price REAL,
+                exit_date TEXT,
+                notes TEXT
+            )
+        """)
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS thesis (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticker TEXT NOT NULL,
+                title TEXT,
+                created_date TEXT,
+                updated_date TEXT,
+                investment_case TEXT,
+                moat_type TEXT,
+                moat_rating TEXT,
+                revenue_growth_assumption REAL,
+                margin_assumption REAL,
+                wacc_assumption REAL,
+                terminal_growth REAL,
+                intrinsic_value REAL,
+                margin_of_safety REAL,
+                buy_trigger TEXT,
+                sell_trigger TEXT,
+                risk_factors TEXT,
+                current_price REAL,
+                status TEXT DEFAULT 'active'
+            )
+        """)
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS weekly_review (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                thesis_id INTEGER,
+                ticker TEXT,
+                review_date TEXT,
+                current_price REAL,
+                target_price REAL,
+                price_change_pct REAL,
+                thesis_intact INTEGER DEFAULT 1,
+                revenue_on_track INTEGER DEFAULT 1,
+                margin_on_track INTEGER DEFAULT 1,
+                new_developments TEXT,
+                assumption_changes TEXT,
+                action TEXT DEFAULT 'hold',
+                confidence INTEGER DEFAULT 3,
+                notes TEXT,
+                FOREIGN KEY (thesis_id) REFERENCES thesis(id)
+            )
+        """)
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS screener_results (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_date TEXT,
+                market TEXT,
+                filters TEXT,
+                results TEXT
+            )
+        """)
+        # Migrations: add new columns if missing
+        existing_cols = {row[1] for row in c.execute("PRAGMA table_info(thesis)")}
+        for col, col_type in [
+            ("entry_pe",             "REAL"),
+            ("entry_roe",            "REAL"),
+            ("entry_revenue_growth", "REAL"),
+            ("entry_net_margin",     "REAL"),
+            ("entry_market_cap",     "REAL"),
+            ("target_price",         "REAL"),
+            ("bear_target",          "REAL"),
+            ("bull_target",          "REAL"),
+        ]:
+            if col not in existing_cols:
+                c.execute(f"ALTER TABLE thesis ADD COLUMN {col} {col_type}")
 
     conn.commit()
     conn.close()
     print("Database initialized.")
 
 
-# ── Watchlist CRUD ──────────────────────────────────────────────
+# ── Watchlist CRUD ───────────────────────────────────────────────
 def add_to_watchlist(ticker, name, market="US", notes=""):
     conn = get_db()
     try:
-        conn.execute(
-            "INSERT OR REPLACE INTO watchlist (ticker, name, market, added_date, notes) VALUES (?,?,?,?,?)",
-            (ticker.upper(), name, market, datetime.now().strftime("%Y-%m-%d"), notes)
-        )
+        c = conn.cursor()
+        now = datetime.now().strftime("%Y-%m-%d")
+        if _USE_PG:
+            c.execute(
+                """INSERT INTO watchlist (ticker, name, market, added_date, notes)
+                   VALUES (%s,%s,%s,%s,%s)
+                   ON CONFLICT (ticker) DO UPDATE SET
+                     name=EXCLUDED.name, market=EXCLUDED.market,
+                     added_date=EXCLUDED.added_date, notes=EXCLUDED.notes""",
+                (ticker.upper(), name, market, now, notes)
+            )
+        else:
+            c.execute(
+                "INSERT OR REPLACE INTO watchlist (ticker, name, market, added_date, notes) VALUES (?,?,?,?,?)",
+                (ticker.upper(), name, market, now, notes)
+            )
         conn.commit()
         return True
     except Exception as e:
@@ -150,14 +281,17 @@ def add_to_watchlist(ticker, name, market="US", notes=""):
 
 def get_watchlist():
     conn = get_db()
-    rows = conn.execute("SELECT * FROM watchlist ORDER BY added_date DESC").fetchall()
+    c = conn.cursor()
+    c.execute("SELECT * FROM watchlist ORDER BY added_date DESC")
+    rows = _rows(c)
     conn.close()
-    return [dict(r) for r in rows]
+    return rows
 
 
 def remove_from_watchlist(ticker):
     conn = get_db()
-    conn.execute("DELETE FROM watchlist WHERE ticker=?", (ticker.upper(),))
+    c = conn.cursor()
+    c.execute(_sql("DELETE FROM watchlist WHERE ticker=?"), (ticker.upper(),))
     conn.commit()
     conn.close()
 
@@ -165,9 +299,10 @@ def remove_from_watchlist(ticker):
 # ── Portfolio CRUD ───────────────────────────────────────────────
 def add_position(ticker, name, entry_price, shares, entry_date, target_price, stop_loss, notes=""):
     conn = get_db()
-    conn.execute(
-        """INSERT INTO portfolio (ticker, name, entry_price, shares, entry_date, target_price, stop_loss, notes)
-           VALUES (?,?,?,?,?,?,?,?)""",
+    c = conn.cursor()
+    c.execute(
+        _sql("""INSERT INTO portfolio (ticker, name, entry_price, shares, entry_date, target_price, stop_loss, notes)
+           VALUES (?,?,?,?,?,?,?,?)"""),
         (ticker.upper(), name, entry_price, shares, entry_date, target_price, stop_loss, notes)
     )
     conn.commit()
@@ -176,23 +311,28 @@ def add_position(ticker, name, entry_price, shares, entry_date, target_price, st
 
 def get_portfolio():
     conn = get_db()
-    rows = conn.execute("SELECT * FROM portfolio ORDER BY entry_date DESC").fetchall()
+    c = conn.cursor()
+    c.execute("SELECT * FROM portfolio ORDER BY entry_date DESC")
+    rows = _rows(c)
     conn.close()
-    return [dict(r) for r in rows]
+    return rows
 
 
 def update_position(pos_id, **kwargs):
     conn = get_db()
-    sets = ", ".join(f"{k}=?" for k in kwargs)
+    c = conn.cursor()
+    ph = "%s" if _USE_PG else "?"
+    sets = ", ".join(f"{k}={ph}" for k in kwargs)
     vals = list(kwargs.values()) + [pos_id]
-    conn.execute(f"UPDATE portfolio SET {sets} WHERE id=?", vals)
+    c.execute(f"UPDATE portfolio SET {sets} WHERE id={ph}", vals)
     conn.commit()
     conn.close()
 
 
 def delete_position(pos_id):
     conn = get_db()
-    conn.execute("DELETE FROM portfolio WHERE id=?", (pos_id,))
+    c = conn.cursor()
+    c.execute(_sql("DELETE FROM portfolio WHERE id=?"), (pos_id,))
     conn.commit()
     conn.close()
 
@@ -200,23 +340,32 @@ def delete_position(pos_id):
 # ── Thesis CRUD ──────────────────────────────────────────────────
 def save_thesis(data: dict):
     conn = get_db()
+    c = conn.cursor()
     now = datetime.now().strftime("%Y-%m-%d")
+    ph = "%s" if _USE_PG else "?"
 
-    existing = conn.execute("SELECT id FROM thesis WHERE ticker=?", (data["ticker"].upper(),)).fetchone()
+    c.execute(_sql(f"SELECT id FROM thesis WHERE ticker={ph}"), (data["ticker"].upper(),))
+    existing = c.fetchone()
+
     if existing:
-        sets = ", ".join(f"{k}=?" for k in data if k != "ticker")
+        sets = ", ".join(f"{k}={ph}" for k in data if k != "ticker")
         vals = [data[k] for k in data if k != "ticker"] + [data["ticker"].upper()]
-        conn.execute(f"UPDATE thesis SET updated_date=?, {sets} WHERE ticker=?",
-                     [now] + vals)
-        thesis_id = existing["id"]
+        c.execute(f"UPDATE thesis SET updated_date={ph}, {sets} WHERE ticker={ph}", [now] + vals)
+        thesis_id = existing["id"] if isinstance(existing, dict) else existing[0]
     else:
         data["ticker"] = data["ticker"].upper()
         data["created_date"] = now
         data["updated_date"] = now
         cols = ", ".join(data.keys())
-        placeholders = ", ".join("?" * len(data))
-        conn.execute(f"INSERT INTO thesis ({cols}) VALUES ({placeholders})", list(data.values()))
-        thesis_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        placeholders = ", ".join([ph] * len(data))
+        if _USE_PG:
+            c.execute(f"INSERT INTO thesis ({cols}) VALUES ({placeholders}) RETURNING id",
+                      list(data.values()))
+            thesis_id = c.fetchone()["id"]
+        else:
+            c.execute(f"INSERT INTO thesis ({cols}) VALUES ({placeholders})", list(data.values()))
+            c.execute("SELECT last_insert_rowid()")
+            thesis_id = c.fetchone()[0]
 
     conn.commit()
     conn.close()
@@ -225,17 +374,20 @@ def save_thesis(data: dict):
 
 def get_thesis(ticker=None):
     conn = get_db()
+    c = conn.cursor()
     if ticker:
-        rows = conn.execute("SELECT * FROM thesis WHERE ticker=?", (ticker.upper(),)).fetchall()
+        c.execute(_sql("SELECT * FROM thesis WHERE ticker=?"), (ticker.upper(),))
     else:
-        rows = conn.execute("SELECT * FROM thesis ORDER BY updated_date DESC").fetchall()
+        c.execute("SELECT * FROM thesis ORDER BY updated_date DESC")
+    rows = _rows(c)
     conn.close()
-    return [dict(r) for r in rows]
+    return rows
 
 
 def delete_thesis(thesis_id):
     conn = get_db()
-    conn.execute("DELETE FROM thesis WHERE id=?", (thesis_id,))
+    c = conn.cursor()
+    c.execute(_sql("DELETE FROM thesis WHERE id=?"), (thesis_id,))
     conn.commit()
     conn.close()
 
@@ -243,25 +395,27 @@ def delete_thesis(thesis_id):
 # ── Weekly Reviews ───────────────────────────────────────────────
 def save_weekly_review(data: dict):
     conn = get_db()
+    c = conn.cursor()
+    ph = "%s" if _USE_PG else "?"
     data["review_date"] = data.get("review_date", datetime.now().strftime("%Y-%m-%d"))
     cols = ", ".join(data.keys())
-    placeholders = ", ".join("?" * len(data))
-    conn.execute(f"INSERT INTO weekly_review ({cols}) VALUES ({placeholders})", list(data.values()))
+    placeholders = ", ".join([ph] * len(data))
+    c.execute(f"INSERT INTO weekly_review ({cols}) VALUES ({placeholders})", list(data.values()))
     conn.commit()
     conn.close()
 
 
 def get_weekly_reviews(ticker=None, thesis_id=None):
     conn = get_db()
+    c = conn.cursor()
     if ticker:
-        rows = conn.execute(
-            "SELECT * FROM weekly_review WHERE ticker=? ORDER BY review_date DESC", (ticker.upper(),)
-        ).fetchall()
+        c.execute(_sql("SELECT * FROM weekly_review WHERE ticker=? ORDER BY review_date DESC"),
+                  (ticker.upper(),))
     elif thesis_id:
-        rows = conn.execute(
-            "SELECT * FROM weekly_review WHERE thesis_id=? ORDER BY review_date DESC", (thesis_id,)
-        ).fetchall()
+        c.execute(_sql("SELECT * FROM weekly_review WHERE thesis_id=? ORDER BY review_date DESC"),
+                  (thesis_id,))
     else:
-        rows = conn.execute("SELECT * FROM weekly_review ORDER BY review_date DESC").fetchall()
+        c.execute("SELECT * FROM weekly_review ORDER BY review_date DESC")
+    rows = _rows(c)
     conn.close()
-    return [dict(r) for r in rows]
+    return rows
