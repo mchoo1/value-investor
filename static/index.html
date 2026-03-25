@@ -358,7 +358,19 @@
 ═══════════════════════════════════════════ -->
 <div id="section-valuation" class="section p-6 max-w-7xl mx-auto">
   <h1 class="text-2xl font-bold text-white mb-1">Valuation Engine</h1>
-  <p class="text-slate-400 text-sm mb-6">DCF + Comparable + Graham — your intrinsic value toolkit</p>
+  <p class="text-slate-400 text-sm mb-3">DCF + Comparable + Graham — your intrinsic value toolkit</p>
+
+  <!-- Shared ticker bar — populates all tabs and runs all models -->
+  <div class="card mb-4 flex flex-wrap gap-3 items-end">
+    <div class="flex-1 min-w-32">
+      <label class="text-slate-400 text-xs block mb-1">Ticker Symbol</label>
+      <input id="valTicker" class="input-field font-bold uppercase" placeholder="e.g. AAPL"
+             oninput="this.value=this.value.toUpperCase()"
+             onkeydown="if(event.key==='Enter')loadValTicker()">
+    </div>
+    <button onclick="loadValTicker()" id="valLoadBtn" class="btn-primary px-6">Load &amp; Run All →</button>
+    <div id="valTickerStatus" class="text-xs text-slate-500 self-center w-full mt-1"></div>
+  </div>
 
   <div class="flex gap-2 mb-6">
     <button onclick="switchValTab('dcf')" id="vt-dcf" class="tab-btn active">DCF Model</button>
@@ -377,29 +389,22 @@
           <p class="text-slate-500 text-xs mt-0.5">Two-stage discounted cash flow. Shared fundamentals, independent assumptions per scenario.</p>
         </div>
       </div>
-      <div class="grid grid-cols-5 gap-3 text-sm">
+      <div class="grid grid-cols-4 gap-3 text-sm">
         <div>
-          <label class="text-slate-400 text-xs block mb-1">Ticker</label>
-          <div class="flex gap-1">
-            <input id="dcfTicker" class="input-field" placeholder="AAPL">
-            <button onclick="autofillDCF()" class="btn-secondary text-xs px-2 whitespace-nowrap">Fill</button>
-          </div>
+          <label class="text-slate-400 text-xs block mb-1">Current FCF <span class="text-slate-600">(auto-filled)</span></label>
+          <input id="dcfFcf" type="number" class="input-field" placeholder="auto-filled from ticker">
         </div>
         <div>
-          <label class="text-slate-400 text-xs block mb-1">Current FCF</label>
-          <input id="dcfFcf" type="number" class="input-field" placeholder="e.g. 90000000000">
+          <label class="text-slate-400 text-xs block mb-1">Shares Outstanding <span class="text-slate-600">(auto-filled)</span></label>
+          <input id="dcfShares" type="number" class="input-field" placeholder="auto-filled from ticker">
         </div>
         <div>
-          <label class="text-slate-400 text-xs block mb-1">Shares Outstanding</label>
-          <input id="dcfShares" type="number" class="input-field" placeholder="e.g. 15500000000">
+          <label class="text-slate-400 text-xs block mb-1">Net Debt (Debt − Cash) <span class="text-slate-600">(auto-filled)</span></label>
+          <input id="dcfNetDebt" type="number" class="input-field" placeholder="auto-filled from ticker">
         </div>
         <div>
-          <label class="text-slate-400 text-xs block mb-1">Net Debt (Debt − Cash)</label>
-          <input id="dcfNetDebt" type="number" class="input-field" placeholder="negative = net cash">
-        </div>
-        <div>
-          <label class="text-slate-400 text-xs block mb-1">Current Market Price</label>
-          <input id="dcfPrice" type="number" class="input-field" placeholder="e.g. 175.00">
+          <label class="text-slate-400 text-xs block mb-1">Current Market Price <span class="text-slate-600">(auto-filled)</span></label>
+          <input id="dcfPrice" type="number" class="input-field" placeholder="auto-filled from ticker">
         </div>
       </div>
     </div>
@@ -438,7 +443,7 @@
       </div>
     </div>
 
-    <button onclick="runDCF()" class="btn-primary mb-6">Run All 3 Scenarios →</button>
+    <button onclick="runDCF()" class="btn-secondary mb-6 text-sm">↺ Re-run DCF with current assumptions</button>
 
     <div id="dcfResults">
       <div class="card text-center py-12 text-slate-500">
@@ -775,6 +780,6 @@
   </div>
 </div>
 
-<script src="/static/app.js?v=8"></script>
+<script src="/static/app.js?v=9"></script>
 </body>
 </html>

@@ -1071,17 +1071,90 @@ function renderValSummary() {
     </div>`;
 }
 
-async function autofillDCF() {
-  const ticker = document.getElementById("dcfTicker").value.trim().toUpperCase();
-  if (!ticker) return;
+// ── Master valuation loader — fills ALL tabs and runs all models ─
+async function loadValTicker() {
+  const ticker = (document.getElementById("valTicker").value || "").trim().toUpperCase();
+  if (!ticker) { alert("Please enter a ticker symbol first."); return; }
+
+  const btn    = document.getElementById("valLoadBtn");
+  const status = document.getElementById("valTickerStatus");
+  btn.disabled = true;
+  btn.textContent = "Loading…";
+  status.textContent = `Fetching data for ${ticker}…`;
+
   try {
-    const info = await api("/api/stock/" + ticker);
-    if (info.error) { alert("Could not fetch: " + info.error); return; }
-    document.getElementById("dcfFcf").value = info.free_cashflow || 0;
-    document.getElementById("dcfShares").value = info.shares_outstanding || 0;
-    document.getElementById("dcfNetDebt").value = (info.total_debt || 0) - (info.total_cash || 0);
-    document.getElementById("dcfPrice").value = info.current_price || 0;
-  } catch (e) { alert("Error: " + e.message); }
+    const info = await api("/api/stock/" + ticker, "GET", null, 30000);
+    if (info.error) throw new Error(info.error);
+
+    const fcf     = info.free_cashflow      || 0;
+    const shares  = info.shares_outstanding || 0;
+    const netDebt = (info.total_debt || 0) - (info.total_cash || 0);
+    const price   = info.current_price      || 0;
+    const eps     = info.eps_ttm            || 0;
+    const growth  = info.earnings_growth    ? Math.round(info.earnings_growth * 100) : 8;
+
+    // ── Populate DCF inputs ──────────────────────────────────────
+    document.getElementById("dcfFcf").value     = fcf;
+    document.getElementById("dcfShares").value  = shares;
+    document.getElementById("dcfNetDebt").value = netDebt;
+    document.getElementById("dcfPrice").value   = price ? price.toFixed(2) : "";
+
+    // ── Populate Quick Valuation inputs ─────────────────────────
+    const qTicker = document.getElementById("quickTicker"); if (qTicker) qTicker.value = ticker;
+    const qEps    = document.getElementById("quickEps");    if (qEps)    qEps.value    = eps ? eps.toFixed(2) : "";
+    const qPrice  = document.getElementById("quickPrice");  if (qPrice)  qPrice.value  = price || "";
+    const qGrowth = document.getElementById("quickGrowth"); if (qGrowth) qGrowth.value = growth;
+
+    // ── Populate Comparable inputs ───────────────────────────────
+    const cTicker  = document.getElementById("compTicker");  if (cTicker)  cTicker.value  = ticker;
+    const cEps     = document.getElementById("compEps");     if (cEps)     cEps.value     = eps ? eps.toFixed(2) : "";
+    const cPrice   = document.getElementById("compPrice");   if (cPrice)   cPrice.value   = price || "";
+    const cShares  = document.getElementById("compShares");  if (cShares)  cShares.value  = shares || "";
+    const cNetDebt = document.getElementById("compNetDebt"); if (cNetDebt) cNetDebt.value = netDebt;
+    // Try to get EBITDA from financials
+    try {
+      const fin = await api("/api/stock/" + ticker + "/financials", "GET", null, 20000);
+      if (fin.summary?.length) {
+        const latest  = fin.summary[fin.summary.length - 1];
+        const cEbitda = document.getElementById("compEbitda");
+        if (cEbitda && latest.ebitda) cEbitda.value = latest.ebitda;
+      }
+    } catch (_) {}
+
+    const fcfStr = fcf ? ` | FCF: $${(fcf/1e9).toFixed(1)}B` : " | FCF: N/A (enter manually)";
+    status.innerHTML = `<span class="text-emerald-400 font-semibold">✓ ${ticker}${info.name ? " — " + info.name : ""}</span>` +
+      ` | Price: $${price.toFixed(2)}${fcfStr}` +
+      ` | Shares: ${(shares/1e9).toFixed(2)}B` +
+      ` | Net Debt: ${netDebt >= 0 ? "+" : ""}$${(netDebt/1e9).toFixed(1)}B`;
+
+    // ── Auto-run all 3 DCF scenarios ─────────────────────────────
+    if (fcf && shares) {
+      await runDCF();
+    } else {
+      document.getElementById("dcfResults").innerHTML =
+        `<div class="card text-amber-400 p-4 text-sm">⚠ FCF data not available for ${ticker}. ` +
+        `Enter Current FCF manually above, then click <strong>↺ Re-run</strong>.</div>`;
+    }
+
+    // ── Auto-run Quick Valuation ─────────────────────────────────
+    if (eps) { try { await runQuick(); } catch (_) {} }
+
+  } catch (e) {
+    status.innerHTML = `<span class="text-red-400">✗ ${e.message}</span>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Load & Run All →";
+  }
+}
+
+async function autofillDCF() {
+  // Keep for backwards compatibility — delegate to master loader
+  const t = document.getElementById("valTicker");
+  if (t && !t.value) {
+    const old = document.getElementById("dcfTicker");
+    if (old && old.value) t.value = old.value;
+  }
+  await loadValTicker();
 }
 
 async function runDCF() {
@@ -1366,14 +1439,13 @@ async function renderDCFResults(scenarios, currentPrice) {
 }
 
 async function autofillQuick() {
-  const ticker = document.getElementById("quickTicker").value.trim().toUpperCase();
+  // Sync shared ticker then delegate
+  const qt = document.getElementById("quickTicker");
+  const vt = document.getElementById("valTicker");
+  const ticker = (qt?.value || vt?.value || "").trim().toUpperCase();
   if (!ticker) return;
-  try {
-    const info = await api("/api/stock/" + ticker);
-    document.getElementById("quickEps").value = info.eps_ttm ? info.eps_ttm.toFixed(2) : "";
-    document.getElementById("quickPrice").value = info.current_price || "";
-    document.getElementById("quickGrowth").value = info.earnings_growth ? (info.earnings_growth*100).toFixed(0) : 8;
-  } catch (e) { alert("Error: " + e.message); }
+  if (vt) vt.value = ticker;
+  await loadValTicker();
 }
 
 async function runQuick() {
@@ -1408,19 +1480,13 @@ async function runQuick() {
 }
 
 async function autofillComp() {
-  const ticker = document.getElementById("compTicker").value.trim().toUpperCase();
+  // Sync shared ticker then delegate
+  const ct = document.getElementById("compTicker");
+  const vt = document.getElementById("valTicker");
+  const ticker = (ct?.value || vt?.value || "").trim().toUpperCase();
   if (!ticker) return;
-  try {
-    const [info, fin] = await Promise.all([api("/api/stock/"+ticker), api("/api/stock/"+ticker+"/financials")]);
-    document.getElementById("compEps").value = info.eps_ttm ? info.eps_ttm.toFixed(2) : "";
-    document.getElementById("compNetDebt").value = (info.total_debt||0)-(info.total_cash||0);
-    document.getElementById("compShares").value = info.shares_outstanding || "";
-    document.getElementById("compPrice").value = info.current_price || "";
-    if (fin.summary?.length) {
-      const latest = fin.summary[fin.summary.length-1];
-      if (latest.ebitda) document.getElementById("compEbitda").value = latest.ebitda;
-    }
-  } catch (e) { alert("Error: " + e.message); }
+  if (vt) vt.value = ticker;
+  await loadValTicker();
 }
 
 async function runComp() {
