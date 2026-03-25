@@ -677,14 +677,14 @@ function renderMarginChart(summary) {
 }
 
 function prefillValuation(ticker, eps, fcf, shares, netDebt, price) {
-  document.getElementById("dcfTicker").value = ticker;
+  const vt = document.getElementById("valTicker"); if (vt) vt.value = ticker;
   document.getElementById("dcfFcf").value = fcf;
   document.getElementById("dcfShares").value = shares;
   document.getElementById("dcfNetDebt").value = netDebt;
   document.getElementById("dcfPrice").value = price;
-  document.getElementById("quickTicker").value = ticker;
-  document.getElementById("quickEps").value = eps ? eps.toFixed(2) : "";
-  document.getElementById("quickPrice").value = price;
+  const qt = document.getElementById("quickTicker"); if (qt) qt.value = ticker;
+  const qe = document.getElementById("quickEps");    if (qe) qe.value = eps ? eps.toFixed(2) : "";
+  const qp = document.getElementById("quickPrice");  if (qp) qp.value = price;
   showSection("valuation");
 }
 
@@ -1320,7 +1320,7 @@ async function renderDCFResults(scenarios, currentPrice) {
   // ── Revenue projection (5yr) from base scenario inputs ──────
   const fcf = parseFloat(document.getElementById("dcfFcf").value) || 0;
   const g1  = parseFloat(document.getElementById("dcfG1").value)  || 0;
-  const ticker = document.getElementById("dcfTicker").value.trim().toUpperCase();
+  const ticker = (document.getElementById("valTicker") || document.getElementById("dcfTicker") || {value:""}).value.trim().toUpperCase();
 
   // Fetch actual revenue from stock info if ticker present
   let revProjection = "";
