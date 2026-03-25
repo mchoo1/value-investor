@@ -1,0 +1,780 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Value Investor</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --navy: #0f172a;
+    --navy2: #1e293b;
+    --green: #10b981;
+    --red: #ef4444;
+    --gold: #f59e0b;
+    --blue: #3b82f6;
+  }
+  body { background: var(--navy); color: #e2e8f0; font-family: 'Inter', system-ui, sans-serif; }
+  .nav-btn { transition: all .2s; }
+  .nav-btn.active { background: var(--green); color: white; }
+  .card { background: var(--navy2); border-radius: 12px; padding: 20px; border: 1px solid #334155; }
+  .input-field { background: #0f172a; border: 1px solid #334155; color: #e2e8f0; border-radius: 8px; padding: 8px 12px; width: 100%; outline: none; }
+  .input-field:focus { border-color: var(--green); }
+  .btn-primary { background: var(--green); color: white; border-radius: 8px; padding: 8px 18px; cursor: pointer; border: none; font-weight: 600; transition: opacity .2s; }
+  .btn-primary:hover { opacity: .85; }
+  .btn-secondary { background: #334155; color: #e2e8f0; border-radius: 8px; padding: 8px 18px; cursor: pointer; border: none; font-weight: 500; transition: opacity .2s; }
+  .btn-secondary:hover { opacity: .85; }
+  .btn-danger { background: #7f1d1d; color: #fca5a5; border-radius: 8px; padding: 6px 14px; cursor: pointer; border: none; font-size: 13px; }
+  .pill-green { background: #064e3b; color: #34d399; border-radius: 20px; padding: 2px 10px; font-size: 12px; font-weight: 600; }
+  .pill-red { background: #7f1d1d; color: #fca5a5; border-radius: 20px; padding: 2px 10px; font-size: 12px; font-weight: 600; }
+  .pill-yellow { background: #78350f; color: #fcd34d; border-radius: 20px; padding: 2px 10px; font-size: 12px; font-weight: 600; }
+  .pill-blue { background: #1e3a5f; color: #93c5fd; border-radius: 20px; padding: 2px 10px; font-size: 12px; font-weight: 600; }
+  .metric-box { background: #0f172a; border-radius: 8px; padding: 12px 16px; border: 1px solid #334155; }
+  .tab-btn { padding: 8px 16px; border-radius: 8px; cursor: pointer; color: #94a3b8; font-weight: 500; border: none; background: transparent; transition: all .2s; }
+  .tab-btn.active { background: #1e293b; color: #e2e8f0; }
+  .score-bar { height: 6px; border-radius: 3px; background: #334155; }
+  .score-fill { height: 6px; border-radius: 3px; transition: width .5s; }
+  .signal-strong_buy { color: #34d399; font-weight: 700; }
+  .signal-buy { color: #6ee7b7; font-weight: 600; }
+  .signal-fairly_valued { color: #fcd34d; font-weight: 600; }
+  .signal-overvalued { color: #fb923c; font-weight: 600; }
+  .signal-significantly_overvalued { color: #f87171; font-weight: 700; }
+  .loader { border: 3px solid #334155; border-top: 3px solid var(--green); border-radius: 50%; width: 28px; height: 28px; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  textarea.input-field { resize: vertical; min-height: 80px; }
+  .section { display: none; }
+  .section.active { display: block; }
+  .table-row:hover { background: #1e293b; }
+  .moat-btn { padding: 6px 12px; border-radius: 6px; cursor: pointer; border: 1px solid #334155; background: transparent; color: #94a3b8; font-size: 13px; transition: all .2s; }
+  .moat-btn.selected { border-color: var(--green); background: #064e3b; color: #34d399; }
+  .confidence-star { cursor: pointer; font-size: 20px; color: #334155; transition: color .2s; }
+  .confidence-star.lit { color: var(--gold); }
+  .review-card { border-left: 3px solid var(--blue); }
+  .review-card.intact { border-left-color: var(--green); }
+  .review-card.broken { border-left-color: var(--red); }
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: #0f172a; }
+  ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+
+  /* ── Mobile Responsive ─────────────────────────────── */
+  @media (max-width: 768px) {
+    /* Nav: scrollable pill row */
+    nav { flex-wrap: wrap; gap: 8px; padding: 10px 12px; }
+    nav > div:first-child { width: 100%; }
+    nav > div:nth-child(2) { overflow-x: auto; -webkit-overflow-scrolling: touch; flex-wrap: nowrap; width: 100%; padding-bottom: 4px; }
+    nav > div:last-child { width: 100%; }
+    nav > div:last-child input { width: 100% !important; }
+    .tab-btn { padding: 6px 10px; font-size: 12px; white-space: nowrap; }
+
+    /* Sections */
+    .section { padding: 12px !important; }
+
+    /* Override multi-col grids for single column on mobile */
+    .grid-cols-2, .grid-cols-3, .grid-cols-4, .grid-cols-5, .grid-cols-6 { grid-template-columns: 1fr !important; }
+    [class*="col-span-"] { grid-column: span 1 !important; }
+
+    /* Cards */
+    .card { padding: 14px; border-radius: 10px; }
+    .metric-box { padding: 10px 12px; }
+
+    /* Tables: make scrollable */
+    .overflow-x-auto { -webkit-overflow-scrolling: touch; }
+
+    /* Typography */
+    h1 { font-size: 1.3rem !important; }
+    h2 { font-size: 1.1rem !important; }
+
+    /* Screener: filter panel full-width on mobile */
+    #screenResults { width: 100%; }
+
+    /* Stat strip in research: wrap */
+    .divide-x > div { min-width: 70px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- TOP NAV -->
+<nav class="flex items-center justify-between px-6 py-3 border-b border-slate-700 sticky top-0 z-50" style="background:#0f172a">
+  <div class="flex items-center gap-3">
+    <span class="text-2xl">📈</span>
+    <span class="font-bold text-lg text-white">Value<span class="text-emerald-400">Investor</span></span>
+  </div>
+  <div class="flex gap-1">
+    <button onclick="showSection('dashboard')" class="nav-btn tab-btn active" id="nav-dashboard">Dashboard</button>
+    <button onclick="showSection('screener')" class="nav-btn tab-btn" id="nav-screener">Screener</button>
+    <button onclick="showSection('research')" class="nav-btn tab-btn" id="nav-research">Research</button>
+    <button onclick="showSection('valuation')" class="nav-btn tab-btn" id="nav-valuation">Valuation</button>
+    <button onclick="showSection('thesis')" class="nav-btn tab-btn" id="nav-thesis">Thesis</button>
+    <button onclick="showSection('tracker')" class="nav-btn tab-btn" id="nav-tracker">📋 Weekly</button>
+    <button onclick="showSection('portfolio')" class="nav-btn tab-btn" id="nav-portfolio">Portfolio</button>
+  </div>
+  <div class="flex items-center gap-2">
+    <input id="quickSearch" class="input-field" style="width:180px;font-size:13px" placeholder="Search ticker..." onkeydown="if(event.key==='Enter')quickLookup()">
+    <button onclick="quickLookup()" class="btn-primary" style="padding:7px 14px;font-size:13px">Go</button>
+  </div>
+</nav>
+
+<!-- ═══════════════════════════════════════════
+     DASHBOARD
+═══════════════════════════════════════════ -->
+<div id="section-dashboard" class="section active p-6 max-w-7xl mx-auto">
+  <div class="flex items-center justify-between mb-6">
+    <div>
+      <h1 class="text-2xl font-bold text-white">Dashboard</h1>
+      <p class="text-slate-400 text-sm" id="dashDate"></p>
+    </div>
+    <button onclick="loadDashboard()" class="btn-secondary text-sm">↻ Refresh</button>
+  </div>
+
+  <!-- Market Overview -->
+  <div class="grid grid-cols-5 gap-3 mb-6" id="marketOverview">
+    <div class="card text-center"><div class="text-slate-400 text-xs mb-1">S&P 500</div><div class="text-lg font-bold" id="idx-sp500">—</div></div>
+    <div class="card text-center"><div class="text-slate-400 text-xs mb-1">Dow Jones</div><div class="text-lg font-bold" id="idx-dow">—</div></div>
+    <div class="card text-center"><div class="text-slate-400 text-xs mb-1">NASDAQ</div><div class="text-lg font-bold" id="idx-nasdaq">—</div></div>
+    <div class="card text-center"><div class="text-slate-400 text-xs mb-1">STI</div><div class="text-lg font-bold" id="idx-sti">—</div></div>
+    <div class="card text-center"><div class="text-slate-400 text-xs mb-1">VIX</div><div class="text-lg font-bold" id="idx-vix">—</div></div>
+  </div>
+
+  <div class="grid grid-cols-3 gap-6">
+    <!-- Watchlist -->
+    <div class="card col-span-1">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="font-semibold text-white">Watchlist</h2>
+        <button onclick="showSection('screener')" class="text-emerald-400 text-xs">+ Add</button>
+      </div>
+      <div id="dashWatchlist" class="space-y-2 text-sm text-slate-400"><div class="text-slate-600 text-sm text-center py-4">—</div></div>
+    </div>
+
+    <!-- Portfolio Summary -->
+    <div class="card col-span-1">
+      <h2 class="font-semibold text-white mb-4">Portfolio Summary</h2>
+      <div id="dashPortfolio" class="space-y-3 text-sm"><div class="text-slate-600 text-sm text-center py-4">—</div></div>
+    </div>
+
+    <!-- Active Theses -->
+    <div class="card col-span-1">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="font-semibold text-white">Active Theses</h2>
+        <button onclick="showSection('thesis')" class="text-emerald-400 text-xs">View All</button>
+      </div>
+      <div id="dashTheses" class="space-y-2 text-sm text-slate-400"><div class="text-slate-600 text-sm text-center py-4">—</div></div>
+    </div>
+  </div>
+
+  <!-- Weekly Action Items -->
+  <div class="card mt-6">
+    <h2 class="font-semibold text-white mb-4">📋 Weekly Workflow</h2>
+    <div class="grid grid-cols-4 gap-4 text-sm">
+      <div class="metric-box">
+        <div class="text-emerald-400 font-semibold mb-1">Monday</div>
+        <div class="text-slate-300">Run screener → shortlist 5 stocks</div>
+        <button onclick="showSection('screener')" class="mt-2 text-emerald-400 text-xs">Open Screener →</button>
+      </div>
+      <div class="metric-box">
+        <div class="text-blue-400 font-semibold mb-1">Midweek</div>
+        <div class="text-slate-300">Deep dive into shortlisted stocks</div>
+        <button onclick="showSection('research')" class="mt-2 text-blue-400 text-xs">Open Research →</button>
+      </div>
+      <div class="metric-box">
+        <div class="text-amber-400 font-semibold mb-1">Weekend</div>
+        <div class="text-slate-300">Run valuation → buy / watchlist decision</div>
+        <button onclick="showSection('valuation')" class="mt-2 text-amber-400 text-xs">Open Valuation →</button>
+      </div>
+      <div class="metric-box">
+        <div class="text-purple-400 font-semibold mb-1">Sunday</div>
+        <div class="text-slate-300">Review thesis & log weekly update</div>
+        <button onclick="showSection('thesis')" class="mt-2 text-purple-400 text-xs">Open Thesis →</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════
+     SCREENER
+═══════════════════════════════════════════ -->
+<div id="section-screener" class="section p-6 max-w-7xl mx-auto">
+  <h1 class="text-2xl font-bold text-white mb-1">Stock Screener</h1>
+  <p class="text-slate-400 text-sm mb-6">Goldman Sachs-style screen — find undervalued stocks matching your criteria</p>
+
+  <div class="grid grid-cols-5 gap-6">
+    <!-- Filters Panel -->
+    <div class="card col-span-1">
+      <h2 class="font-semibold text-white mb-4">Filters</h2>
+
+      <div class="mb-3">
+        <label class="text-slate-400 text-xs mb-1 block">Market Universe</label>
+        <select id="screenMarket" class="input-field">
+          <option value="US">US (S&P 500 + Russell 1000)</option>
+          <option value="SGX">SGX (STI 30)</option>
+          <option value="custom">Custom Tickers</option>
+        </select>
+      </div>
+
+      <div class="mb-3">
+        <label class="text-slate-400 text-xs mb-1 block">Sector</label>
+        <select id="screenSector" class="input-field">
+          <option value="All">All Sectors</option>
+          <option>Technology</option>
+          <option>Healthcare</option>
+          <option>Financials</option>
+          <option>Consumer Discretionary</option>
+          <option>Consumer Staples</option>
+          <option>Energy</option>
+          <option>Industrials</option>
+          <option>Materials</option>
+          <option>Real Estate</option>
+          <option>Utilities</option>
+          <option>Communication Services</option>
+        </select>
+      </div>
+
+      <div id="customTickersDiv" class="mb-3 hidden">
+        <label class="text-slate-400 text-xs mb-1 block">Custom Tickers (comma-separated)</label>
+        <textarea id="customTickers" class="input-field" placeholder="AAPL, MSFT, D05.SI" style="height:70px"></textarea>
+      </div>
+
+      <div class="space-y-2 text-sm">
+        <div>
+          <label class="text-slate-400 text-xs block mb-1">Max P/E Ratio</label>
+          <input id="fMaxPe" type="number" class="input-field" placeholder="e.g. 20">
+        </div>
+        <div>
+          <label class="text-slate-400 text-xs block mb-1">Max P/B Ratio</label>
+          <input id="fMaxPb" type="number" class="input-field" placeholder="e.g. 3">
+        </div>
+        <div>
+          <label class="text-slate-400 text-xs block mb-1">Min ROE (%)</label>
+          <input id="fMinRoe" type="number" class="input-field" placeholder="e.g. 12">
+        </div>
+        <div>
+          <label class="text-slate-400 text-xs block mb-1">Max Debt/Equity</label>
+          <input id="fMaxDe" type="number" class="input-field" placeholder="e.g. 1.5">
+        </div>
+        <div class="flex items-center gap-2 mt-1">
+          <input id="fFcfPositive" type="checkbox">
+          <label class="text-slate-300 text-xs">Positive Free Cash Flow only</label>
+        </div>
+        <div class="flex items-center gap-2 mt-2 border-t border-slate-700 pt-2">
+          <input id="fInsiderBuying" type="checkbox">
+          <label class="text-slate-300 text-xs">🔍 Insider buying last 60 days <span class="text-slate-500">(slower)</span></label>
+        </div>
+      </div>
+
+      <button onclick="runScreener()" class="btn-primary w-full mt-4">
+        🔍 Run Screen
+      </button>
+      <p class="text-slate-600 text-xs mt-2 text-center">~800 stocks · first run 3–8 min · cached 30 min</p>
+
+      <div id="screenLoader" class="hidden mt-3 flex justify-center">
+        <div class="loader"></div>
+      </div>
+      <div id="screenStatus" class="text-slate-400 text-xs mt-2 text-center"></div>
+
+      <!-- Score Formula -->
+      <div class="mt-5 border-t border-slate-700 pt-4">
+        <p class="text-slate-400 text-xs font-semibold mb-2">Score Formula (0–100)</p>
+        <div class="space-y-1 text-xs text-slate-500">
+          <div class="flex justify-between"><span>P/E Ratio</span><span class="text-blue-400">0–20 pts</span></div>
+          <div class="flex justify-between"><span>P/B Ratio</span><span class="text-blue-400">0–20 pts</span></div>
+          <div class="flex justify-between"><span>Return on Equity</span><span class="text-emerald-400">0–20 pts</span></div>
+          <div class="flex justify-between"><span>Debt / Equity</span><span class="text-yellow-400">0–20 pts</span></div>
+          <div class="flex justify-between"><span>FCF Yield</span><span class="text-blue-400">0–20 pts</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Results -->
+    <div class="col-span-4">
+      <div id="screenResults">
+        <div class="card text-center py-12 text-slate-500">
+          <div class="text-4xl mb-3">🔍</div>
+          <div>Set your filters and run the screener to find undervalued stocks.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════
+     RESEARCH HUB
+═══════════════════════════════════════════ -->
+<div id="section-research" class="section p-6 max-w-7xl mx-auto">
+  <h1 class="text-2xl font-bold text-white mb-1">Research Hub</h1>
+  <p class="text-slate-400 text-sm mb-5">Morgan Stanley-style deep dive — understand the business before you value it</p>
+
+  <div class="flex gap-3 mb-4">
+    <input id="researchTicker" class="input-field" style="max-width:200px" placeholder="Enter ticker (e.g. AAPL)">
+    <select id="researchMarket" class="input-field" style="max-width:120px">
+      <option value="">US</option>
+      <option value=".SI">SGX (.SI)</option>
+      <option value=".HK">HK (.HK)</option>
+    </select>
+    <button onclick="loadResearch()" class="btn-primary">Analyze →</button>
+    <div id="resLoader" class="hidden flex items-center"><div class="loader"></div></div>
+  </div>
+
+  <!-- Research Sub-tabs -->
+  <div class="flex gap-1 mb-5">
+    <button onclick="switchResTab('overview')"   id="rt-overview"   class="tab-btn active">Overview</button>
+    <button onclick="switchResTab('insiders')"   id="rt-insiders"   class="tab-btn">Insiders</button>
+    <button onclick="switchResTab('catalysts')"  id="rt-catalysts"  class="tab-btn">Catalysts</button>
+    <button onclick="switchResTab('redflags')"   id="rt-redflags"   class="tab-btn">⚠ Red Flags</button>
+    <button onclick="switchResTab('competitors')" id="rt-competitors" class="tab-btn">Competitors</button>
+  </div>
+
+  <div id="researchContent">
+    <div class="card text-center py-16 text-slate-500">
+      <div class="text-5xl mb-3">🏢</div>
+      <div class="text-lg">Enter a ticker to begin your research</div>
+      <div class="text-sm mt-2 text-slate-600">Supports US, SGX (.SI), HK (.HK)</div>
+    </div>
+  </div>
+
+  <!-- Insiders Panel -->
+  <div id="resInsiders" class="hidden">
+    <div class="card"><div id="insidersContent"><div class="text-slate-500 text-center py-8">Run analysis first.</div></div></div>
+  </div>
+
+  <!-- Catalysts Panel -->
+  <div id="resCatalysts" class="hidden">
+    <div class="card"><div id="catalystsContent"><div class="text-slate-500 text-center py-8">Run analysis first.</div></div></div>
+  </div>
+
+  <!-- Red Flags Panel -->
+  <div id="resRedFlags" class="hidden">
+    <div class="card"><div id="redflagsContent"><div class="text-slate-500 text-center py-8">Run analysis first.</div></div></div>
+  </div>
+
+  <!-- Competitors Panel -->
+  <div id="resCompetitors" class="hidden">
+    <div class="card"><div id="competitorsContent"><div class="text-slate-500 text-center py-8">Run analysis first.</div></div></div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════
+     VALUATION
+═══════════════════════════════════════════ -->
+<div id="section-valuation" class="section p-6 max-w-7xl mx-auto">
+  <h1 class="text-2xl font-bold text-white mb-1">Valuation Engine</h1>
+  <p class="text-slate-400 text-sm mb-6">DCF + Comparable + Graham — your intrinsic value toolkit</p>
+
+  <div class="flex gap-2 mb-6">
+    <button onclick="switchValTab('dcf')" id="vt-dcf" class="tab-btn active">DCF Model</button>
+    <button onclick="switchValTab('quick')" id="vt-quick" class="tab-btn">Quick Valuation</button>
+    <button onclick="switchValTab('comparable')" id="vt-comparable" class="tab-btn">Comparable</button>
+    <button onclick="switchValTab('summary')" id="vt-summary" class="tab-btn">📊 Summary</button>
+  </div>
+
+  <!-- DCF Tab -->
+  <div id="valTab-dcf">
+    <!-- Shared Inputs -->
+    <div class="card mb-4">
+      <div class="flex items-center justify-between mb-3">
+        <div>
+          <h2 class="font-semibold text-white">DCF Model — Bull / Base / Bear Scenarios</h2>
+          <p class="text-slate-500 text-xs mt-0.5">Two-stage discounted cash flow. Shared fundamentals, independent assumptions per scenario.</p>
+        </div>
+      </div>
+      <div class="grid grid-cols-5 gap-3 text-sm">
+        <div>
+          <label class="text-slate-400 text-xs block mb-1">Ticker</label>
+          <div class="flex gap-1">
+            <input id="dcfTicker" class="input-field" placeholder="AAPL">
+            <button onclick="autofillDCF()" class="btn-secondary text-xs px-2 whitespace-nowrap">Fill</button>
+          </div>
+        </div>
+        <div>
+          <label class="text-slate-400 text-xs block mb-1">Current FCF</label>
+          <input id="dcfFcf" type="number" class="input-field" placeholder="e.g. 90000000000">
+        </div>
+        <div>
+          <label class="text-slate-400 text-xs block mb-1">Shares Outstanding</label>
+          <input id="dcfShares" type="number" class="input-field" placeholder="e.g. 15500000000">
+        </div>
+        <div>
+          <label class="text-slate-400 text-xs block mb-1">Net Debt (Debt − Cash)</label>
+          <input id="dcfNetDebt" type="number" class="input-field" placeholder="negative = net cash">
+        </div>
+        <div>
+          <label class="text-slate-400 text-xs block mb-1">Current Market Price</label>
+          <input id="dcfPrice" type="number" class="input-field" placeholder="e.g. 175.00">
+        </div>
+      </div>
+    </div>
+
+    <!-- Scenario Assumptions -->
+    <div class="grid grid-cols-3 gap-4 mb-4 text-sm">
+      <!-- Bear -->
+      <div class="card border border-red-900">
+        <h3 class="font-semibold text-red-400 mb-3">🐻 Bear Case</h3>
+        <div class="space-y-2">
+          <div><label class="text-slate-400 text-xs block mb-1">FCF Growth Y1–5 (%)</label><input id="dcfG1Bear" type="number" class="input-field" value="5"></div>
+          <div><label class="text-slate-400 text-xs block mb-1">FCF Growth Y6–10 (%)</label><input id="dcfG2Bear" type="number" class="input-field" value="2"></div>
+          <div><label class="text-slate-400 text-xs block mb-1">WACC / Discount Rate (%)</label><input id="dcfWaccBear" type="number" class="input-field" value="12"></div>
+          <div><label class="text-slate-400 text-xs block mb-1">Terminal Growth Rate (%)</label><input id="dcfTgBear" type="number" class="input-field" value="1.5"></div>
+        </div>
+      </div>
+      <!-- Base -->
+      <div class="card border border-slate-600">
+        <h3 class="font-semibold text-slate-300 mb-3">📊 Base Case</h3>
+        <div class="space-y-2">
+          <div><label class="text-slate-400 text-xs block mb-1">FCF Growth Y1–5 (%)</label><input id="dcfG1" type="number" class="input-field" value="10"></div>
+          <div><label class="text-slate-400 text-xs block mb-1">FCF Growth Y6–10 (%)</label><input id="dcfG2" type="number" class="input-field" value="6"></div>
+          <div><label class="text-slate-400 text-xs block mb-1">WACC / Discount Rate (%)</label><input id="dcfWacc" type="number" class="input-field" value="10"></div>
+          <div><label class="text-slate-400 text-xs block mb-1">Terminal Growth Rate (%)</label><input id="dcfTg" type="number" class="input-field" value="2.5"></div>
+        </div>
+      </div>
+      <!-- Bull -->
+      <div class="card border border-emerald-900">
+        <h3 class="font-semibold text-emerald-400 mb-3">🐂 Bull Case</h3>
+        <div class="space-y-2">
+          <div><label class="text-slate-400 text-xs block mb-1">FCF Growth Y1–5 (%)</label><input id="dcfG1Bull" type="number" class="input-field" value="18"></div>
+          <div><label class="text-slate-400 text-xs block mb-1">FCF Growth Y6–10 (%)</label><input id="dcfG2Bull" type="number" class="input-field" value="10"></div>
+          <div><label class="text-slate-400 text-xs block mb-1">WACC / Discount Rate (%)</label><input id="dcfWaccBull" type="number" class="input-field" value="9"></div>
+          <div><label class="text-slate-400 text-xs block mb-1">Terminal Growth Rate (%)</label><input id="dcfTgBull" type="number" class="input-field" value="3"></div>
+        </div>
+      </div>
+    </div>
+
+    <button onclick="runDCF()" class="btn-primary mb-6">Run All 3 Scenarios →</button>
+
+    <div id="dcfResults">
+      <div class="card text-center py-12 text-slate-500">
+        <div class="text-4xl mb-3">💰</div>
+        <div>Fill in the shared inputs, adjust each scenario's assumptions, then run.</div>
+        <div class="text-sm mt-2 text-slate-600">Use "Fill" to auto-populate from a ticker</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Quick Valuation Tab -->
+  <div id="valTab-quick" class="hidden grid grid-cols-2 gap-6">
+    <div class="card">
+      <h2 class="font-semibold text-white mb-4">Quick Valuation Inputs</h2>
+      <p class="text-slate-500 text-xs mb-4">Graham formula + EPS × P/E + Peter Lynch 5-year</p>
+      <div class="space-y-3 text-sm">
+        <div>
+          <label class="text-slate-400 text-xs block mb-1">Ticker (to auto-fill)</label>
+          <div class="flex gap-2">
+            <input id="quickTicker" class="input-field" placeholder="e.g. AAPL">
+            <button onclick="autofillQuick()" class="btn-secondary text-xs px-3">Fill</button>
+          </div>
+        </div>
+        <div>
+          <label class="text-slate-400 text-xs block mb-1">EPS (Trailing 12 months)</label>
+          <input id="quickEps" type="number" step="0.01" class="input-field" placeholder="e.g. 6.43">
+        </div>
+        <div>
+          <label class="text-slate-400 text-xs block mb-1">Expected Annual Growth Rate (%)</label>
+          <input id="quickGrowth" type="number" class="input-field" value="8">
+        </div>
+        <div>
+          <label class="text-slate-400 text-xs block mb-1">Reasonable P/E Multiple</label>
+          <input id="quickPe" type="number" class="input-field" value="15">
+        </div>
+        <div>
+          <label class="text-slate-400 text-xs block mb-1">Current Market Price</label>
+          <input id="quickPrice" type="number" step="0.01" class="input-field" placeholder="e.g. 175.00">
+        </div>
+      </div>
+      <button onclick="runQuick()" class="btn-primary w-full mt-4">Calculate →</button>
+    </div>
+    <div id="quickResults">
+      <div class="card text-center py-12 text-slate-500">Enter inputs and calculate</div>
+    </div>
+  </div>
+
+  <!-- Summary Tab -->
+  <div id="valTab-summary" class="hidden">
+    <div id="valSummaryContent">
+      <div class="card text-center py-16 text-slate-500">
+        <div class="text-4xl mb-3">📊</div>
+        <div class="text-base mb-2">No results yet</div>
+        <div class="text-sm text-slate-600">Run the DCF, Quick Valuation, and/or Comparable models — results will appear here automatically.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Comparable Tab -->
+  <div id="valTab-comparable" class="hidden grid grid-cols-2 gap-6">
+    <div class="card">
+      <h2 class="font-semibold text-white mb-4">Comparable Valuation</h2>
+      <p class="text-slate-500 text-xs mb-4">Value using industry average multiples</p>
+      <div class="space-y-3 text-sm">
+        <div>
+          <label class="text-slate-400 text-xs block mb-1">Ticker (to auto-fill)</label>
+          <div class="flex gap-2">
+            <input id="compTicker" class="input-field" placeholder="e.g. AAPL">
+            <button onclick="autofillComp()" class="btn-secondary text-xs px-3">Fill</button>
+          </div>
+        </div>
+        <div><label class="text-slate-400 text-xs block mb-1">EPS (TTM)</label><input id="compEps" type="number" step="0.01" class="input-field"></div>
+        <div><label class="text-slate-400 text-xs block mb-1">EBITDA</label><input id="compEbitda" type="number" class="input-field"></div>
+        <div><label class="text-slate-400 text-xs block mb-1">Net Debt</label><input id="compNetDebt" type="number" class="input-field" value="0"></div>
+        <div><label class="text-slate-400 text-xs block mb-1">Shares Outstanding</label><input id="compShares" type="number" class="input-field"></div>
+        <hr class="border-slate-700">
+        <div><label class="text-slate-400 text-xs block mb-1">Sector Average P/E</label><input id="compSectorPe" type="number" class="input-field" value="18"></div>
+        <div><label class="text-slate-400 text-xs block mb-1">Sector Average EV/EBITDA</label><input id="compSectorEv" type="number" class="input-field" value="12"></div>
+        <div><label class="text-slate-400 text-xs block mb-1">Current Market Price</label><input id="compPrice" type="number" step="0.01" class="input-field"></div>
+      </div>
+      <button onclick="runComp()" class="btn-primary w-full mt-4">Calculate →</button>
+    </div>
+    <div id="compResults">
+      <div class="card text-center py-12 text-slate-500">Enter inputs and calculate</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════
+     THESIS TRACKER
+═══════════════════════════════════════════ -->
+<div id="section-thesis" class="section p-6 max-w-7xl mx-auto">
+  <div class="flex items-center justify-between mb-6">
+    <div>
+      <h1 class="text-2xl font-bold text-white">Investment Thesis</h1>
+      <p class="text-slate-400 text-sm">Record your thesis, track weekly, monitor assumptions</p>
+    </div>
+    <button onclick="openThesisForm()" class="btn-primary">+ New Thesis</button>
+  </div>
+
+  <div class="grid grid-cols-3 gap-6">
+    <!-- Thesis List -->
+    <div class="col-span-1">
+      <div id="thesisList" class="space-y-3">
+        <div class="text-slate-500 text-sm text-center py-8">Loading theses...</div>
+      </div>
+    </div>
+
+    <!-- Thesis Detail / Form -->
+    <div class="col-span-2" id="thesisDetail">
+      <div class="card text-center py-16 text-slate-500">
+        <div class="text-4xl mb-3">📝</div>
+        <div>Select a thesis to view details, or create a new one</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════
+     WEEKLY TRACKER
+═══════════════════════════════════════════ -->
+<div id="section-tracker" class="section p-6 max-w-7xl mx-auto">
+  <div class="flex items-center justify-between mb-6">
+    <div>
+      <h1 class="text-2xl font-bold text-white">📋 Weekly Thesis Tracker</h1>
+      <p class="text-slate-400 text-sm">Live metrics vs your entry snapshot + recent news for each active thesis</p>
+    </div>
+    <button onclick="loadWeeklyTracker()" class="btn-secondary text-sm">↻ Refresh</button>
+  </div>
+  <div id="weeklyTrackerContent">
+    <div class="card text-center py-12 text-slate-500">
+      <div class="text-4xl mb-3">📋</div>
+      <div>Loading thesis tracker…</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════
+     PORTFOLIO
+═══════════════════════════════════════════ -->
+<div id="section-portfolio" class="section p-6 max-w-7xl mx-auto">
+  <div class="flex items-center justify-between mb-6">
+    <div>
+      <h1 class="text-2xl font-bold text-white">Portfolio</h1>
+      <p class="text-slate-400 text-sm">Track positions, target prices and assumption changes</p>
+    </div>
+    <button onclick="openPortfolioForm()" class="btn-primary">+ Add Position</button>
+  </div>
+
+  <!-- Summary Row -->
+  <div class="grid grid-cols-4 gap-4 mb-6" id="portfolioSummary"></div>
+
+  <!-- Positions Table -->
+  <div class="card" id="portfolioTable">
+    <div class="text-slate-500 text-center py-8">Loading positions...</div>
+  </div>
+
+  <!-- Add Position Form Modal -->
+  <div id="portfolioFormModal" class="hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4">
+    <div class="card w-full max-w-lg" style="max-height:90vh;overflow-y:auto">
+      <div class="flex justify-between items-center mb-4">
+        <h2 class="font-semibold text-white">Add Position</h2>
+        <button onclick="closePortfolioForm()" class="text-slate-400 hover:text-white text-xl">✕</button>
+      </div>
+      <div class="space-y-3 text-sm">
+        <div class="grid grid-cols-2 gap-3">
+          <div><label class="text-slate-400 text-xs block mb-1">Ticker</label><input id="pfTicker" class="input-field" placeholder="AAPL"></div>
+          <div><label class="text-slate-400 text-xs block mb-1">Name</label><input id="pfName" class="input-field" placeholder="Apple Inc."></div>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div><label class="text-slate-400 text-xs block mb-1">Entry Price</label><input id="pfEntry" type="number" step="0.01" class="input-field"></div>
+          <div><label class="text-slate-400 text-xs block mb-1">Shares</label><input id="pfShares" type="number" step="0.01" class="input-field"></div>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div><label class="text-slate-400 text-xs block mb-1">Entry Date</label><input id="pfDate" type="date" class="input-field"></div>
+          <div><label class="text-slate-400 text-xs block mb-1">Target Price</label><input id="pfTarget" type="number" step="0.01" class="input-field"></div>
+        </div>
+        <div><label class="text-slate-400 text-xs block mb-1">Stop Loss</label><input id="pfStop" type="number" step="0.01" class="input-field"></div>
+        <div><label class="text-slate-400 text-xs block mb-1">Notes</label><textarea id="pfNotes" class="input-field" style="height:60px"></textarea></div>
+      </div>
+      <button onclick="savePosition()" class="btn-primary w-full mt-4">Save Position</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════
+     THESIS FORM MODAL
+═══════════════════════════════════════════ -->
+<div id="thesisFormModal" class="hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4">
+  <div class="card w-full max-w-2xl" style="max-height:90vh;overflow-y:auto">
+    <div class="flex justify-between items-center mb-4">
+      <h2 class="font-semibold text-white">Investment Thesis</h2>
+      <button onclick="closeThesisForm()" class="text-slate-400 hover:text-white text-xl">✕</button>
+    </div>
+    <div class="grid grid-cols-2 gap-4 text-sm">
+      <div><label class="text-slate-400 text-xs block mb-1">Ticker *</label><input id="thTicker" class="input-field"></div>
+      <div><label class="text-slate-400 text-xs block mb-1">Title</label><input id="thTitle" class="input-field" placeholder="e.g. AAPL - iPhone Ecosystem Moat"></div>
+      <div class="col-span-2">
+        <label class="text-slate-400 text-xs block mb-1">Investment Case (Why are you buying?)</label>
+        <textarea id="thCase" class="input-field" style="height:100px" placeholder="Describe the business quality, growth drivers, and why it's undervalued..."></textarea>
+      </div>
+      <div>
+        <label class="text-slate-400 text-xs block mb-2">Moat Type</label>
+        <div class="flex flex-wrap gap-2">
+          <button onclick="toggleMoat(this,'brand')" class="moat-btn">Brand</button>
+          <button onclick="toggleMoat(this,'network')" class="moat-btn">Network Effect</button>
+          <button onclick="toggleMoat(this,'cost')" class="moat-btn">Cost Advantage</button>
+          <button onclick="toggleMoat(this,'switching')" class="moat-btn">Switching Cost</button>
+          <button onclick="toggleMoat(this,'scale')" class="moat-btn">Scale</button>
+          <button onclick="toggleMoat(this,'ip')" class="moat-btn">IP/Patents</button>
+        </div>
+        <input type="hidden" id="thMoatType">
+      </div>
+      <div>
+        <label class="text-slate-400 text-xs block mb-1">Moat Rating</label>
+        <select id="thMoatRating" class="input-field">
+          <option value="wide">Wide Moat</option>
+          <option value="narrow">Narrow Moat</option>
+          <option value="none">No Moat</option>
+        </select>
+      </div>
+      <div><label class="text-slate-400 text-xs block mb-1">Revenue Growth Assumption (%/yr)</label><input id="thRevGrowth" type="number" class="input-field" placeholder="8"></div>
+      <div><label class="text-slate-400 text-xs block mb-1">Margin Assumption (%)</label><input id="thMargin" type="number" class="input-field" placeholder="22"></div>
+      <div><label class="text-slate-400 text-xs block mb-1">WACC Used (%)</label><input id="thWacc" type="number" class="input-field" placeholder="10"></div>
+      <div><label class="text-slate-400 text-xs block mb-1">Terminal Growth (%)</label><input id="thTg" type="number" class="input-field" placeholder="2.5"></div>
+      <div><label class="text-slate-400 text-xs block mb-1">Intrinsic Value (per share)</label><input id="thIv" type="number" step="0.01" class="input-field"></div>
+      <div><label class="text-slate-400 text-xs block mb-1">Current Price</label><input id="thCurrentPrice" type="number" step="0.01" class="input-field"></div>
+      <div class="col-span-2">
+        <label class="text-slate-400 text-xs block mb-1">Buy Trigger (What conditions prompt adding?)</label>
+        <textarea id="thBuyTrigger" class="input-field" style="height:60px" placeholder="e.g. Price drops below $150 with thesis intact..."></textarea>
+      </div>
+      <div class="col-span-2">
+        <label class="text-slate-400 text-xs block mb-1">Sell Trigger (What would break the thesis?)</label>
+        <textarea id="thSellTrigger" class="input-field" style="height:60px" placeholder="e.g. Revenue growth falls below 5% for 2 consecutive quarters..."></textarea>
+      </div>
+      <div class="col-span-2">
+        <label class="text-slate-400 text-xs block mb-1">Key Risk Factors</label>
+        <textarea id="thRisks" class="input-field" style="height:60px" placeholder="e.g. Regulatory risk, competition from Google, China revenue exposure..."></textarea>
+      </div>
+      <div>
+        <label class="text-slate-400 text-xs block mb-1">Status</label>
+        <select id="thStatus" class="input-field">
+          <option value="active">Active (Monitoring)</option>
+          <option value="monitoring">On Watchlist</option>
+          <option value="closed">Closed</option>
+        </select>
+      </div>
+    </div>
+    <input type="hidden" id="thEditId">
+    <button onclick="saveThesis()" class="btn-primary w-full mt-4">Save Thesis</button>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════
+     WEEKLY REVIEW MODAL
+═══════════════════════════════════════════ -->
+<div id="reviewModal" class="hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4">
+  <div class="card w-full max-w-xl" style="max-height:90vh;overflow-y:auto">
+    <div class="flex justify-between items-center mb-4">
+      <h2 class="font-semibold text-white">Weekly Review — <span id="reviewTicker"></span></h2>
+      <button onclick="closeReview()" class="text-slate-400 hover:text-white text-xl">✕</button>
+    </div>
+
+    <div class="bg-slate-800 rounded-lg p-3 mb-4 text-xs text-slate-400 border border-slate-600">
+      <strong class="text-slate-300">Weekly Review Template</strong> — fill each section to keep your thesis current
+    </div>
+
+    <div class="space-y-3 text-sm">
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="text-slate-400 text-xs block mb-1">Review Date</label><input id="rvDate" type="date" class="input-field"></div>
+        <div><label class="text-slate-400 text-xs block mb-1">Current Price</label><input id="rvPrice" type="number" step="0.01" class="input-field"></div>
+      </div>
+      <div><label class="text-slate-400 text-xs block mb-1">Target Price</label><input id="rvTarget" type="number" step="0.01" class="input-field"></div>
+
+      <div class="metric-box">
+        <div class="text-slate-300 font-semibold mb-2">Thesis Health Check</div>
+        <div class="flex items-center gap-4">
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input id="rvThesisIntact" type="checkbox" checked>
+            <span class="text-slate-300 text-xs">Thesis still intact?</span>
+          </label>
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input id="rvRevOnTrack" type="checkbox" checked>
+            <span class="text-slate-300 text-xs">Revenue on track?</span>
+          </label>
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input id="rvMarginOnTrack" type="checkbox" checked>
+            <span class="text-slate-300 text-xs">Margins on track?</span>
+          </label>
+        </div>
+      </div>
+
+      <div>
+        <label class="text-slate-400 text-xs block mb-1">New Developments This Week</label>
+        <textarea id="rvDevelopments" class="input-field" style="height:70px" placeholder="Earnings, news, management changes, sector moves..."></textarea>
+      </div>
+
+      <div>
+        <label class="text-slate-400 text-xs block mb-1">Assumption Changes (if any)</label>
+        <textarea id="rvAssumptions" class="input-field" style="height:60px" placeholder="e.g. Updated revenue growth from 8% → 6% due to Q2 miss..."></textarea>
+      </div>
+
+      <div>
+        <label class="text-slate-400 text-xs block mb-2">Action This Week</label>
+        <div class="flex gap-2">
+          <button onclick="setAction(this,'buy')" class="moat-btn" data-action="buy">Buy More</button>
+          <button onclick="setAction(this,'hold')" class="moat-btn selected" data-action="hold">Hold</button>
+          <button onclick="setAction(this,'sell')" class="moat-btn" data-action="sell">Sell / Trim</button>
+          <button onclick="setAction(this,'watch')" class="moat-btn" data-action="watch">Watch</button>
+        </div>
+        <input type="hidden" id="rvAction" value="hold">
+      </div>
+
+      <div>
+        <label class="text-slate-400 text-xs block mb-1">Conviction Level</label>
+        <div class="flex gap-1" id="confStars">
+          <span class="confidence-star lit" onclick="setConf(1)">★</span>
+          <span class="confidence-star lit" onclick="setConf(2)">★</span>
+          <span class="confidence-star lit" onclick="setConf(3)">★</span>
+          <span class="confidence-star" onclick="setConf(4)">★</span>
+          <span class="confidence-star" onclick="setConf(5)">★</span>
+        </div>
+        <input type="hidden" id="rvConf" value="3">
+      </div>
+
+      <div>
+        <label class="text-slate-400 text-xs block mb-1">Additional Notes</label>
+        <textarea id="rvNotes" class="input-field" style="height:60px" placeholder="Anything else worth noting..."></textarea>
+      </div>
+    </div>
+    <input type="hidden" id="rvThesisId">
+    <input type="hidden" id="rvTickerHidden">
+    <button onclick="saveReview()" class="btn-primary w-full mt-4">Save Weekly Review</button>
+  </div>
+</div>
+
+<script src="/static/app.js?v=8"></script>
+</body>
+</html>

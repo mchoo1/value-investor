@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: value-investor
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 8 --timeout 120
+    envVars:
+      - key: DATA_DIR
+        value: /var/data
+    disk:
+      name: data
+      mountPath: /var/data
+      sizeGB: 1
