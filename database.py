@@ -14,9 +14,14 @@ _DATABASE_URL = os.environ.get("DATABASE_URL", "")
 _USE_PG = bool(_DATABASE_URL)
 
 # SQLite path (used when DATABASE_URL is not set)
+# Vercel filesystem is read-only — fall back to /tmp
 _BASE = os.path.dirname(os.path.abspath(__file__))
 _DATA_DIR = os.environ.get("DATA_DIR", os.path.join(_BASE, "data"))
-os.makedirs(_DATA_DIR, exist_ok=True)
+try:
+    os.makedirs(_DATA_DIR, exist_ok=True)
+except OSError:
+    _DATA_DIR = "/tmp/valueinvestor_data"
+    os.makedirs(_DATA_DIR, exist_ok=True)
 DB_PATH = os.path.join(_DATA_DIR, "valueinvestor.db")
 
 

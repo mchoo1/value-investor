@@ -13,8 +13,14 @@ from datetime import datetime
 sys.path.insert(0, os.path.dirname(__file__))
 
 # Support Railway / cloud: data dir can be overridden via DATA_DIR env var
+# On Vercel the app directory is read-only — fall back to /tmp
 _DATA_DIR = os.environ.get("DATA_DIR", os.path.join(os.path.dirname(__file__), "data"))
-os.makedirs(_DATA_DIR, exist_ok=True)
+try:
+    os.makedirs(_DATA_DIR, exist_ok=True)
+except OSError:
+    _DATA_DIR = "/tmp/valueinvestor_data"
+    os.makedirs(_DATA_DIR, exist_ok=True)
+os.environ.setdefault("DATA_DIR", _DATA_DIR)
 
 from flask import Flask, jsonify, request, send_from_directory
 from flask.json.provider import DefaultJSONProvider
@@ -45,7 +51,10 @@ app.json_provider_class = _NaNSafeJSONProvider
 app.json = _NaNSafeJSONProvider(app)
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0   # never cache static files
 
-db.init_db()
+try:
+    db.init_db()
+except Exception as _e:
+    print(f"[warn] db.init_db() failed: {_e}")
 
 
 # ── Serve Frontend ───────────────────────────────────────────────
