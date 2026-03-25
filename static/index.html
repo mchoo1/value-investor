@@ -391,20 +391,24 @@
       </div>
       <div class="grid grid-cols-4 gap-3 text-sm">
         <div>
-          <label class="text-slate-400 text-xs block mb-1">Current FCF <span class="text-slate-600">(auto-filled)</span></label>
-          <input id="dcfFcf" type="number" class="input-field" placeholder="auto-filled from ticker">
+          <label class="text-slate-400 text-xs block mb-1">Current FCF <span class="text-slate-600">(full $)</span></label>
+          <input id="dcfFcf" type="number" class="input-field" placeholder="e.g. 1584000000" oninput="updateDcfHint('dcfFcf','dcfFcfHint','$')">
+          <div id="dcfFcfHint" class="text-xs text-amber-400 mt-1 h-4"></div>
         </div>
         <div>
-          <label class="text-slate-400 text-xs block mb-1">Shares Outstanding <span class="text-slate-600">(auto-filled)</span></label>
-          <input id="dcfShares" type="number" class="input-field" placeholder="auto-filled from ticker">
+          <label class="text-slate-400 text-xs block mb-1">Shares Outstanding <span class="text-slate-600">(full count)</span></label>
+          <input id="dcfShares" type="number" class="input-field" placeholder="e.g. 790000000" oninput="updateDcfHint('dcfShares','dcfSharesHint','')">
+          <div id="dcfSharesHint" class="text-xs text-amber-400 mt-1 h-4"></div>
         </div>
         <div>
-          <label class="text-slate-400 text-xs block mb-1">Net Debt (Debt − Cash) <span class="text-slate-600">(auto-filled)</span></label>
-          <input id="dcfNetDebt" type="number" class="input-field" placeholder="auto-filled from ticker">
+          <label class="text-slate-400 text-xs block mb-1">Net Debt (Debt − Cash) <span class="text-slate-600">(full $)</span></label>
+          <input id="dcfNetDebt" type="number" class="input-field" placeholder="negative = net cash" oninput="updateDcfHint('dcfNetDebt','dcfDebtHint','$')">
+          <div id="dcfDebtHint" class="text-xs text-amber-400 mt-1 h-4"></div>
         </div>
         <div>
-          <label class="text-slate-400 text-xs block mb-1">Current Market Price <span class="text-slate-600">(auto-filled)</span></label>
-          <input id="dcfPrice" type="number" class="input-field" placeholder="auto-filled from ticker">
+          <label class="text-slate-400 text-xs block mb-1">Current Market Price</label>
+          <input id="dcfPrice" type="number" class="input-field" placeholder="e.g. 73.72">
+          <div class="text-xs text-slate-600 mt-1 h-4">per share</div>
         </div>
       </div>
     </div>
@@ -780,6 +784,6 @@
   </div>
 </div>
 
-<script src="/static/app.js?v=9"></script>
+<script src="/static/app.js?v=10"></script>
 </body>
 </html>

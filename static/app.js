@@ -5,6 +5,24 @@
 let charts = {};
 let screenerRan = false;
 
+// ── DCF input scale hints ─────────────────────────────────────────
+function fmtHint(v, prefix) {
+  if (!v && v !== 0) return "";
+  const abs = Math.abs(v);
+  const sign = v < 0 ? "-" : "";
+  if (abs >= 1e12) return `${sign}${prefix}${(abs/1e12).toFixed(2)}T`;
+  if (abs >= 1e9)  return `${sign}${prefix}${(abs/1e9).toFixed(2)}B`;
+  if (abs >= 1e6)  return `${sign}${prefix}${(abs/1e6).toFixed(2)}M`;
+  if (abs >= 1e3)  return `${sign}${prefix}${(abs/1e3).toFixed(1)}K`;
+  return `${sign}${prefix}${abs}`;
+}
+function updateDcfHint(inputId, hintId, prefix) {
+  const v = parseFloat(document.getElementById(inputId).value);
+  const el = document.getElementById(hintId);
+  if (!el) return;
+  el.textContent = isNaN(v) ? "" : "= " + fmtHint(v, prefix);
+}
+
 // ── Safe API fetch with timeout + error handling ─────────────────
 async function api(path, method = "GET", body = null, timeoutMs = 60000) {
   try {
@@ -1098,6 +1116,10 @@ async function loadValTicker() {
     document.getElementById("dcfShares").value  = shares;
     document.getElementById("dcfNetDebt").value = netDebt;
     document.getElementById("dcfPrice").value   = price ? price.toFixed(2) : "";
+    // Update scale hints immediately after fill
+    updateDcfHint("dcfFcf",     "dcfFcfHint",    "$");
+    updateDcfHint("dcfShares",  "dcfSharesHint", "");
+    updateDcfHint("dcfNetDebt", "dcfDebtHint",   "$");
 
     // ── Populate Quick Valuation inputs ─────────────────────────
     const qTicker = document.getElementById("quickTicker"); if (qTicker) qTicker.value = ticker;
