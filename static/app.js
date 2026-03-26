@@ -222,14 +222,17 @@ document.addEventListener("DOMContentLoaded", () => {
 let _screenerData = [];
 let _sortCol = "score";
 let _sortAsc = false;
+let _screenerPage = 1;
+const _PAGE_SIZE = 50;
 
 function sortScreener(col) {
   if (_sortCol === col) {
     _sortAsc = !_sortAsc;
   } else {
     _sortCol = col;
-    _sortAsc = col === "ticker" || col === "name" || col === "sector"; // text cols default asc
+    _sortAsc = col === "ticker" || col === "name" || col === "sector";
   }
+  _screenerPage = 1;
   const sorted = [..._screenerData].sort((a, b) => {
     let av = a[col], bv = b[col];
     if (av === null || av === undefined) av = _sortAsc ? Infinity : -Infinity;
@@ -238,6 +241,11 @@ function sortScreener(col) {
     return _sortAsc ? av - bv : bv - av;
   });
   renderScreenerTable(sorted);
+}
+
+function setScreenerPage(n, data) {
+  _screenerPage = n;
+  renderScreenerTable(data || _screenerData);
 }
 
 async function runScreener() {
@@ -293,24 +301,50 @@ function renderScreenerResults(results) {
   renderScreenerTable(results);
 }
 
+function _valColor(val, price) {
+  if (!val || !price) return "text-slate-400";
+  return val >= price ? "text-emerald-400" : "text-red-400";
+}
+
 function renderScreenerTable(results) {
-  // Pre-compute derived columns so sorting works
+  // Pre-compute all derived valuation columns so sorting works
   results = results.map(r => {
-    const eps = r.eps_ttm || (r.pe_ratio && r.price ? r.price / r.pe_ratio : null);
-    const quickVal = eps ? parseFloat((eps * 15).toFixed(2)) : null;
-    const quickMos = quickVal && r.price ? parseFloat(((quickVal - r.price) / Math.abs(quickVal) * 100).toFixed(1)) : null;
-    return { ...r, _eps: eps, quick_val: quickVal, quick_mos: quickMos };
+    const eps  = r.eps_ttm || (r.pe_ratio && r.price ? r.price / r.pe_ratio : null);
+    const bvps = (r.pb_ratio && r.pb_ratio > 0 && r.price) ? r.price / r.pb_ratio : null;
+    const g    = Math.min(Math.max(r.revenue_growth || 0, 2), 40); // growth cap 2–40%
+
+    // Graham: √(22.5 × EPS × BVPS)
+    const graham = (eps > 0 && bvps > 0) ? parseFloat(Math.sqrt(22.5 * eps * bvps).toFixed(2)) : null;
+    // P/E Method: EPS × 15x
+    const pe_val = eps ? parseFloat((eps * 15).toFixed(2)) : null;
+    // Peter Lynch 5-yr: EPS × (1+g)^5 × 15, discounted back at 10% pa
+    const lynch  = eps ? parseFloat((eps * Math.pow(1 + g/100, 5) * 15 / Math.pow(1.1, 5)).toFixed(2)) : null;
+
+    return { ...r, _eps: eps, graham, pe_val, lynch };
   });
 
   const wrap = document.getElementById("screenerTableWrap");
   if (!wrap) return;
+  // Pagination
+  const totalPages = Math.max(1, Math.ceil(results.length / _PAGE_SIZE));
+  _screenerPage = Math.min(_screenerPage, totalPages);
+  const pageStart = (_screenerPage - 1) * _PAGE_SIZE;
+  const pageRows  = results.slice(pageStart, pageStart + _PAGE_SIZE);
+
+  // Pagination controls HTML
+  const pageButtons = Array.from({length: totalPages}, (_, i) => i + 1).map(p =>
+    `<button onclick="setScreenerPage(${p}, _screenerData)" class="px-2 py-1 rounded text-xs ${p === _screenerPage ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white'}">${p}</button>`
+  ).join("");
+
   wrap.innerHTML = `
-    <div class="flex items-center justify-between mb-3">
-      <h2 class="font-semibold text-white">${results.length} stocks matched</h2>
-      <span class="text-slate-500 text-xs">Click column headers to sort</span>
+    <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+      <h2 class="font-semibold text-white">${results.length} stocks matched
+        <span class="text-slate-500 text-xs font-normal ml-2">showing ${pageStart+1}–${Math.min(pageStart+_PAGE_SIZE, results.length)}</span>
+      </h2>
+      <span class="text-slate-500 text-xs">Click column headers to sort · scroll right for all columns</span>
     </div>
     <div class="overflow-x-auto" style="-webkit-overflow-scrolling:touch">
-      <table class="text-sm" style="min-width:1600px;width:100%">
+      <table class="text-sm" style="min-width:1800px;width:100%">
         <thead>
           <tr class="text-slate-400 text-xs border-b border-slate-700">
             ${thCol("Ticker",    "ticker",          "text-left pr-2 whitespace-nowrap")}
@@ -324,8 +358,9 @@ function renderScreenerTable(results) {
             ${thCol("Rev Gr%",   "revenue_growth",  "text-right whitespace-nowrap")}
             ${thCol("EPS",       "eps_ttm",         "text-right whitespace-nowrap")}
             ${thCol("P/E",       "pe_ratio",        "text-right whitespace-nowrap")}
-            ${thCol("Quick Val", "quick_val",       "text-right whitespace-nowrap")}
-            ${thCol("MoS%",      "quick_mos",       "text-right whitespace-nowrap")}
+            ${thCol("Graham",    "graham",          "text-right whitespace-nowrap")}
+            ${thCol("P/E Val",   "pe_val",          "text-right whitespace-nowrap")}
+            ${thCol("Lynch 5yr", "lynch",           "text-right whitespace-nowrap")}
             ${thCol("P/B",       "pb_ratio",        "text-right whitespace-nowrap")}
             ${thCol("ROE%",      "roe",             "text-right whitespace-nowrap")}
             ${thCol("D/E",       "debt_to_equity",  "text-right whitespace-nowrap")}
@@ -336,14 +371,12 @@ function renderScreenerTable(results) {
           </tr>
         </thead>
         <tbody>
-          ${results.map(r => {
+          ${pageRows.map(r => {
             const bd = r.score_breakdown || {};
             const tip = `P/E:${bd.pe||0} P/B:${bd.pb||0} ROE:${bd.roe||0} D/E:${bd.de||0} FCF:${bd.fcf_yield||0}`;
             const moatColor = r.moat_rating==="Wide"?"text-emerald-400 bg-emerald-900":r.moat_rating==="Narrow"?"text-yellow-400 bg-yellow-900":"text-slate-400 bg-slate-800";
             const moatIcon  = r.moat_rating==="Wide"?"🏰":r.moat_rating==="Narrow"?"🧱":"—";
-            // Use pre-computed quick valuation fields
-            const { quick_val: quickVal, quick_mos: quickMos } = r;
-            const mosColor = quickMos === null ? "text-slate-500" : quickMos >= 20 ? "text-emerald-400 font-bold" : quickMos >= 0 ? "text-yellow-400" : "text-red-400";
+            const vc = v => _valColor(v, r.price); // green if val > price
             return `
               <tr class="table-row border-b border-slate-800 cursor-pointer" onclick="openResearch('${r.ticker}')">
                 <td class="py-2 pr-2 font-bold text-white whitespace-nowrap">${r.ticker}</td>
@@ -352,17 +385,18 @@ function renderScreenerTable(results) {
                 <td class="py-2 text-right text-white whitespace-nowrap">${fmt(r.price)}</td>
                 <td class="py-2 text-right text-slate-300 whitespace-nowrap">${fmtBig(r.market_cap)}</td>
                 <td class="py-2 text-right text-slate-300 whitespace-nowrap">${fmtBig(r.revenue)}</td>
-                <td class="py-2 text-right whitespace-nowrap ${(r.net_income||0) >= 0 ? 'text-emerald-400' : 'text-red-400'}">${fmtBig(r.net_income)}</td>
-                <td class="py-2 text-right whitespace-nowrap ${r.net_margin >= 15 ? 'text-emerald-400' : r.net_margin >= 8 ? 'text-yellow-400' : 'text-slate-400'}">${r.net_margin ? r.net_margin + "%" : "—"}</td>
-                <td class="py-2 text-right whitespace-nowrap ${r.revenue_growth >= 10 ? 'text-emerald-400' : r.revenue_growth >= 0 ? 'text-slate-300' : 'text-red-400'}">${r.revenue_growth !== null ? r.revenue_growth + "%" : "—"}</td>
-                <td class="py-2 text-right whitespace-nowrap text-slate-300">${r.eps_ttm != null ? "$"+r.eps_ttm : "—"}</td>
-                <td class="py-2 text-right whitespace-nowrap">${r.pe_ratio ?? "—"}</td>
-                <td class="py-2 text-right whitespace-nowrap text-amber-400 font-semibold" title="EPS × 15x P/E">${quickVal ? fmt(quickVal) : "—"}</td>
-                <td class="py-2 text-right whitespace-nowrap ${mosColor}" title="Margin of Safety vs 15x P/E">${quickMos !== null ? quickMos.toFixed(0)+"%" : "—"}</td>
-                <td class="py-2 text-right whitespace-nowrap">${r.pb_ratio ?? "—"}</td>
-                <td class="py-2 text-right whitespace-nowrap ${(r.roe||0) >= 15 ? 'text-emerald-400' : (r.roe||0) >= 10 ? 'text-yellow-400' : 'text-slate-400'}">${r.roe ? r.roe + "%" : "—"}</td>
-                <td class="py-2 text-right whitespace-nowrap ${(r.debt_to_equity||99) <= 0.5 ? 'text-emerald-400' : (r.debt_to_equity||99) <= 1 ? 'text-yellow-400' : 'text-slate-400'}">${r.debt_to_equity ?? "—"}</td>
-                <td class="py-2 text-right whitespace-nowrap ${(r.fcf_yield||0) >= 5 ? 'text-emerald-400' : 'text-slate-300'}">${r.fcf_yield ? r.fcf_yield + "%" : "—"}</td>
+                <td class="py-2 text-right whitespace-nowrap ${(r.net_income||0)>=0?'text-emerald-400':'text-red-400'}">${fmtBig(r.net_income)}</td>
+                <td class="py-2 text-right whitespace-nowrap ${r.net_margin>=15?'text-emerald-400':r.net_margin>=8?'text-yellow-400':'text-slate-400'}">${r.net_margin?r.net_margin+"%":"—"}</td>
+                <td class="py-2 text-right whitespace-nowrap ${r.revenue_growth>=10?'text-emerald-400':r.revenue_growth>=0?'text-slate-300':'text-red-400'}">${r.revenue_growth!==null?r.revenue_growth+"%":"—"}</td>
+                <td class="py-2 text-right whitespace-nowrap text-slate-300">${r.eps_ttm!=null?"$"+r.eps_ttm:"—"}</td>
+                <td class="py-2 text-right whitespace-nowrap">${r.pe_ratio??"—"}</td>
+                <td class="py-2 text-right whitespace-nowrap font-semibold ${vc(r.graham)}" title="Graham: √(22.5 × EPS × Book Value/Share)">${r.graham?fmt(r.graham):"—"}</td>
+                <td class="py-2 text-right whitespace-nowrap font-semibold ${vc(r.pe_val)}"   title="P/E Method: EPS × 15x">${r.pe_val?fmt(r.pe_val):"—"}</td>
+                <td class="py-2 text-right whitespace-nowrap font-semibold ${vc(r.lynch)}"    title="Peter Lynch 5-yr: EPS × (1+g)^5 × 15, discounted at 10%">${r.lynch?fmt(r.lynch):"—"}</td>
+                <td class="py-2 text-right whitespace-nowrap">${r.pb_ratio??"—"}</td>
+                <td class="py-2 text-right whitespace-nowrap ${(r.roe||0)>=15?'text-emerald-400':(r.roe||0)>=10?'text-yellow-400':'text-slate-400'}">${r.roe?r.roe+"%":"—"}</td>
+                <td class="py-2 text-right whitespace-nowrap ${(r.debt_to_equity||99)<=0.5?'text-emerald-400':(r.debt_to_equity||99)<=1?'text-yellow-400':'text-slate-400'}">${r.debt_to_equity??"—"}</td>
+                <td class="py-2 text-right whitespace-nowrap ${(r.fcf_yield||0)>=5?'text-emerald-400':'text-slate-300'}">${r.fcf_yield?r.fcf_yield+"%":"—"}</td>
                 <td class="py-2 text-right whitespace-nowrap">
                   <span class="text-xs px-1.5 py-0.5 rounded font-medium ${moatColor}" title="Moat score: ${r.moat_score||0}/100">${moatIcon} ${r.moat_rating||"—"}</span>
                 </td>
@@ -386,6 +420,26 @@ function renderScreenerTable(results) {
           </tbody>
         </table>
       </div>
+    </div>
+    ${totalPages > 1 ? `
+    <div class="flex items-center justify-between mt-4 flex-wrap gap-2">
+      <div class="text-slate-500 text-xs">Page ${_screenerPage} of ${totalPages} &nbsp;·&nbsp; ${results.length} stocks</div>
+      <div class="flex items-center gap-1 flex-wrap">
+        <button onclick="setScreenerPage(Math.max(1,_screenerPage-1), _screenerData)"
+          class="px-3 py-1 rounded text-xs ${_screenerPage<=1?'text-slate-600 cursor-default':'text-slate-400 hover:text-white'}"
+          ${_screenerPage<=1?"disabled":""}>← Prev</button>
+        ${pageButtons}
+        <button onclick="setScreenerPage(Math.min(${totalPages},_screenerPage+1), _screenerData)"
+          class="px-3 py-1 rounded text-xs ${_screenerPage>=totalPages?'text-slate-600 cursor-default':'text-slate-400 hover:text-white'}"
+          ${_screenerPage>=totalPages?"disabled":""}>Next →</button>
+      </div>
+    </div>` : ""}
+    <div class="mt-3 text-xs text-slate-600">
+      Graham: √(22.5 × EPS × Book Value/Share) &nbsp;·&nbsp;
+      P/E Val: EPS × 15x &nbsp;·&nbsp;
+      Lynch 5yr: EPS × (1+g)⁵ × 15 discounted at 10% &nbsp;·&nbsp;
+      <span class="text-emerald-400">Green</span> = above price &nbsp;
+      <span class="text-red-400">Red</span> = below price
     </div>`;
 }
 
