@@ -294,6 +294,14 @@ function renderScreenerResults(results) {
 }
 
 function renderScreenerTable(results) {
+  // Pre-compute derived columns so sorting works
+  results = results.map(r => {
+    const eps = r.eps_ttm || (r.pe_ratio && r.price ? r.price / r.pe_ratio : null);
+    const quickVal = eps ? parseFloat((eps * 15).toFixed(2)) : null;
+    const quickMos = quickVal && r.price ? parseFloat(((quickVal - r.price) / Math.abs(quickVal) * 100).toFixed(1)) : null;
+    return { ...r, _eps: eps, quick_val: quickVal, quick_mos: quickMos };
+  });
+
   const wrap = document.getElementById("screenerTableWrap");
   if (!wrap) return;
   wrap.innerHTML = `
@@ -301,27 +309,30 @@ function renderScreenerTable(results) {
       <h2 class="font-semibold text-white">${results.length} stocks matched</h2>
       <span class="text-slate-500 text-xs">Click column headers to sort</span>
     </div>
-    <div class="overflow-x-auto">
-      <table class="w-full text-sm">
+    <div class="overflow-x-auto" style="-webkit-overflow-scrolling:touch">
+      <table class="text-sm" style="min-width:1600px;width:100%">
         <thead>
           <tr class="text-slate-400 text-xs border-b border-slate-700">
-            ${thCol("Ticker",    "ticker",          "text-left pr-2")}
-            ${thCol("Company",   "name",            "text-left")}
-            ${thCol("Sector",    "sector",          "text-left")}
-            ${thCol("Price",     "price",           "text-right")}
-            ${thCol("Mkt Cap",   "market_cap",      "text-right")}
-            ${thCol("Revenue",   "revenue",         "text-right")}
-            ${thCol("Net Income","net_income",      "text-right")}
-            ${thCol("Margin%",   "net_margin",      "text-right")}
-            ${thCol("Rev Gr%",   "revenue_growth",  "text-right")}
-            ${thCol("P/E",       "pe_ratio",        "text-right")}
-            ${thCol("P/B",       "pb_ratio",        "text-right")}
-            ${thCol("ROE%",      "roe",             "text-right")}
-            ${thCol("D/E",       "debt_to_equity",  "text-right")}
-            ${thCol("FCF Yld",   "fcf_yield",       "text-right")}
-            ${thCol("Moat",      "moat_score",      "text-right")}
-            ${thCol("Score",     "score",           "text-right")}
-            <th class="pb-3 text-right">Action</th>
+            ${thCol("Ticker",    "ticker",          "text-left pr-2 whitespace-nowrap")}
+            ${thCol("Company",   "name",            "text-left whitespace-nowrap")}
+            ${thCol("Sector",    "sector",          "text-left whitespace-nowrap")}
+            ${thCol("Price",     "price",           "text-right whitespace-nowrap")}
+            ${thCol("Mkt Cap",   "market_cap",      "text-right whitespace-nowrap")}
+            ${thCol("Revenue",   "revenue",         "text-right whitespace-nowrap")}
+            ${thCol("Net Inc",   "net_income",      "text-right whitespace-nowrap")}
+            ${thCol("Margin%",   "net_margin",      "text-right whitespace-nowrap")}
+            ${thCol("Rev Gr%",   "revenue_growth",  "text-right whitespace-nowrap")}
+            ${thCol("EPS",       "eps_ttm",         "text-right whitespace-nowrap")}
+            ${thCol("P/E",       "pe_ratio",        "text-right whitespace-nowrap")}
+            ${thCol("Quick Val", "quick_val",       "text-right whitespace-nowrap")}
+            ${thCol("MoS%",      "quick_mos",       "text-right whitespace-nowrap")}
+            ${thCol("P/B",       "pb_ratio",        "text-right whitespace-nowrap")}
+            ${thCol("ROE%",      "roe",             "text-right whitespace-nowrap")}
+            ${thCol("D/E",       "debt_to_equity",  "text-right whitespace-nowrap")}
+            ${thCol("FCF Yld",   "fcf_yield",       "text-right whitespace-nowrap")}
+            ${thCol("Moat",      "moat_score",      "text-right whitespace-nowrap")}
+            ${thCol("Score",     "score",           "text-right whitespace-nowrap")}
+            <th class="pb-3 text-right whitespace-nowrap">Action</th>
           </tr>
         </thead>
         <tbody>
@@ -330,26 +341,32 @@ function renderScreenerTable(results) {
             const tip = `P/E:${bd.pe||0} P/B:${bd.pb||0} ROE:${bd.roe||0} D/E:${bd.de||0} FCF:${bd.fcf_yield||0}`;
             const moatColor = r.moat_rating==="Wide"?"text-emerald-400 bg-emerald-900":r.moat_rating==="Narrow"?"text-yellow-400 bg-yellow-900":"text-slate-400 bg-slate-800";
             const moatIcon  = r.moat_rating==="Wide"?"🏰":r.moat_rating==="Narrow"?"🧱":"—";
+            // Use pre-computed quick valuation fields
+            const { quick_val: quickVal, quick_mos: quickMos } = r;
+            const mosColor = quickMos === null ? "text-slate-500" : quickMos >= 20 ? "text-emerald-400 font-bold" : quickMos >= 0 ? "text-yellow-400" : "text-red-400";
             return `
               <tr class="table-row border-b border-slate-800 cursor-pointer" onclick="openResearch('${r.ticker}')">
-                <td class="py-2 pr-2 font-bold text-white">${r.ticker}</td>
-                <td class="py-2 text-slate-400 text-xs" style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.name}">${r.name}</td>
+                <td class="py-2 pr-2 font-bold text-white whitespace-nowrap">${r.ticker}</td>
+                <td class="py-2 text-slate-400 text-xs whitespace-nowrap" style="max-width:140px;overflow:hidden;text-overflow:ellipsis" title="${r.name}">${r.name}</td>
                 <td class="py-2 text-slate-400 text-xs whitespace-nowrap">${r.sector !== "N/A" ? r.sector : "—"}</td>
-                <td class="py-2 text-right text-white">${fmt(r.price)}</td>
-                <td class="py-2 text-right text-slate-300">${fmtBig(r.market_cap)}</td>
-                <td class="py-2 text-right text-slate-300">${fmtBig(r.revenue)}</td>
-                <td class="py-2 text-right ${(r.net_income||0) >= 0 ? 'text-emerald-400' : 'text-red-400'}">${fmtBig(r.net_income)}</td>
-                <td class="py-2 text-right ${r.net_margin >= 15 ? 'text-emerald-400' : r.net_margin >= 8 ? 'text-yellow-400' : 'text-slate-400'}">${r.net_margin ? r.net_margin + "%" : "—"}</td>
-                <td class="py-2 text-right ${r.revenue_growth >= 10 ? 'text-emerald-400' : r.revenue_growth >= 0 ? 'text-slate-300' : 'text-red-400'}">${r.revenue_growth !== null ? r.revenue_growth + "%" : "—"}</td>
-                <td class="py-2 text-right">${r.pe_ratio ?? "—"}</td>
-                <td class="py-2 text-right">${r.pb_ratio ?? "—"}</td>
-                <td class="py-2 text-right ${(r.roe||0) >= 15 ? 'text-emerald-400' : (r.roe||0) >= 10 ? 'text-yellow-400' : 'text-slate-400'}">${r.roe ? r.roe + "%" : "—"}</td>
-                <td class="py-2 text-right ${(r.debt_to_equity||99) <= 0.5 ? 'text-emerald-400' : (r.debt_to_equity||99) <= 1 ? 'text-yellow-400' : 'text-slate-400'}">${r.debt_to_equity ?? "—"}</td>
-                <td class="py-2 text-right ${(r.fcf_yield||0) >= 5 ? 'text-emerald-400' : 'text-slate-300'}">${r.fcf_yield ? r.fcf_yield + "%" : "—"}</td>
-                <td class="py-2 text-right">
+                <td class="py-2 text-right text-white whitespace-nowrap">${fmt(r.price)}</td>
+                <td class="py-2 text-right text-slate-300 whitespace-nowrap">${fmtBig(r.market_cap)}</td>
+                <td class="py-2 text-right text-slate-300 whitespace-nowrap">${fmtBig(r.revenue)}</td>
+                <td class="py-2 text-right whitespace-nowrap ${(r.net_income||0) >= 0 ? 'text-emerald-400' : 'text-red-400'}">${fmtBig(r.net_income)}</td>
+                <td class="py-2 text-right whitespace-nowrap ${r.net_margin >= 15 ? 'text-emerald-400' : r.net_margin >= 8 ? 'text-yellow-400' : 'text-slate-400'}">${r.net_margin ? r.net_margin + "%" : "—"}</td>
+                <td class="py-2 text-right whitespace-nowrap ${r.revenue_growth >= 10 ? 'text-emerald-400' : r.revenue_growth >= 0 ? 'text-slate-300' : 'text-red-400'}">${r.revenue_growth !== null ? r.revenue_growth + "%" : "—"}</td>
+                <td class="py-2 text-right whitespace-nowrap text-slate-300">${r.eps_ttm != null ? "$"+r.eps_ttm : "—"}</td>
+                <td class="py-2 text-right whitespace-nowrap">${r.pe_ratio ?? "—"}</td>
+                <td class="py-2 text-right whitespace-nowrap text-amber-400 font-semibold" title="EPS × 15x P/E">${quickVal ? fmt(quickVal) : "—"}</td>
+                <td class="py-2 text-right whitespace-nowrap ${mosColor}" title="Margin of Safety vs 15x P/E">${quickMos !== null ? quickMos.toFixed(0)+"%" : "—"}</td>
+                <td class="py-2 text-right whitespace-nowrap">${r.pb_ratio ?? "—"}</td>
+                <td class="py-2 text-right whitespace-nowrap ${(r.roe||0) >= 15 ? 'text-emerald-400' : (r.roe||0) >= 10 ? 'text-yellow-400' : 'text-slate-400'}">${r.roe ? r.roe + "%" : "—"}</td>
+                <td class="py-2 text-right whitespace-nowrap ${(r.debt_to_equity||99) <= 0.5 ? 'text-emerald-400' : (r.debt_to_equity||99) <= 1 ? 'text-yellow-400' : 'text-slate-400'}">${r.debt_to_equity ?? "—"}</td>
+                <td class="py-2 text-right whitespace-nowrap ${(r.fcf_yield||0) >= 5 ? 'text-emerald-400' : 'text-slate-300'}">${r.fcf_yield ? r.fcf_yield + "%" : "—"}</td>
+                <td class="py-2 text-right whitespace-nowrap">
                   <span class="text-xs px-1.5 py-0.5 rounded font-medium ${moatColor}" title="Moat score: ${r.moat_score||0}/100">${moatIcon} ${r.moat_rating||"—"}</span>
                 </td>
-                <td class="py-2 text-right" title="Score breakdown — ${tip}">
+                <td class="py-2 text-right whitespace-nowrap" title="Score breakdown — ${tip}">
                   <div class="flex items-center justify-end gap-1.5">
                     <div class="w-12 h-1.5 rounded bg-slate-700"><div class="h-1.5 rounded bg-emerald-500" style="width:${r.score||0}%"></div></div>
                     <span class="text-emerald-400 font-bold text-xs w-6">${r.score||0}</span>

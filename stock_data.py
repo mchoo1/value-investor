@@ -442,6 +442,7 @@ def _screen_one(ticker: str, filters: dict) -> dict | None:
         breakdown = _score_breakdown(pe, pb, roe, de, fcf_yield)
         moat      = get_moat_rating(ticker)
 
+        eps_ttm = info.get("eps_ttm") or 0
         return {
             "ticker":        ticker,
             "name":          info.get("name", ticker),
@@ -459,6 +460,7 @@ def _screen_one(ticker: str, filters: dict) -> dict | None:
             "debt_to_equity": round(de, 2)       if de        else None,
             "fcf_yield":     round(fcf_yield, 1) if fcf_yield else None,
             "dividend_yield": round((info.get("dividend_yield") or 0) * 100, 2),
+            "eps_ttm":       round(eps_ttm, 2)   if eps_ttm   else None,
             "score":           breakdown["total"],
             "score_breakdown": breakdown,
             "insider_signal":  insider_signal,
