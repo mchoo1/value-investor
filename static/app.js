@@ -263,10 +263,10 @@ async function runScreener() {
   };
 
   const universe = market === "SGX" ? "30 STI stocks" :
-    custom_tickers.length ? `${custom_tickers.length} custom tickers` : "~800 US stocks";
+    custom_tickers.length ? `${custom_tickers.length} custom tickers` : "US stocks";
 
   document.getElementById("screenLoader").classList.remove("hidden");
-  document.getElementById("screenStatus").textContent = `Screening ${universe}${sector !== "All" ? " · " + sector : ""} — this may take a few minutes on first run...`;
+  document.getElementById("screenStatus").textContent = `Screening ${universe}${sector !== "All" ? " · " + sector : ""} — please wait...`;
   document.getElementById("screenResults").innerHTML = "";
 
   try {
@@ -275,14 +275,18 @@ async function runScreener() {
     _sortCol = "score";
     _sortAsc = false;
     document.getElementById("screenLoader").classList.add("hidden");
-    document.getElementById("screenStatus").textContent =
-      `✓ ${data.results.length} stocks passed filters out of ${data.screened} screened`;
+    const cloudNote = data.cloud_mode
+      ? ` · <span title="Cloud mode: top 100 curated US stocks. Enter specific tickers in Custom Tickers for a broader search." style="cursor:help;opacity:.7">☁ cloud (100 stocks)</span>`
+      : "";
+    document.getElementById("screenStatus").innerHTML =
+      `✓ ${data.results.length} stocks passed filters out of ${data.screened} screened${cloudNote}`;
     renderScreenerResults(data.results);
   } catch (e) {
     document.getElementById("screenLoader").classList.add("hidden");
     document.getElementById("screenStatus").textContent = "⚠ Error: " + e.message;
     document.getElementById("screenResults").innerHTML =
-      `<div class="card text-red-400 text-sm p-4">Screener error: ${e.message}<br><br>Make sure the app is running and try again.</div>`;
+      `<div class="card text-red-400 text-sm p-4">Screener error: ${e.message}<br><br>` +
+      `Try entering specific tickers in the <b>Custom Tickers</b> field above instead of scanning all stocks.</div>`;
   }
 }
 

@@ -154,6 +154,39 @@ US_UNIVERSE = [
 # Keep old name as alias so existing code referencing SP500_SAMPLE still works
 SP500_SAMPLE = US_UNIVERSE
 
+# ── Curated universe for cloud/serverless deployments (~100 stocks) ──
+# Used on Vercel where serverless functions time out with the full ~800 stock list.
+# Covers all 11 GICS sectors with the most widely-followed value stocks.
+CLOUD_UNIVERSE = [
+    # Technology
+    "AAPL", "MSFT", "GOOGL", "META", "NVDA", "ORCL", "IBM", "TXN", "CSCO",
+    "INTU", "ADBE", "CRM", "QCOM", "ACN", "AMAT",
+    # Healthcare
+    "JNJ", "UNH", "LLY", "PFE", "ABBV", "MRK", "TMO", "ABT", "BMY",
+    "AMGN", "CVS", "DHR", "SYK", "ISRG",
+    # Financials
+    "BRK-B", "JPM", "BAC", "WFC", "V", "MA", "BLK", "GS", "AXP",
+    "PRU", "SCHW", "MS", "C", "USB", "PNC",
+    # Consumer Discretionary
+    "AMZN", "HD", "MCD", "NKE", "SBUX", "LOW", "TGT", "TJX",
+    "BKNG", "TSLA", "ROST", "CMG", "EBAY",
+    # Consumer Staples
+    "PG", "KO", "PEP", "PM", "WMT", "COST", "MDLZ", "CL", "MO", "KMB",
+    # Energy
+    "XOM", "CVX", "COP", "SLB", "OXY", "EOG", "PSX", "VLO", "KMI",
+    # Industrials
+    "CAT", "HON", "UNP", "GE", "RTX", "LMT", "BA", "DE", "EMR",
+    "UPS", "CTAS", "FDX", "MMM",
+    # Materials
+    "LIN", "APD", "SHW", "NEM", "FCX", "NUE", "ECL",
+    # Real Estate
+    "AMT", "PLD", "EQIX", "O", "PSA",
+    # Utilities
+    "NEE", "SO", "DUK", "AEP", "XEL",
+    # Communication Services
+    "VZ", "T", "CMCSA", "DIS", "NFLX", "TMUS",
+]
+
 
 def get_stock_info(ticker: str) -> dict:
     """

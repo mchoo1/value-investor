@@ -118,16 +118,27 @@ def screen():
     if sector:
         filters["sector"] = sector
 
+    # On Vercel (serverless) use a curated ~100-stock universe to stay within
+    # the 60-second function timeout.  Full ~800-stock scan works locally.
+    _on_vercel = bool(os.environ.get("VERCEL"))
+
     # Choose universe
     if custom_tickers:
         tickers = [t.upper() for t in custom_tickers]
     elif market == "SGX":
         tickers = sd.STI_COMPONENTS
+    elif _on_vercel:
+        tickers = sd.CLOUD_UNIVERSE
     else:
         tickers = sd.US_UNIVERSE
 
     results = sd.screen_stocks(tickers, filters)
-    return jsonify({"results": results, "total": len(results), "screened": len(tickers)})
+    return jsonify({
+        "results": results,
+        "total": len(results),
+        "screened": len(tickers),
+        "cloud_mode": _on_vercel,
+    })
 
 
 @app.route("/api/screen/formula", methods=["GET"])
