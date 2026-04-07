@@ -180,6 +180,42 @@ def init_db():
                 notes TEXT
             )
         """)
+        # ── Postgres migrations: add new thesis columns if missing ──
+        c.execute("""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name = 'thesis'
+        """)
+        pg_thesis_cols = {row[0] if isinstance(row, tuple) else row["column_name"]
+                         for row in c.fetchall()}
+        for col, col_type in [
+            ("conviction_tier",       "TEXT"),
+            ("verdict",               "TEXT"),
+            ("key_90d_metric",        "TEXT"),
+            ("strategy",              "TEXT"),
+            ("probability_weighted_ev","REAL"),
+            ("bear_probability",      "REAL"),
+            ("base_probability",      "REAL"),
+            ("bull_probability",      "REAL"),
+            ("position_size_pct",     "REAL"),
+            ("entry_price_low",       "REAL"),
+            ("entry_price_high",      "REAL"),
+            ("stop_loss",             "REAL"),
+            ("risk_reward_ratio",     "REAL"),
+            ("target_price_36m",      "REAL"),
+            ("macro_sensitivity",     "TEXT"),
+            ("report_date",           "TEXT"),
+        ]:
+            if col not in pg_thesis_cols:
+                c.execute(f"ALTER TABLE thesis ADD COLUMN {col} {col_type}")
+        # ── Postgres migrations: research_queue ──
+        c.execute("""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name = 'research_queue'
+        """)
+        pg_queue_cols = {row[0] if isinstance(row, tuple) else row["column_name"]
+                        for row in c.fetchall()}
+        if not pg_queue_cols:
+            pass  # table was just created above
     else:
         # SQLite schema
         c.execute("""
