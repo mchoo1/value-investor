@@ -235,6 +235,25 @@
         <textarea id="customTickers" class="input-field" placeholder="AAPL, MSFT, D05.SI" style="height:70px"></textarea>
       </div>
 
+      <!-- Strategy Presets -->
+      <div class="mb-3 pb-3 border-b border-slate-700">
+        <label class="text-slate-400 text-xs mb-2 block">Strategy Preset</label>
+        <div class="flex flex-col gap-1.5">
+          <button id="preset-5x" onclick="applyScreenerPreset('5x')"
+            class="preset-btn btn-secondary text-xs py-1.5 text-left px-3 border border-slate-700 rounded">
+            📈 5X Compounder
+            <span class="text-slate-500 block text-xs font-normal">Rev growth &gt;20%, moat, growth sectors</span>
+          </button>
+          <button id="preset-value" onclick="applyScreenerPreset('value')"
+            class="preset-btn btn-secondary text-xs py-1.5 text-left px-3 border border-slate-700 rounded">
+            💰 Value Dislocation
+            <span class="text-slate-500 block text-xs font-normal">Mkt cap &gt;$20B, FCF yield &gt;4%, Net D/E &lt;3×</span>
+          </button>
+          <button onclick="applyScreenerPreset('clear')"
+            class="text-slate-600 text-xs hover:text-slate-400 text-left px-1">↺ Clear presets</button>
+        </div>
+      </div>
+
       <div class="space-y-2 text-sm">
         <div>
           <label class="text-slate-400 text-xs block mb-1">Max P/E Ratio</label>
@@ -251,6 +270,27 @@
         <div>
           <label class="text-slate-400 text-xs block mb-1">Max Debt/Equity</label>
           <input id="fMaxDe" type="number" class="input-field" placeholder="e.g. 1.5">
+        </div>
+        <div class="border-t border-slate-700 pt-2 mt-2">
+          <label class="text-slate-400 text-xs block mb-1.5">Strategy Filters</label>
+          <div class="space-y-2">
+            <div>
+              <label class="text-slate-400 text-xs block mb-1">Min Market Cap ($B)</label>
+              <input id="fMinMarketCap" type="number" class="input-field" placeholder="e.g. 20">
+            </div>
+            <div>
+              <label class="text-slate-400 text-xs block mb-1">Min FCF Yield (%)</label>
+              <input id="fMinFcfYield" type="number" class="input-field" placeholder="e.g. 4">
+            </div>
+            <div>
+              <label class="text-slate-400 text-xs block mb-1">Min Rev Growth (%)</label>
+              <input id="fMinRevGrowth" type="number" class="input-field" placeholder="e.g. 20">
+            </div>
+            <div>
+              <label class="text-slate-400 text-xs block mb-1">Max Net Debt/EBITDA</label>
+              <input id="fMaxNetDebtEbitda" type="number" class="input-field" placeholder="e.g. 3">
+            </div>
+          </div>
         </div>
         <div class="flex items-center gap-2 mt-1">
           <input id="fFcfPositive" type="checkbox">
@@ -784,6 +824,6 @@
   </div>
 </div>
 
-<script src="/static/app.js?v=13"></script>
+<script src="/static/app.js?v=14"></script>
 </body>
 </html>

@@ -454,7 +454,16 @@ def _screen_one(ticker: str, filters: dict) -> dict | None:
         fcf    = info.get("free_cashflow") or 0
         price  = info.get("current_price") or 0
         shares = info.get("shares_outstanding") or 1
+        market_cap = info.get("market_cap") or 0
         fcf_yield = ((fcf / shares) / price * 100) if (price and fcf and shares) else 0
+        rev_growth = (info.get("revenue_growth") or 0) * 100
+
+        # Net Debt / EBITDA (for Strategy 2 filter)
+        total_debt = info.get("total_debt") or 0
+        total_cash = info.get("total_cash") or 0
+        ebitda     = info.get("ebitda") or 0
+        net_debt   = total_debt - total_cash
+        net_debt_ebitda = round(net_debt / ebitda, 2) if ebitda > 0 and net_debt > 0 else 0
 
         # Apply numeric filters
         if filters.get("max_pe")  and 0 < pe  > filters["max_pe"]:  return None
@@ -462,6 +471,13 @@ def _screen_one(ticker: str, filters: dict) -> dict | None:
         if filters.get("min_roe") and roe < filters["min_roe"]:      return None
         if filters.get("max_de")  and de  > filters["max_de"]:       return None
         if filters.get("require_positive_fcf") and fcf <= 0:         return None
+        # New strategy-aligned filters
+        min_mc_b = filters.get("min_market_cap")   # in $B
+        if min_mc_b and market_cap < min_mc_b * 1e9:                 return None
+        if filters.get("min_fcf_yield") and fcf_yield < filters["min_fcf_yield"]:  return None
+        if filters.get("min_rev_growth") and rev_growth < filters["min_rev_growth"]: return None
+        max_nde = filters.get("max_net_debt_ebitda")
+        if max_nde and net_debt > 0 and ebitda > 0 and net_debt_ebitda > max_nde: return None
 
         # Insider buying filter — only include stocks with net buys in last 60 days
         insider_signal = None
@@ -494,6 +510,9 @@ def _screen_one(ticker: str, filters: dict) -> dict | None:
             "fcf_yield":     round(fcf_yield, 1) if fcf_yield else None,
             "dividend_yield": round((info.get("dividend_yield") or 0) * 100, 2),
             "eps_ttm":       round(eps_ttm, 2)   if eps_ttm   else None,
+            "ev_revenue":      round(info.get("ev_revenue") or 0, 1) or None,
+            "ev_ebitda":       round(info.get("ev_ebitda") or 0, 1) or None,
+            "net_debt_ebitda": net_debt_ebitda or None,
             "score":           breakdown["total"],
             "score_breakdown": breakdown,
             "insider_signal":  insider_signal,

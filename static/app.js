@@ -106,17 +106,25 @@ async function loadWatchlistPanel() {
     if (!wl.length) {
       el.innerHTML = `<div class="text-slate-600 text-sm text-center py-4">No stocks yet. Use Screener to find ideas.</div>`;
     } else {
-      el.innerHTML = wl.map(w => `
+      el.innerHTML = wl.map(w => {
+        const meta = _parseWatchNotes(w.notes);
+        const scoreBadge = meta.score != null
+          ? `<span class="text-slate-500 text-xs ml-1.5">Score:${meta.score}</span>` : '';
+        const mosBadge = meta.mos != null
+          ? `<span class="text-xs ml-1.5 ${meta.mos>=20?'text-emerald-400':meta.mos>=0?'text-yellow-400':'text-red-400'}">${meta.mos>0?'+':''}${meta.mos}% MoS</span>` : '';
+        return `
         <div class="flex items-center justify-between py-1.5 border-b border-slate-800">
           <div>
             <span class="font-semibold text-white text-sm">${w.ticker}</span>
             <span class="text-slate-500 text-xs ml-2">${w.name || ""}</span>
+            ${scoreBadge}${mosBadge}
           </div>
           <div class="flex gap-3">
             <button onclick="openResearch('${w.ticker}')" class="text-blue-400 text-xs hover:underline">Research</button>
             <button onclick="removeFromWatchlist('${w.ticker}', this)" class="text-red-400 text-xs">✕</button>
           </div>
-        </div>`).join("");
+        </div>`;
+      }).join("");
     }
   } catch (e) {
     el.innerHTML = `<div class="text-red-400 text-xs">Error loading watchlist: ${e.message}</div>`;
@@ -224,6 +232,136 @@ let _sortCol = "score";
 let _sortAsc = false;
 let _screenerPage = 1;
 const _PAGE_SIZE = 50;
+let _watchlistTickers = new Set();  // drives "Watching" badge
+let _priorPickTickers = new Set();  // drives "★ Prior" badge — tickers ever in thesis
+let _queuedTickers    = new Set();  // drives "⏱ Queued" badge — in research queue
+let _screenerSelected = new Set();  // checkboxes for bulk-add
+
+// ── Strategy presets ─────────────────────────────────────────────
+function applyScreenerPreset(preset) {
+  const ids = ['fMaxPe','fMaxPb','fMinRoe','fMaxDe',
+               'fMinMarketCap','fMinFcfYield','fMinRevGrowth','fMaxNetDebtEbitda'];
+  ids.forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+  document.getElementById('fFcfPositive').checked  = false;
+  document.getElementById('fInsiderBuying').checked = false;
+  if (preset === '5x') {
+    // 5X Compounders: growth-first, no P/E screen, min 20% revenue growth
+    document.getElementById('fMinRevGrowth').value = '20';
+    document.getElementById('fMinRoe').value       = '12';
+  } else if (preset === 'value') {
+    // Value Dislocations: large cap, FCF-positive, clean balance sheet
+    document.getElementById('fMinMarketCap').value     = '20';
+    document.getElementById('fMinFcfYield').value      = '4';
+    document.getElementById('fMaxNetDebtEbitda').value = '3';
+    document.getElementById('fMaxPe').value            = '20';
+    document.getElementById('fFcfPositive').checked    = true;
+  }
+  // Highlight the active preset button
+  document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('border-emerald-500','text-emerald-400'));
+  if (preset !== 'clear') {
+    const btn = document.getElementById('preset-' + preset);
+    if (btn) btn.classList.add('border-emerald-500','text-emerald-400');
+  }
+}
+
+// ── Bulk-add helpers ─────────────────────────────────────────────
+function toggleScreenerRow(ticker, cb) {
+  if (cb.checked) _screenerSelected.add(ticker);
+  else _screenerSelected.delete(ticker);
+  _updateBulkBar();
+}
+function toggleSelectAll(cb) {
+  const pageStart = (_screenerPage - 1) * _PAGE_SIZE;
+  const pageRows  = _screenerData.slice(pageStart, pageStart + _PAGE_SIZE);
+  pageRows.forEach(r => {
+    if (cb.checked) _screenerSelected.add(r.ticker);
+    else _screenerSelected.delete(r.ticker);
+  });
+  _updateBulkBar();
+  renderScreenerTable(_screenerData);
+}
+function _updateBulkBar() {
+  let bar = document.getElementById('screenerBulkBar');
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'screenerBulkBar';
+    bar.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:#1e293b;border-top:1px solid #334155;padding:10px 24px;display:flex;align-items:center;gap:12px;z-index:200;';
+    document.body.appendChild(bar);
+  }
+  if (_screenerSelected.size === 0) { bar.style.display = 'none'; return; }
+  bar.style.display = 'flex';
+  const newOnes = [..._screenerSelected].filter(t => !_watchlistTickers.has(t)).length;
+  bar.innerHTML = `
+    <span class="text-white text-sm font-semibold">${_screenerSelected.size} selected</span>
+    <button onclick="addSelectedToWatchlist()" class="btn-primary text-xs py-1.5 px-4">
+      + Add ${newOnes} to Watchlist</button>
+    <button onclick="queueSelectedForResearch()" class="btn-secondary text-xs py-1.5 px-4">
+      ⏱ Queue for AI Research</button>
+    <button onclick="_screenerSelected.clear();_updateBulkBar();renderScreenerTable(_screenerData)"
+      class="text-slate-400 text-xs hover:text-white ml-auto">✕ Clear</button>`;
+}
+
+// ── Watchlist note builder ────────────────────────────────────────
+function buildScreenerNotes(r) {
+  const parts = [];
+  if (r.score      != null) parts.push(`Score:${r.score}`);
+  if (r.pe_ratio   != null) parts.push(`P/E:${r.pe_ratio}`);
+  if (r.graham     != null) parts.push(`Graham:$${r.graham}`);
+  if (r.graham && r.price) {
+    const mos = Math.round((r.graham - r.price) / r.graham * 100);
+    parts.push(`MoS:${mos}%`);
+  }
+  if (r.ev_revenue != null) parts.push(`EV/Rev:${r.ev_revenue}x`);
+  if (r.ev_ebitda  != null) parts.push(`EV/EBITDA:${r.ev_ebitda}x`);
+  if (r.roe        != null) parts.push(`ROE:${r.roe}%`);
+  if (r.fcf_yield  != null) parts.push(`FCF:${r.fcf_yield}%`);
+  return parts.join(' | ');
+}
+function _parseWatchNotes(notes) {
+  if (!notes) return {};
+  const score = (notes.match(/Score:(\d+)/)   || [])[1];
+  const mos   = (notes.match(/MoS:(-?\d+)%/)  || [])[1];
+  return { score: score ? +score : null, mos: mos ? +mos : null };
+}
+
+// ── Bulk watchlist add ────────────────────────────────────────────
+async function addSelectedToWatchlist() {
+  const bar = document.getElementById('screenerBulkBar');
+  const tickers = [..._screenerSelected].filter(t => !_watchlistTickers.has(t));
+  if (!tickers.length) { _screenerSelected.clear(); _updateBulkBar(); return; }
+  const rowMap = Object.fromEntries(_screenerData.map(r => [r.ticker, r]));
+  if (bar) bar.innerHTML = `<span class="text-slate-300 text-sm">Adding ${tickers.length} stocks…</span>`;
+  let added = 0;
+  for (const ticker of tickers) {
+    const r = rowMap[ticker] || {};
+    try {
+      await api('/api/watchlist', 'POST', { ticker, name: r.name||'', market:'US', notes: buildScreenerNotes(r) });
+      _watchlistTickers.add(ticker);
+      added++;
+    } catch (_) {}
+  }
+  _screenerSelected.clear(); _updateBulkBar();
+  renderScreenerTable(_screenerData);
+  const st = document.getElementById('screenStatus');
+  if (st) { const prev = st.innerHTML; st.innerHTML = `✓ Added ${added} to watchlist`; setTimeout(()=>st.innerHTML=prev, 2500); }
+}
+
+// ── Bulk research queue ───────────────────────────────────────────
+async function queueSelectedForResearch() {
+  const tickers = [..._screenerSelected].filter(t => !_queuedTickers.has(t));
+  const rowMap  = Object.fromEntries(_screenerData.map(r => [r.ticker, r]));
+  for (const ticker of tickers) {
+    const r = rowMap[ticker] || {};
+    try {
+      await api('/api/research-queue', 'POST', { ticker, notes: `Screener score:${r.score||0}` });
+      _queuedTickers.add(ticker);
+    } catch (_) {}
+  }
+  _screenerSelected.clear(); _updateBulkBar();
+  renderScreenerTable(_screenerData);
+  const st = document.getElementById('screenStatus');
+  if (st) { const prev = st.innerHTML; st.innerHTML = `⏱ ${tickers.length} tickers queued for Monday's AI run`; setTimeout(()=>st.innerHTML=prev, 2500); }
+}
 
 function sortScreener(col) {
   if (_sortCol === col) {
@@ -254,10 +392,14 @@ async function runScreener() {
   const customRaw = document.getElementById("customTickers").value;
   const custom_tickers = customRaw ? customRaw.split(/[,\s]+/).filter(Boolean) : [];
   const filters = {
-    max_pe:  parseFloat(document.getElementById("fMaxPe").value)  || null,
-    max_pb:  parseFloat(document.getElementById("fMaxPb").value)  || null,
-    min_roe: parseFloat(document.getElementById("fMinRoe").value) || null,
-    max_de:  parseFloat(document.getElementById("fMaxDe").value)  || null,
+    max_pe:              parseFloat(document.getElementById("fMaxPe").value)          || null,
+    max_pb:              parseFloat(document.getElementById("fMaxPb").value)          || null,
+    min_roe:             parseFloat(document.getElementById("fMinRoe").value)         || null,
+    max_de:              parseFloat(document.getElementById("fMaxDe").value)          || null,
+    min_market_cap:      parseFloat(document.getElementById("fMinMarketCap")?.value)  || null,
+    min_fcf_yield:       parseFloat(document.getElementById("fMinFcfYield")?.value)   || null,
+    min_rev_growth:      parseFloat(document.getElementById("fMinRevGrowth")?.value)  || null,
+    max_net_debt_ebitda: parseFloat(document.getElementById("fMaxNetDebtEbitda")?.value) || null,
     require_positive_fcf: document.getElementById("fFcfPositive").checked,
     insider_buying_only:  document.getElementById("fInsiderBuying").checked,
   };
@@ -274,6 +416,18 @@ async function runScreener() {
     _screenerData = data.results;
     _sortCol = "score";
     _sortAsc = false;
+    _screenerSelected.clear();
+    // Fetch watchlist, prior picks, and queue in parallel to drive row badges
+    Promise.all([
+      api("/api/watchlist").catch(()=>[]),
+      api("/api/thesis/tickers").catch(()=>[]),
+      api("/api/research-queue").catch(()=>[]),
+    ]).then(([wl, priorTickers, queue]) => {
+      _watchlistTickers = new Set(wl.map(w => w.ticker));
+      _priorPickTickers = new Set(priorTickers);
+      _queuedTickers    = new Set(queue.map(q => q.ticker));
+      renderScreenerTable(_screenerData);
+    });
     document.getElementById("screenLoader").classList.add("hidden");
     const cloudNote = data.cloud_mode
       ? ` · <span title="Cloud mode: top 100 curated US stocks. Enter specific tickers in Custom Tickers for a broader search." style="cursor:help;opacity:.7">☁ cloud (100 stocks)</span>`
@@ -348,9 +502,14 @@ function renderScreenerTable(results) {
       <span class="text-slate-500 text-xs">Click column headers to sort · scroll right for all columns</span>
     </div>
     <div class="overflow-x-auto" style="-webkit-overflow-scrolling:touch">
-      <table class="text-sm" style="min-width:1800px;width:100%">
+      <table class="text-sm" style="min-width:1850px;width:100%">
         <thead>
           <tr class="text-slate-400 text-xs border-b border-slate-700">
+            <th class="pb-3 pr-2 whitespace-nowrap text-left">
+              <input type="checkbox" id="selectAllRows" title="Select all on page"
+                onchange="toggleSelectAll(this)"
+                class="accent-emerald-500 cursor-pointer">
+            </th>
             ${thCol("Ticker",    "ticker",          "text-left pr-2 whitespace-nowrap")}
             ${thCol("Company",   "name",            "text-left whitespace-nowrap")}
             ${thCol("Sector",    "sector",          "text-left whitespace-nowrap")}
@@ -362,6 +521,8 @@ function renderScreenerTable(results) {
             ${thCol("Rev Gr%",   "revenue_growth",  "text-right whitespace-nowrap")}
             ${thCol("EPS",       "eps_ttm",         "text-right whitespace-nowrap")}
             ${thCol("P/E",       "pe_ratio",        "text-right whitespace-nowrap")}
+            ${thCol("EV/Rev",    "ev_revenue",      "text-right whitespace-nowrap")}
+            ${thCol("EV/EBITDA", "ev_ebitda",       "text-right whitespace-nowrap")}
             ${thCol("Graham",    "graham",          "text-right whitespace-nowrap")}
             ${thCol("P/E Val",   "pe_val",          "text-right whitespace-nowrap")}
             ${thCol("Lynch 5yr", "lynch",           "text-right whitespace-nowrap")}
@@ -380,10 +541,28 @@ function renderScreenerTable(results) {
             const tip = `P/E:${bd.pe||0} P/B:${bd.pb||0} ROE:${bd.roe||0} D/E:${bd.de||0} FCF:${bd.fcf_yield||0}`;
             const moatColor = r.moat_rating==="Wide"?"text-emerald-400 bg-emerald-900":r.moat_rating==="Narrow"?"text-yellow-400 bg-yellow-900":"text-slate-400 bg-slate-800";
             const moatIcon  = r.moat_rating==="Wide"?"🏰":r.moat_rating==="Narrow"?"🧱":"—";
-            const vc = v => _valColor(v, r.price); // green if val > price
+            const vc = v => _valColor(v, r.price);
+            const isWatching = _watchlistTickers.has(r.ticker);
+            const isPrior    = _priorPickTickers.has(r.ticker);
+            const isQueued   = _queuedTickers.has(r.ticker);
+            const isSelected = _screenerSelected.has(r.ticker);
+            // Action cell: badges + buttons
+            const watchBtn = isWatching
+              ? `<span class="text-emerald-400 text-xs" title="Already in watchlist">👁 Watching</span>`
+              : `<button onclick="event.stopPropagation();addToWatchlistFromScreen('${r.ticker}',this)"
+                   class="text-blue-400 text-xs hover:underline">Watch</button>`;
+            const priorBadge  = isPrior  ? `<span class="text-amber-400 text-xs" title="In prior AI research">★ Prior</span>` : '';
+            const queueBadge  = isQueued ? `<span class="text-violet-400 text-xs" title="Queued for Monday AI run">⏱</span>` : '';
             return `
-              <tr class="table-row border-b border-slate-800 cursor-pointer" onclick="openResearch('${r.ticker}')">
-                <td class="py-2 pr-2 font-bold text-white whitespace-nowrap">${r.ticker}</td>
+              <tr class="table-row border-b border-slate-800 cursor-pointer ${isPrior?'bg-amber-950/20':''}"
+                  onclick="openResearch('${r.ticker}')">
+                <td class="py-2 pr-2" onclick="event.stopPropagation()">
+                  <input type="checkbox" ${isSelected?'checked':''} class="accent-emerald-500 cursor-pointer"
+                    onchange="toggleScreenerRow('${r.ticker}',this)">
+                </td>
+                <td class="py-2 pr-2 font-bold text-white whitespace-nowrap">
+                  ${r.ticker}${queueBadge ? ' '+queueBadge : ''}
+                </td>
                 <td class="py-2 text-slate-400 text-xs whitespace-nowrap" style="max-width:140px;overflow:hidden;text-overflow:ellipsis" title="${r.name}">${r.name}</td>
                 <td class="py-2 text-slate-400 text-xs whitespace-nowrap">${r.sector !== "N/A" ? r.sector : "—"}</td>
                 <td class="py-2 text-right text-white whitespace-nowrap">${fmt(r.price)}</td>
@@ -394,9 +573,11 @@ function renderScreenerTable(results) {
                 <td class="py-2 text-right whitespace-nowrap ${r.revenue_growth>=10?'text-emerald-400':r.revenue_growth>=0?'text-slate-300':'text-red-400'}">${r.revenue_growth!==null?r.revenue_growth+"%":"—"}</td>
                 <td class="py-2 text-right whitespace-nowrap text-slate-300">${r.eps_ttm!=null?"$"+r.eps_ttm:"—"}</td>
                 <td class="py-2 text-right whitespace-nowrap">${r.pe_ratio??"—"}</td>
+                <td class="py-2 text-right whitespace-nowrap text-slate-300" title="EV/Revenue">${r.ev_revenue?r.ev_revenue+'x':"—"}</td>
+                <td class="py-2 text-right whitespace-nowrap text-slate-300" title="EV/EBITDA">${r.ev_ebitda?r.ev_ebitda+'x':"—"}</td>
                 <td class="py-2 text-right whitespace-nowrap font-semibold ${vc(r.graham)}" title="Graham: √(22.5 × EPS × Book Value/Share)">${r.graham?fmt(r.graham):"—"}</td>
                 <td class="py-2 text-right whitespace-nowrap font-semibold ${vc(r.pe_val)}"   title="P/E Method: EPS × 15x">${r.pe_val?fmt(r.pe_val):"—"}</td>
-                <td class="py-2 text-right whitespace-nowrap font-semibold ${vc(r.lynch)}"    title="Peter Lynch 5-yr: EPS × (1+g)^5 × 15, discounted at 10%">${r.lynch?fmt(r.lynch):"—"}</td>
+                <td class="py-2 text-right whitespace-nowrap font-semibold ${vc(r.lynch)}"    title="Peter Lynch 5-yr">${r.lynch?fmt(r.lynch):"—"}</td>
                 <td class="py-2 text-right whitespace-nowrap">${r.pb_ratio??"—"}</td>
                 <td class="py-2 text-right whitespace-nowrap ${(r.roe||0)>=15?'text-emerald-400':(r.roe||0)>=10?'text-yellow-400':'text-slate-400'}">${r.roe?r.roe+"%":"—"}</td>
                 <td class="py-2 text-right whitespace-nowrap ${(r.debt_to_equity||99)<=0.5?'text-emerald-400':(r.debt_to_equity||99)<=1?'text-yellow-400':'text-slate-400'}">${r.debt_to_equity??"—"}</td>
@@ -410,12 +591,11 @@ function renderScreenerTable(results) {
                     <span class="text-emerald-400 font-bold text-xs w-6">${r.score||0}</span>
                   </div>
                 </td>
-                <td class="py-2 text-right">
-                  <div class="flex gap-1 justify-end">
-                    <button onclick="event.stopPropagation();addToWatchlistFromScreen('${r.ticker}','${r.name.replace(/'/g,"")}')"
-                      class="text-blue-400 text-xs hover:underline">Watch</button>
-                    <span class="text-slate-600">|</span>
-                    <button onclick="event.stopPropagation();startThesisFromScreener('${r.ticker}','${r.name.replace(/'/g,"")}',${r.price||0})"
+                <td class="py-2 text-right" onclick="event.stopPropagation()">
+                  <div class="flex flex-col items-end gap-0.5">
+                    ${priorBadge}
+                    ${watchBtn}
+                    <button onclick="startThesisFromScreener('${r.ticker}','${r.name.replace(/'/g,"")}',${r.price||0})"
                       class="text-emerald-400 text-xs hover:underline">Thesis</button>
                   </div>
                 </td>
@@ -447,11 +627,25 @@ function renderScreenerTable(results) {
     </div>`;
 }
 
-async function addToWatchlistFromScreen(ticker, name) {
+async function addToWatchlistFromScreen(ticker, btn) {
+  if (_watchlistTickers.has(ticker)) return;
+  const r    = _screenerData.find(x => x.ticker === ticker) || {};
+  const name  = r.name || ticker;
+  const notes = buildScreenerNotes(r);
+  const orig  = btn.textContent;
+  btn.textContent = '…'; btn.disabled = true;
   try {
-    await api("/api/watchlist", "POST", { ticker, name, market: "US" });
-    alert(`${ticker} added to watchlist!`);
-  } catch (e) { alert("Error: " + e.message); }
+    await api('/api/watchlist', 'POST', { ticker, name, market:'US', notes });
+    _watchlistTickers.add(ticker);
+    btn.textContent = '✓ Added';
+    btn.className   = 'text-emerald-400 text-xs cursor-default';
+    btn.disabled    = true;
+    // Refresh panel on dashboard quietly
+    loadWatchlistPanel().catch(()=>{});
+  } catch (e) {
+    btn.textContent = orig; btn.disabled = false;
+    btn.title = 'Error: ' + e.message;
+  }
 }
 
 function startThesisFromScreener(ticker, name, price) {

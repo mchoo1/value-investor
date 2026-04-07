@@ -124,7 +124,23 @@ def init_db():
                 entry_market_cap REAL,
                 target_price REAL,
                 bear_target REAL,
-                bull_target REAL
+                bull_target REAL,
+                conviction_tier TEXT,
+                verdict TEXT,
+                key_90d_metric TEXT,
+                strategy TEXT,
+                probability_weighted_ev REAL,
+                bear_probability REAL,
+                base_probability REAL,
+                bull_probability REAL,
+                position_size_pct REAL,
+                entry_price_low REAL,
+                entry_price_high REAL,
+                stop_loss REAL,
+                risk_reward_ratio REAL,
+                target_price_36m REAL,
+                macro_sensitivity TEXT,
+                report_date TEXT
             )
         """)
         c.execute("""
@@ -154,6 +170,14 @@ def init_db():
                 market TEXT,
                 filters TEXT,
                 results TEXT
+            )
+        """)
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS research_queue (
+                id SERIAL PRIMARY KEY,
+                ticker TEXT NOT NULL UNIQUE,
+                added_date TEXT,
+                notes TEXT
             )
         """)
     else:
@@ -236,7 +260,15 @@ def init_db():
                 results TEXT
             )
         """)
-        # Migrations: add new columns if missing
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS research_queue (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticker TEXT NOT NULL UNIQUE,
+                added_date TEXT,
+                notes TEXT
+            )
+        """)
+        # Migrations: add new columns if missing (thesis table)
         existing_cols = {row[1] for row in c.execute("PRAGMA table_info(thesis)")}
         for col, col_type in [
             ("entry_pe",             "REAL"),
@@ -247,6 +279,22 @@ def init_db():
             ("target_price",         "REAL"),
             ("bear_target",          "REAL"),
             ("bull_target",          "REAL"),
+            ("conviction_tier",      "TEXT"),
+            ("verdict",              "TEXT"),
+            ("key_90d_metric",       "TEXT"),
+            ("strategy",             "TEXT"),
+            ("probability_weighted_ev", "REAL"),
+            ("bear_probability",     "REAL"),
+            ("base_probability",     "REAL"),
+            ("bull_probability",     "REAL"),
+            ("position_size_pct",    "REAL"),
+            ("entry_price_low",      "REAL"),
+            ("entry_price_high",     "REAL"),
+            ("stop_loss",            "REAL"),
+            ("risk_reward_ratio",    "REAL"),
+            ("target_price_36m",     "REAL"),
+            ("macro_sensitivity",    "TEXT"),
+            ("report_date",          "TEXT"),
         ]:
             if col not in existing_cols:
                 c.execute(f"ALTER TABLE thesis ADD COLUMN {col} {col_type}")
@@ -393,6 +441,58 @@ def delete_thesis(thesis_id):
     conn = get_db()
     c = conn.cursor()
     c.execute(_sql("DELETE FROM thesis WHERE id=?"), (thesis_id,))
+    conn.commit()
+    conn.close()
+
+
+def get_thesis_tickers():
+    """Return all unique tickers that have ever had a thesis entry."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("SELECT DISTINCT ticker FROM thesis ORDER BY ticker")
+    rows = c.fetchall()
+    conn.close()
+    if not rows:
+        return []
+    if isinstance(rows[0], dict):
+        return [r["ticker"] for r in rows]
+    return [r[0] for r in rows]
+
+
+# ── Research Queue ───────────────────────────────────────────────
+def get_research_queue():
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("SELECT * FROM research_queue ORDER BY added_date DESC")
+    rows = _rows(c)
+    conn.close()
+    return rows
+
+
+def add_to_research_queue(ticker, notes=""):
+    conn = get_db()
+    c = conn.cursor()
+    now = datetime.now().strftime("%Y-%m-%d")
+    if _USE_PG:
+        c.execute(
+            """INSERT INTO research_queue (ticker, added_date, notes)
+               VALUES (%s,%s,%s)
+               ON CONFLICT (ticker) DO UPDATE SET added_date=EXCLUDED.added_date, notes=EXCLUDED.notes""",
+            (ticker.upper(), now, notes)
+        )
+    else:
+        c.execute(
+            "INSERT OR REPLACE INTO research_queue (ticker, added_date, notes) VALUES (?,?,?)",
+            (ticker.upper(), now, notes)
+        )
+    conn.commit()
+    conn.close()
+
+
+def remove_from_research_queue(ticker):
+    conn = get_db()
+    c = conn.cursor()
+    c.execute(_sql("DELETE FROM research_queue WHERE ticker=?"), (ticker.upper(),))
     conn.commit()
     conn.close()
 

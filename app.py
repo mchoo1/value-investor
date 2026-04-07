@@ -109,6 +109,8 @@ def screen():
     """
     Screen stocks based on value investing filters.
     Body: { market, filters, custom_tickers, sector }
+    New strategy-aligned filters supported inside filters{}:
+      min_market_cap ($B), min_fcf_yield (%), min_rev_growth (%), max_net_debt_ebitda (x)
     """
     body = request.json or {}
     market = body.get("market", "US")
@@ -145,6 +147,31 @@ def screen():
 def score_formula():
     """Return the score formula weights for UI display."""
     return jsonify(sd.SCORE_FORMULA)
+
+
+@app.route("/api/thesis/tickers", methods=["GET"])
+def thesis_tickers():
+    """Return all unique tickers that have ever had a thesis entry (prior picks)."""
+    return jsonify(db.get_thesis_tickers())
+
+
+# ── Research Queue ────────────────────────────────────────────────
+@app.route("/api/research-queue", methods=["GET"])
+def get_research_queue():
+    return jsonify(db.get_research_queue())
+
+
+@app.route("/api/research-queue", methods=["POST"])
+def add_research_queue():
+    b = request.json or {}
+    db.add_to_research_queue(b.get("ticker", ""), b.get("notes", ""))
+    return jsonify({"status": "ok"})
+
+
+@app.route("/api/research-queue/<ticker>", methods=["DELETE"])
+def remove_research_queue(ticker):
+    db.remove_from_research_queue(ticker)
+    return jsonify({"status": "ok"})
 
 
 # ══════════════════════════════════════════════════════════════════
