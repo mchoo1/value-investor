@@ -220,6 +220,13 @@ def get_targets(ticker):
     return jsonify(sd.get_price_targets(ticker.upper()))
 
 
+@app.route("/api/stock/<ticker>/metrics-history", methods=["GET"])
+def get_metrics_history(ticker):
+    """1Y and 5Y historical anchors: Rev Growth, Net Margin, FCF Margin, Op Margin, ROIC.
+    Also returns current price, EPS TTM/Forward, shares, revenue TTM, P/E, Forward P/E."""
+    return jsonify(sd.get_historical_metrics(ticker.upper()))
+
+
 # ══════════════════════════════════════════════════════════════════
 # VALUATION
 # ══════════════════════════════════════════════════════════════════

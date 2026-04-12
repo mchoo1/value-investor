@@ -338,6 +338,91 @@ def get_financial_history(ticker: str) -> dict:
         return {"error": str(e), "summary": []}
 
 
+def get_historical_metrics(ticker: str) -> dict:
+    """
+    Return 1Y (TTM) and 5Y average historical anchor values for:
+    Revenue Growth, Net Margin, FCF Margin, Operating Margin, ROIC.
+    Used to calibrate Low/Mid/High assumption inputs in the valuation model.
+    """
+    key = ticker + "_hist_metrics"
+    cached = _cache_get(key)
+    if cached:
+        return cached
+
+    try:
+        info = get_stock_info(ticker)
+        fin  = get_financial_history(ticker)
+        rows = fin.get("summary", [])
+
+        # 1Y = TTM from live info
+        rev_1y   = round((info.get("revenue_growth") or 0) * 100, 1)
+        margin_1y = round((info.get("net_margin") or 0) * 100, 1)
+        op_margin_1y = round((info.get("operating_margin") or 0) * 100, 1)
+
+        # FCF margin 1Y
+        fcf  = info.get("free_cashflow") or 0
+        rev  = info.get("total_revenue") or 1
+        fcf_margin_1y = round(fcf / rev * 100, 1) if rev else 0
+
+        # ROIC 1Y
+        op_income = (info.get("operating_margin") or 0) * rev
+        nopat_1y  = op_income * 0.79
+        bv   = info.get("book_value") or 0
+        sh   = info.get("shares_outstanding") or 1
+        debt = info.get("total_debt") or 0
+        cash = info.get("total_cash") or 0
+        ic   = bv * sh + debt - cash
+        roic_1y = round(nopat_1y / ic * 100, 1) if ic > 0 else 0
+
+        # 5Y averages from annual history (last 4-5 rows)
+        def avg(vals): return round(sum(vals) / len(vals), 1) if vals else None
+
+        rev_growths, margins, fcf_margins, op_margins, roics = [], [], [], [], []
+        sorted_rows = sorted(rows, key=lambda r: r.get("year", ""), reverse=True)[:5]
+
+        for i, r in enumerate(sorted_rows):
+            rev_r = r.get("revenue") or 0
+            if r.get("net_margin") is not None:
+                margins.append(r["net_margin"])
+            if rev_r and r.get("fcf"):
+                fcf_margins.append(round(r["fcf"] / rev_r * 100, 1))
+            if r.get("operating_margin") is not None:
+                op_margins.append(r["operating_margin"])
+            # Revenue growth: compare to next older year
+            if i + 1 < len(sorted_rows):
+                prev_rev = sorted_rows[i+1].get("revenue") or 0
+                if prev_rev and rev_r:
+                    rev_growths.append(round((rev_r / prev_rev - 1) * 100, 1))
+            # ROIC from historical data
+            oi  = (r.get("operating_income") or 0)
+            np5 = oi * 0.79
+            eq  = r.get("total_equity") or 0
+            dt  = r.get("total_debt") or 0
+            ic5 = eq + dt
+            if ic5 > 0 and np5 != 0:
+                roics.append(round(np5 / ic5 * 100, 1))
+
+        result = {
+            "rev_growth":    {"1y": rev_1y,      "5y": avg(rev_growths)},
+            "net_margin":    {"1y": margin_1y,   "5y": avg(margins)},
+            "fcf_margin":    {"1y": fcf_margin_1y, "5y": avg(fcf_margins)},
+            "op_margin":     {"1y": op_margin_1y,"5y": avg(op_margins)},
+            "roic":          {"1y": roic_1y,     "5y": avg(roics)},
+            # Convenience: current price data for exit model
+            "current_price": info.get("current_price") or 0,
+            "eps_ttm":       info.get("eps_ttm") or 0,
+            "eps_forward":   info.get("eps_forward") or 0,
+            "shares":        info.get("shares_outstanding") or 0,
+            "revenue_ttm":   rev,
+            "pe_ratio":      info.get("pe_ratio") or 0,
+            "forward_pe":    info.get("forward_pe") or 0,
+        }
+        _cache_set(key, result)
+        return result
+    except Exception as e:
+        return {"error": str(e)}
+
+
 def get_price_history(ticker: str, period: str = "5y") -> list:
     """Monthly price history for charts. Cached."""
     key = ticker + "_price_" + period
@@ -465,6 +550,24 @@ def _screen_one(ticker: str, filters: dict) -> dict | None:
         net_debt   = total_debt - total_cash
         net_debt_ebitda = round(net_debt / ebitda, 2) if ebitda > 0 and net_debt > 0 else 0
 
+        # ROIC = NOPAT / Invested Capital
+        # NOPAT = Operating Income × (1 - 21% tax)
+        # Invested Capital = Book Equity + Total Debt - Cash
+        op_margin  = info.get("operating_margin") or 0
+        revenue    = info.get("total_revenue") or 0
+        book_value = info.get("book_value") or 0
+        op_income  = op_margin * revenue
+        nopat      = op_income * (1 - 0.21)
+        total_equity = book_value * shares
+        invested_capital = total_equity + total_debt - total_cash
+        roic = round(nopat / invested_capital * 100, 1) if invested_capital > 0 and nopat != 0 else 0
+
+        # FCF margin %
+        fcf_margin = round(fcf / revenue * 100, 1) if revenue and fcf else 0
+        # Net margin %
+        net_income = info.get("net_income") or 0
+        net_margin_pct = round(net_income / revenue * 100, 1) if revenue else 0
+
         # Apply numeric filters
         if filters.get("max_pe")  and 0 < pe  > filters["max_pe"]:  return None
         if filters.get("max_pb")  and 0 < pb  > filters["max_pb"]:  return None
@@ -478,6 +581,7 @@ def _screen_one(ticker: str, filters: dict) -> dict | None:
         if filters.get("min_rev_growth") and rev_growth < filters["min_rev_growth"]: return None
         max_nde = filters.get("max_net_debt_ebitda")
         if max_nde and net_debt > 0 and ebitda > 0 and net_debt_ebitda > max_nde: return None
+        if filters.get("min_roic") and roic < filters["min_roic"]:                 return None
 
         # Insider buying filter — only include stocks with net buys in last 60 days
         insider_signal = None
@@ -513,6 +617,9 @@ def _screen_one(ticker: str, filters: dict) -> dict | None:
             "ev_revenue":      round(info.get("ev_revenue") or 0, 1) or None,
             "ev_ebitda":       round(info.get("ev_ebitda") or 0, 1) or None,
             "net_debt_ebitda": net_debt_ebitda or None,
+            "roic":            roic or None,
+            "fcf_margin":      fcf_margin or None,
+            "net_margin_pct":  net_margin_pct or None,
             "score":           breakdown["total"],
             "score_breakdown": breakdown,
             "insider_signal":  insider_signal,

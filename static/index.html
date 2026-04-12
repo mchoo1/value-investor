@@ -283,6 +283,10 @@
               <input id="fMinFcfYield" type="number" class="input-field" placeholder="e.g. 4">
             </div>
             <div>
+              <label class="text-slate-400 text-xs block mb-1">Min ROIC (%)</label>
+              <input id="fMinRoic" type="number" class="input-field" placeholder="e.g. 12">
+            </div>
+            <div>
               <label class="text-slate-400 text-xs block mb-1">Min Rev Growth (%)</label>
               <input id="fMinRevGrowth" type="number" class="input-field" placeholder="e.g. 20">
             </div>
@@ -412,10 +416,11 @@
     <div id="valTickerStatus" class="text-xs text-slate-500 self-center w-full mt-1"></div>
   </div>
 
-  <div class="flex gap-2 mb-6">
+  <div class="flex gap-2 mb-6 flex-wrap">
     <button onclick="switchValTab('dcf')" id="vt-dcf" class="tab-btn active">DCF Model</button>
     <button onclick="switchValTab('quick')" id="vt-quick" class="tab-btn">Quick Valuation</button>
     <button onclick="switchValTab('comparable')" id="vt-comparable" class="tab-btn">Comparable</button>
+    <button onclick="switchValTab('exit-multiple')" id="vt-exit-multiple" class="tab-btn">🎯 Exit Multiple</button>
     <button onclick="switchValTab('summary')" id="vt-summary" class="tab-btn">📊 Summary</button>
   </div>
 
@@ -532,6 +537,126 @@
     </div>
     <div id="quickResults">
       <div class="card text-center py-12 text-slate-500">Enter inputs and calculate</div>
+    </div>
+  </div>
+
+  <!-- Exit Multiple Tab -->
+  <div id="valTab-exit-multiple" class="hidden">
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <!-- Left: Historical Anchors -->
+      <div class="card">
+        <div class="flex items-center justify-between mb-3">
+          <div>
+            <h2 class="font-semibold text-white">Historical Anchors</h2>
+            <p class="text-slate-500 text-xs mt-0.5">1Y (TTM) and 5Y average actuals to calibrate your assumptions</p>
+          </div>
+          <button onclick="loadExitMultipleModel()" id="emLoadBtn" class="btn-secondary text-xs px-3">↺ Refresh</button>
+        </div>
+        <div id="emAnchors" class="space-y-2 text-sm text-slate-400 italic">Load a ticker above to see historical data.</div>
+        <div id="emCurrentMetrics" class="mt-4 hidden">
+          <div class="border-t border-slate-700 pt-3 mt-3 grid grid-cols-3 gap-2 text-xs text-center">
+            <div class="bg-slate-800 rounded p-2">
+              <div class="text-slate-400 mb-1">Current Price</div>
+              <div id="emCurPrice" class="font-bold text-white text-base">—</div>
+            </div>
+            <div class="bg-slate-800 rounded p-2">
+              <div class="text-slate-400 mb-1">EPS (TTM)</div>
+              <div id="emEpsTtm" class="font-bold text-white text-base">—</div>
+            </div>
+            <div class="bg-slate-800 rounded p-2">
+              <div class="text-slate-400 mb-1">EPS (Fwd)</div>
+              <div id="emEpsFwd" class="font-bold text-white text-base">—</div>
+            </div>
+            <div class="bg-slate-800 rounded p-2">
+              <div class="text-slate-400 mb-1">P/E (TTM)</div>
+              <div id="emPe" class="font-bold text-emerald-400 text-base">—</div>
+            </div>
+            <div class="bg-slate-800 rounded p-2">
+              <div class="text-slate-400 mb-1">Fwd P/E</div>
+              <div id="emFwdPe" class="font-bold text-emerald-400 text-base">—</div>
+            </div>
+            <div class="bg-slate-800 rounded p-2">
+              <div class="text-slate-400 mb-1">Revenue TTM</div>
+              <div id="emRevTtm" class="font-bold text-white text-base">—</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: Exit Multiple Inputs -->
+      <div class="card">
+        <h2 class="font-semibold text-white mb-1">Exit Multiple Model</h2>
+        <p class="text-slate-500 text-xs mb-4">3-scenario valuation using P/E and P/FCF exit multiples. Inputs pre-filled from historical anchors.</p>
+        <div class="space-y-3 text-sm">
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="text-slate-400 text-xs block mb-1">Holding Period (years)</label>
+              <input id="emYears" type="number" class="input-field" value="3" min="1" max="10">
+            </div>
+            <div>
+              <label class="text-slate-400 text-xs block mb-1">EPS Growth Rate (%/yr)</label>
+              <input id="emEpsGrowth" type="number" class="input-field" placeholder="e.g. 15">
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="text-slate-400 text-xs block mb-1">FCF / Share (TTM)</label>
+              <input id="emFcfPerShare" type="number" step="0.01" class="input-field" placeholder="auto-fill">
+            </div>
+            <div>
+              <label class="text-slate-400 text-xs block mb-1">FCF Growth Rate (%/yr)</label>
+              <input id="emFcfGrowth" type="number" class="input-field" placeholder="e.g. 12">
+            </div>
+          </div>
+          <div class="border-t border-slate-700 pt-3">
+            <p class="text-slate-400 text-xs mb-2 font-medium">P/E Exit Multiples</p>
+            <div class="grid grid-cols-3 gap-2">
+              <div><label class="text-slate-500 text-xs block mb-1">Bear</label><input id="emPeBear" type="number" class="input-field text-red-400" placeholder="e.g. 15"></div>
+              <div><label class="text-slate-500 text-xs block mb-1">Base</label><input id="emPeBase" type="number" class="input-field text-emerald-400" placeholder="e.g. 20"></div>
+              <div><label class="text-slate-500 text-xs block mb-1">Bull</label><input id="emPeBull" type="number" class="input-field text-blue-400" placeholder="e.g. 28"></div>
+            </div>
+          </div>
+          <div class="border-t border-slate-700 pt-3">
+            <p class="text-slate-400 text-xs mb-2 font-medium">P/FCF Exit Multiples</p>
+            <div class="grid grid-cols-3 gap-2">
+              <div><label class="text-slate-500 text-xs block mb-1">Bear</label><input id="emFcfBear" type="number" class="input-field text-red-400" placeholder="e.g. 18"></div>
+              <div><label class="text-slate-500 text-xs block mb-1">Base</label><input id="emFcfBase" type="number" class="input-field text-emerald-400" placeholder="e.g. 25"></div>
+              <div><label class="text-slate-500 text-xs block mb-1">Bull</label><input id="emFcfBull" type="number" class="input-field text-blue-400" placeholder="e.g. 35"></div>
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="text-slate-400 text-xs block mb-1">Required Annual Return (%)</label>
+              <input id="emRequiredReturn" type="number" class="input-field" value="10">
+            </div>
+            <div class="flex items-end pb-0.5">
+              <button onclick="calcExitMultiple()" class="btn-primary w-full text-sm">Calculate →</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Exit Multiple Results -->
+    <div id="emResults" class="mt-6 hidden">
+      <div class="card">
+        <h2 class="font-semibold text-white mb-4">Results — Implied Price &amp; Annual Return</h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <!-- P/E Results -->
+          <div>
+            <p class="text-slate-400 text-xs font-medium mb-3 uppercase tracking-wide">P/E Based Valuation</p>
+            <div class="space-y-2" id="emPeResults"></div>
+          </div>
+          <!-- P/FCF Results -->
+          <div>
+            <p class="text-slate-400 text-xs font-medium mb-3 uppercase tracking-wide">P/FCF Based Valuation</p>
+            <div class="space-y-2" id="emFcfResults"></div>
+          </div>
+        </div>
+        <div class="mt-4 pt-3 border-t border-slate-700">
+          <p class="text-slate-500 text-xs" id="emResultNote"></p>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -824,6 +949,6 @@
   </div>
 </div>
 
-<script src="/static/app.js?v=15"></script>
+<script src="/static/app.js?v=16"></script>
 </body>
 </html>

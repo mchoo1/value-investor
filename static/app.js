@@ -240,20 +240,22 @@ let _screenerSelected = new Set();  // checkboxes for bulk-add
 // ── Strategy presets ─────────────────────────────────────────────
 function applyScreenerPreset(preset) {
   const ids = ['fMaxPe','fMaxPb','fMinRoe','fMaxDe',
-               'fMinMarketCap','fMinFcfYield','fMinRevGrowth','fMaxNetDebtEbitda'];
+               'fMinMarketCap','fMinFcfYield','fMinRevGrowth','fMaxNetDebtEbitda','fMinRoic'];
   ids.forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
   document.getElementById('fFcfPositive').checked  = false;
   document.getElementById('fInsiderBuying').checked = false;
   if (preset === '5x') {
-    // 5X Compounders: growth-first, no P/E screen, min 20% revenue growth
+    // 5X Compounders: growth-first, no P/E screen, min 20% revenue growth, high ROIC
     document.getElementById('fMinRevGrowth').value = '20';
     document.getElementById('fMinRoe').value       = '12';
+    document.getElementById('fMinRoic').value      = '15';
   } else if (preset === 'value') {
-    // Value Dislocations: large cap, FCF-positive, clean balance sheet
+    // Value Dislocations: large cap, FCF-positive, clean balance sheet, positive ROIC
     document.getElementById('fMinMarketCap').value     = '20';
     document.getElementById('fMinFcfYield').value      = '4';
     document.getElementById('fMaxNetDebtEbitda').value = '3';
     document.getElementById('fMaxPe').value            = '20';
+    document.getElementById('fMinRoic').value          = '10';
     document.getElementById('fFcfPositive').checked    = true;
   }
   // Highlight the active preset button
@@ -398,6 +400,7 @@ async function runScreener() {
     max_de:              parseFloat(document.getElementById("fMaxDe").value)          || null,
     min_market_cap:      parseFloat(document.getElementById("fMinMarketCap")?.value)  || null,
     min_fcf_yield:       parseFloat(document.getElementById("fMinFcfYield")?.value)   || null,
+    min_roic:            parseFloat(document.getElementById("fMinRoic")?.value)       || null,
     min_rev_growth:      parseFloat(document.getElementById("fMinRevGrowth")?.value)  || null,
     max_net_debt_ebitda: parseFloat(document.getElementById("fMaxNetDebtEbitda")?.value) || null,
     require_positive_fcf: document.getElementById("fFcfPositive").checked,
@@ -530,6 +533,7 @@ function renderScreenerTable(results) {
             ${thCol("ROE%",      "roe",             "text-right whitespace-nowrap")}
             ${thCol("D/E",       "debt_to_equity",  "text-right whitespace-nowrap")}
             ${thCol("FCF Yld",   "fcf_yield",       "text-right whitespace-nowrap")}
+            ${thCol("ROIC%",     "roic",            "text-right whitespace-nowrap")}
             ${thCol("Moat",      "moat_score",      "text-right whitespace-nowrap")}
             ${thCol("Score",     "score",           "text-right whitespace-nowrap")}
             <th class="pb-3 text-right whitespace-nowrap">Action</th>
@@ -582,6 +586,7 @@ function renderScreenerTable(results) {
                 <td class="py-2 text-right whitespace-nowrap ${(r.roe||0)>=15?'text-emerald-400':(r.roe||0)>=10?'text-yellow-400':'text-slate-400'}">${r.roe?r.roe+"%":"—"}</td>
                 <td class="py-2 text-right whitespace-nowrap ${(r.debt_to_equity||99)<=0.5?'text-emerald-400':(r.debt_to_equity||99)<=1?'text-yellow-400':'text-slate-400'}">${r.debt_to_equity??"—"}</td>
                 <td class="py-2 text-right whitespace-nowrap ${(r.fcf_yield||0)>=5?'text-emerald-400':'text-slate-300'}">${r.fcf_yield?r.fcf_yield+"%":"—"}</td>
+                <td class="py-2 text-right whitespace-nowrap ${(r.roic||0)>=15?'text-emerald-400':(r.roic||0)>=10?'text-yellow-400':'text-slate-400'}" title="Return on Invested Capital">${r.roic!=null?r.roic+"%":"—"}</td>
                 <td class="py-2 text-right whitespace-nowrap">
                   <span class="text-xs px-1.5 py-0.5 rounded font-medium ${moatColor}" title="Moat score: ${r.moat_score||0}/100">${moatIcon} ${r.moat_rating||"—"}</span>
                 </td>
@@ -1225,11 +1230,12 @@ async function loadCompetitorsPanel(ticker) {
 window._valSummary = { dcf: null, quick: null, comparable: null };
 
 function switchValTab(tab) {
-  ["dcf","quick","comparable","summary"].forEach(t => {
+  ["dcf","quick","comparable","exit-multiple","summary"].forEach(t => {
     document.getElementById("valTab-"+t).classList.toggle("hidden", t !== tab);
     document.getElementById("vt-"+t).classList.toggle("active", t === tab);
   });
   if (tab === "summary") renderValSummary();
+  if (tab === "exit-multiple") loadExitMultipleModel();
 }
 
 function updateValSummary(method, data) {
@@ -2210,6 +2216,157 @@ async function deletePosition(id) {
   if (!confirm("Remove this position?")) return;
   await api("/api/portfolio/" + id, "DELETE");
   loadPortfolio();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// EXIT MULTIPLE VALUATION MODEL
+// ═══════════════════════════════════════════════════════════════
+let _emMetrics = null; // cached metrics-history payload
+
+async function loadExitMultipleModel() {
+  const ticker = (document.getElementById("valTicker")?.value || "").trim().toUpperCase();
+  if (!ticker) return;
+
+  const btn = document.getElementById("emLoadBtn");
+  if (btn) btn.textContent = "Loading…";
+
+  try {
+    _emMetrics = await api(`/api/stock/${ticker}/metrics-history`);
+    const m = _emMetrics;
+
+    // Render historical anchors table
+    const fmtPct = (v, suffix="%") => v != null ? `${v.toFixed(1)}${suffix}` : "—";
+    const row = (label, k) => {
+      const v1 = m[k]?.["1y"], v5 = m[k]?.["5y"];
+      return `<div class="grid grid-cols-3 items-center py-1.5 border-b border-slate-800">
+        <span class="text-slate-400">${label}</span>
+        <span class="text-center font-medium ${colorPct(v1)}">${fmtPct(v1)}</span>
+        <span class="text-center font-medium ${colorPct(v5)}">${fmtPct(v5)}</span>
+      </div>`;
+    };
+    const colorPct = v => v==null?"text-slate-500":v>=15?"text-emerald-400":v>=5?"text-yellow-400":"text-red-400";
+
+    document.getElementById("emAnchors").innerHTML = `
+      <div class="grid grid-cols-3 items-center pb-1.5 border-b border-slate-700 text-xs font-semibold text-slate-400">
+        <span>Metric</span><span class="text-center">1Y (TTM)</span><span class="text-center">5Y Avg</span>
+      </div>
+      ${row("Revenue Growth", "rev_growth")}
+      ${row("Net Margin", "net_margin")}
+      ${row("FCF Margin", "fcf_margin")}
+      ${row("Op Margin", "op_margin")}
+      ${row("ROIC", "roic")}
+    `;
+
+    // Current metrics strip
+    const revTtm = m.revenue_ttm ? (m.revenue_ttm >= 1e9 ? `$${(m.revenue_ttm/1e9).toFixed(1)}B` : `$${(m.revenue_ttm/1e6).toFixed(0)}M`) : "—";
+    document.getElementById("emCurPrice").textContent = m.current_price ? `$${m.current_price.toFixed(2)}` : "—";
+    document.getElementById("emEpsTtm").textContent   = m.eps_ttm ? `$${m.eps_ttm.toFixed(2)}` : "—";
+    document.getElementById("emEpsFwd").textContent   = m.eps_forward ? `$${m.eps_forward.toFixed(2)}` : "—";
+    document.getElementById("emPe").textContent       = m.pe_ratio ? `${m.pe_ratio.toFixed(1)}x` : "—";
+    document.getElementById("emFwdPe").textContent    = m.forward_pe ? `${m.forward_pe.toFixed(1)}x` : "—";
+    document.getElementById("emRevTtm").textContent   = revTtm;
+    document.getElementById("emCurrentMetrics").classList.remove("hidden");
+
+    // Auto-suggest exit multiples from historical P/E
+    const pe = m.pe_ratio;
+    if (pe && !document.getElementById("emPeBase").value) {
+      document.getElementById("emPeBase").value = pe.toFixed(0);
+      document.getElementById("emPeBear").value = Math.max(8, (pe * 0.7).toFixed(0));
+      document.getElementById("emPeBull").value = (pe * 1.3).toFixed(0);
+    }
+    // Suggest FCF multiples (typically premium to P/E for asset-light cos)
+    if (!document.getElementById("emFcfBase").value) {
+      const base = pe ? Math.round(pe * 1.1) : 25;
+      document.getElementById("emFcfBase").value = base;
+      document.getElementById("emFcfBear").value = Math.max(10, Math.round(base * 0.7));
+      document.getElementById("emFcfBull").value = Math.round(base * 1.35);
+    }
+    // Auto-fill EPS growth from 5Y rev growth as a proxy if blank
+    if (!document.getElementById("emEpsGrowth").value && m.rev_growth?.["5y"] != null) {
+      document.getElementById("emEpsGrowth").value = Math.max(0, m.rev_growth["5y"]).toFixed(0);
+    }
+    if (!document.getElementById("emFcfGrowth").value && m.fcf_margin?.["5y"] != null) {
+      document.getElementById("emFcfGrowth").value = Math.max(0, (m.rev_growth?.["5y"] || 10) * 0.85).toFixed(0);
+    }
+    // FCF per share: derive from FCF margin and revenue
+    if (!document.getElementById("emFcfPerShare").value && m.fcf_margin?.["1y"] != null && m.revenue_ttm && m.shares) {
+      const fcfPerShare = (m.fcf_margin["1y"] / 100) * m.revenue_ttm / m.shares;
+      if (fcfPerShare > 0) document.getElementById("emFcfPerShare").value = fcfPerShare.toFixed(2);
+    }
+  } catch(e) {
+    document.getElementById("emAnchors").innerHTML = `<div class="text-red-400 text-xs">Failed to load data for ${ticker}</div>`;
+  } finally {
+    if (btn) btn.textContent = "↺ Refresh";
+  }
+}
+
+function calcExitMultiple() {
+  const ticker  = (document.getElementById("valTicker")?.value || "").trim().toUpperCase();
+  const price   = _emMetrics?.current_price || 0;
+  const years   = parseInt(document.getElementById("emYears").value) || 3;
+  const epsNow  = _emMetrics?.eps_ttm || 0;
+  const epsGrowth = parseFloat(document.getElementById("emEpsGrowth").value) / 100 || 0;
+  const fcfNow  = parseFloat(document.getElementById("emFcfPerShare").value) || 0;
+  const fcfGrowth = parseFloat(document.getElementById("emFcfGrowth").value) / 100 || 0;
+  const reqRet  = parseFloat(document.getElementById("emRequiredReturn").value) / 100 || 0.10;
+
+  const peBear = parseFloat(document.getElementById("emPeBear").value) || 0;
+  const peBase = parseFloat(document.getElementById("emPeBase").value) || 0;
+  const peBull = parseFloat(document.getElementById("emPeBull").value) || 0;
+  const fcfBear = parseFloat(document.getElementById("emFcfBear").value) || 0;
+  const fcfBase = parseFloat(document.getElementById("emFcfBase").value) || 0;
+  const fcfBull = parseFloat(document.getElementById("emFcfBull").value) || 0;
+
+  if (!epsNow && !fcfNow) { alert("No EPS or FCF/share available — please load a ticker first."); return; }
+
+  // Future EPS and FCF per share
+  const epsF = v => epsNow * Math.pow(1 + epsGrowth, years);
+  const fcfF = v => fcfNow * Math.pow(1 + fcfGrowth, years);
+
+  // Implied price = future metric × exit multiple
+  // Annual return = (impliedPrice / currentPrice)^(1/years) - 1
+  const annReturn = (impliedPrice) => price > 0 ? ((Math.pow(impliedPrice / price, 1/years) - 1) * 100).toFixed(1) : null;
+  const reqBadge  = (ret) => {
+    const r = parseFloat(ret);
+    return r >= reqRet*100*1.2 ? "text-emerald-400 font-bold" : r >= reqRet*100 ? "text-yellow-400" : "text-red-400";
+  };
+
+  const scenarioCard = (label, impliedPrice, colorClass) => {
+    if (!impliedPrice) return "";
+    const ret = annReturn(impliedPrice);
+    const retClass = ret != null ? reqBadge(ret) : "text-slate-400";
+    const mos = price > 0 ? (((impliedPrice - price) / price) * 100).toFixed(1) : null;
+    return `<div class="flex items-center justify-between bg-slate-800 rounded px-3 py-2">
+      <span class="${colorClass} text-sm font-semibold w-14">${label}</span>
+      <span class="text-white font-bold text-base">$${impliedPrice.toFixed(2)}</span>
+      <span class="${retClass} text-sm">${ret != null ? (ret>0?"+":"")+ret+"% /yr" : "—"}</span>
+      <span class="text-slate-400 text-xs">${mos != null ? (mos>0?"+":"")+mos+"% MoS" : ""}</span>
+    </div>`;
+  };
+
+  const epsFuture = epsF();
+  const fcfFuture = fcfF();
+
+  const peHtml = [
+    scenarioCard("Bear 🐻", peBear ? epsFuture * peBear : null, "text-red-400"),
+    scenarioCard("Base ⚖️", peBase ? epsFuture * peBase : null, "text-slate-200"),
+    scenarioCard("Bull 🐂", peBull ? epsFuture * peBull : null, "text-emerald-400"),
+  ].join("");
+
+  const fcfHtml = [
+    scenarioCard("Bear 🐻", fcfBear ? fcfFuture * fcfBear : null, "text-red-400"),
+    scenarioCard("Base ⚖️", fcfBase ? fcfFuture * fcfBase : null, "text-slate-200"),
+    scenarioCard("Bull 🐂", fcfBull ? fcfFuture * fcfBull : null, "text-emerald-400"),
+  ].join("");
+
+  document.getElementById("emPeResults").innerHTML  = peHtml  || `<div class="text-slate-500 text-sm">Enter P/E exit multiples above.</div>`;
+  document.getElementById("emFcfResults").innerHTML = fcfHtml || `<div class="text-slate-500 text-sm">Enter P/FCF exit multiples and FCF/share above.</div>`;
+
+  document.getElementById("emResultNote").innerHTML = price
+    ? `${ticker || "Stock"} @ $${price.toFixed(2)} today &nbsp;·&nbsp; ${years}-yr holding &nbsp;·&nbsp; EPS ${epsNow.toFixed(2)} × ${(epsGrowth*100).toFixed(0)}%/yr → $${epsFuture.toFixed(2)} &nbsp;·&nbsp; Required return: ${(reqRet*100).toFixed(0)}%/yr`
+    : "";
+
+  document.getElementById("emResults").classList.remove("hidden");
 }
 
 // ─── Init ────────────────────────────────────────────────────────
