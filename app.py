@@ -488,6 +488,102 @@ def market_overview():
     return jsonify(result)
 
 
+@app.route("/api/market/buffett-indicator", methods=["GET"])
+def buffett_indicator():
+    """Buffett Indicator: US market cap / GDP, sourced from FRED public CSV endpoints.
+    Cached for 6 hours — GDP is quarterly, market cap updates daily."""
+    import time as _time
+    from urllib.request import urlopen
+
+    CACHE_KEY = "__buffett_indicator__"
+    CACHE_TTL  = 6 * 3600  # 6 hours
+
+    with sd._cache_lock:
+        entry = sd._cache.get(CACHE_KEY)
+    if entry and (_time.time() - entry["ts"]) < CACHE_TTL:
+        return jsonify(entry["data"])
+
+    try:
+        def fetch_fred_csv(series_id):
+            url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"
+            with urlopen(url, timeout=12) as resp:
+                text = resp.read().decode("utf-8")
+            rows = []
+            for line in text.strip().splitlines()[1:]:
+                parts = line.strip().split(",")
+                if len(parts) == 2 and parts[1] != ".":
+                    rows.append({"date": parts[0], "value": float(parts[1])})
+            return rows
+
+        mc_data  = fetch_fred_csv("WILL5000INDFC")  # billions USD, daily
+        gdp_data = fetch_fred_csv("GDP")             # billions USD, quarterly, annualised
+
+        if not mc_data or not gdp_data:
+            return jsonify({"error": "FRED returned no data"}), 502
+
+        latest_mc  = mc_data[-1]
+        latest_gdp = gdp_data[-1]
+        ratio      = round(latest_mc["value"] / latest_gdp["value"] * 100, 1)
+
+        # 1-year-ago ratio
+        from datetime import datetime as _dt, timedelta as _td
+        one_yr_ago = (_dt.now() - _td(days=365)).strftime("%Y-%m-%d")
+        mc_1y  = next((d for d in reversed(mc_data)  if d["date"] <= one_yr_ago), mc_data[0])
+        gdp_1y = next((d for d in reversed(gdp_data) if d["date"] <= one_yr_ago), gdp_data[0])
+        ratio_1y = round(mc_1y["value"] / gdp_1y["value"] * 100, 1)
+
+        # Historical series (quarterly, last 32 quarters ≈ 8 years) for sparkline
+        history = []
+        for gdp_pt in gdp_data[-32:]:
+            mc_pt = next((d for d in reversed(mc_data) if d["date"] <= gdp_pt["date"]), None)
+            if mc_pt:
+                history.append({"date": gdp_pt["date"],
+                                 "ratio": round(mc_pt["value"] / gdp_pt["value"] * 100, 1)})
+
+        # Zone classification
+        if ratio < 75:
+            zone, zone_color = "Undervalued",              "emerald"
+        elif ratio < 100:
+            zone, zone_color = "Fair Value",               "yellow"
+        elif ratio < 130:
+            zone, zone_color = "Overvalued",               "orange"
+        elif ratio < 175:
+            zone, zone_color = "Significantly Overvalued", "red"
+        else:
+            zone, zone_color = "Strongly Overvalued",      "red"
+
+        # Interpretation blurb
+        blurbs = {
+            "Undervalued":              "Market appears cheap relative to the economy — historically a good entry window for long-term investors.",
+            "Fair Value":               "Market is broadly in line with economic output. Stock-picking matters more than macro timing here.",
+            "Overvalued":               "Market is running ahead of GDP. Expect lower future returns; a margin-of-safety approach is prudent.",
+            "Significantly Overvalued": "Valuations are stretched. Buffett has historically held cash or been cautious at these levels.",
+            "Strongly Overvalued":      "Extreme overvaluation — above the dot-com bubble peak. Risk management is paramount.",
+        }
+
+        data = {
+            "ratio":          ratio,
+            "ratio_1y":       ratio_1y,
+            "change_1y":      round(ratio - ratio_1y, 1),
+            "zone":           zone,
+            "zone_color":     zone_color,
+            "market_cap_b":   round(latest_mc["value"],  0),
+            "gdp_b":          round(latest_gdp["value"], 0),
+            "market_cap_date": latest_mc["date"],
+            "gdp_date":        latest_gdp["date"],
+            "history":        history,
+            "blurb":          blurbs[zone],
+        }
+
+        with sd._cache_lock:
+            sd._cache[CACHE_KEY] = {"ts": _time.time(), "data": data}
+
+        return jsonify(data)
+
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
 @app.route("/api/cache/clear", methods=["POST"])
 def clear_cache():
     """Clear the in-memory data cache (forces fresh fetch next request)."""

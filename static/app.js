@@ -94,9 +94,10 @@ function loadDashboard() {
   loadWatchlistPanel();
   loadPortfolioPanel();
   loadThesisPanel();
-  // Delay market data by 1s so the fast panels render first,
-  // and yfinance network call doesn't race against SQLite queries
+  // Delay market data by 1s so the fast panels render first
   setTimeout(loadMarketOverview, 1000);
+  // Buffett Indicator — cached 6h server-side, loads fast after first call
+  setTimeout(loadBuffettIndicator, 1500);
 }
 
 async function loadWatchlistPanel() {
@@ -202,6 +203,108 @@ async function loadMarketOverview() {
         ${chg !== undefined ? `<div class="${color} text-xs">${chg >= 0 ? "+" : ""}${chg.toFixed(1)}%</div>` : ""}`;
     });
   } catch (e) { /* market data is optional — fail silently */ }
+}
+
+// ── Buffett Indicator ────────────────────────────────────────────
+async function loadBuffettIndicator() {
+  const card = document.getElementById("buffettCard");
+  if (!card) return;
+  try {
+    const d = await api("/api/market/buffett-indicator");
+    if (d.error) return; // fail silently if FRED unreachable
+
+    // Zone colour map
+    const ZONE_COLORS = {
+      "emerald": "#10b981", "yellow": "#facc15",
+      "orange":  "#f97316", "red":    "#ef4444",
+    };
+    const color = ZONE_COLORS[d.zone_color] || "#94a3b8";
+
+    // Badge
+    const badge = document.getElementById("buffettZoneBadge");
+    badge.textContent = d.zone;
+    badge.className = `text-xs px-2 py-1 rounded font-semibold`;
+    badge.style.background = color + "25";
+    badge.style.color = color;
+
+    // Stats
+    document.getElementById("buffettRatio").textContent   = d.ratio + "%";
+    document.getElementById("buffettRatio1y").textContent = d.ratio_1y + "%";
+    const chgEl = document.getElementById("buffettChange");
+    chgEl.textContent = (d.change_1y >= 0 ? "+" : "") + d.change_1y + " pp";
+    chgEl.style.color  = d.change_1y >= 0 ? "#ef4444" : "#10b981"; // rising = worse
+    document.getElementById("buffettMktCap").textContent = "$" + (d.market_cap_b / 1000).toFixed(1) + "T";
+    document.getElementById("buffettGdp").textContent    = "$" + (d.gdp_b / 1000).toFixed(1) + "T";
+    document.getElementById("buffettBlurb").textContent  = d.blurb;
+
+    // ── Gauge ──────────────────────────────────────────────────────
+    // Half-circle: left (180°) = 0%, right (0°) = 200%+
+    const MAX_RATIO  = 210;
+    const CX = 110, CY = 110, R = 88;
+    const toRad  = deg => deg * Math.PI / 180;
+    const ratioToAngle = ratio => 180 - Math.min(ratio / MAX_RATIO, 1) * 180; // 180°→0°
+    const arcPoint = angleDeg => {
+      const a = toRad(angleDeg);
+      return [CX + R * Math.cos(a), CY - R * Math.sin(a)];
+    };
+
+    // Arc segments: [startRatio, endRatio, color]
+    const segments = [
+      [0,   75,  "#10b981"], // Undervalued — green
+      [75,  100, "#facc15"], // Fair Value — yellow
+      [100, 130, "#f97316"], // Overvalued — orange
+      [130, MAX_RATIO, "#ef4444"], // Significantly OV — red
+    ];
+
+    function describeArc(r1, r2, outerR, innerR=72) {
+      const a1 = ratioToAngle(r1), a2 = ratioToAngle(r2);
+      const [ox1, oy1] = arcPoint(a1);
+      const [ox2, oy2] = arcPoint(a2);
+      // inner arc
+      const ia = a => [CX + innerR * Math.cos(toRad(a)), CY - innerR * Math.sin(toRad(a))];
+      const [ix1, iy1] = ia(a1);
+      const [ix2, iy2] = ia(a2);
+      return `M ${ox1.toFixed(2)} ${oy1.toFixed(2)}
+              A ${outerR} ${outerR} 0 0 0 ${ox2.toFixed(2)} ${oy2.toFixed(2)}
+              L ${ix2.toFixed(2)} ${iy2.toFixed(2)}
+              A ${innerR} ${innerR} 0 0 1 ${ix1.toFixed(2)} ${iy1.toFixed(2)} Z`;
+    }
+
+    const arcGroup = document.getElementById("buffettArcGroup");
+    arcGroup.innerHTML = segments.map(([r1, r2, c]) =>
+      `<path d="${describeArc(r1, r2, R)}" fill="${c}" opacity="0.85"/>`
+    ).join("") +
+    // tick marks at zone boundaries
+    [75, 100, 130].map(r => {
+      const ang = ratioToAngle(r);
+      const [ox, oy] = arcPoint(ang);
+      const ia = a => [CX + 68 * Math.cos(toRad(a)), CY - 68 * Math.sin(toRad(a))];
+      const [ix, iy] = ia(ang);
+      return `<line x1="${ox.toFixed(1)}" y1="${oy.toFixed(1)}" x2="${ix.toFixed(1)}" y2="${iy.toFixed(1)}" stroke="#1e293b" stroke-width="2"/>
+              <text x="${(CX + 58*Math.cos(toRad(ang))).toFixed(1)}" y="${(CY - 58*Math.sin(toRad(ang)) + 4).toFixed(1)}"
+                    text-anchor="middle" font-size="7" fill="#94a3b8">${r}%</text>`;
+    }).join("");
+
+    // Needle
+    const needleAngle = ratioToAngle(d.ratio);
+    const NEEDLE_LEN = 72;
+    const nx = CX + NEEDLE_LEN * Math.cos(toRad(needleAngle));
+    const ny = CY - NEEDLE_LEN * Math.sin(toRad(needleAngle));
+    const needle = document.getElementById("buffettNeedle");
+    needle.setAttribute("x2", nx.toFixed(1));
+    needle.setAttribute("y2", ny.toFixed(1));
+    needle.style.stroke = color;
+    needle.setAttribute("opacity", "1");
+    document.getElementById("buffettNeedleHub").setAttribute("opacity", "1");
+    document.getElementById("buffettNeedleHub").style.fill = color;
+
+    // Centre ratio text
+    const ratioText = document.getElementById("buffettRatioText");
+    ratioText.textContent = d.ratio + "%";
+    ratioText.style.fill  = color;
+    ratioText.setAttribute("opacity", "1");
+
+  } catch (e) { /* fail silently — Buffett indicator is optional dashboard widget */ }
 }
 
 async function removeFromWatchlist(ticker, btn) {
