@@ -329,21 +329,62 @@ def portfolio_snapshot():
 @app.route("/api/portfolio", methods=["GET"])
 def get_portfolio():
     positions = db.get_portfolio()
-    # Enrich with current prices
+    # Index theses by ticker for O(1) join
+    thesis_map = {t["ticker"]: t for t in db.get_thesis()}
+
     enriched = []
     for pos in positions:
+        price, entry, shares = 0, pos.get("entry_price", 0) or 0, pos.get("shares", 0) or 0
+
         if pos.get("status") == "open":
             info = sd.get_stock_info(pos["ticker"])
             if "error" not in info:
-                price = info.get("current_price", 0)
-                entry = pos.get("entry_price", 0)
-                shares = pos.get("shares", 0)
-                pos["current_price"] = price
-                pos["current_value"] = round(price * shares, 2)
-                pos["cost_basis"] = round(entry * shares, 2)
-                pos["gain_loss"] = round((price - entry) * shares, 2)
-                pos["gain_loss_pct"] = round((price - entry) / entry * 100, 1) if entry else 0
-                pos["vs_target"] = round((pos.get("target_price", 0) - price) / price * 100, 1) if pos.get("target_price") else 0
+                price = info.get("current_price", 0) or 0
+                pos["current_price"]   = price
+                pos["current_value"]   = round(price * shares, 2)
+                pos["cost_basis"]      = round(entry * shares, 2)
+                pos["gain_loss"]       = round((price - entry) * shares, 2)
+                pos["gain_loss_pct"]   = round((price - entry) / entry * 100, 1) if entry else 0
+
+        # ── Attach linked thesis ───────────────────────────────────
+        thesis = thesis_map.get(pos["ticker"])
+        if thesis:
+            # Prefer 36m target, then thesis.target_price, then intrinsic_value
+            t_price = (thesis.get("target_price_36m") or thesis.get("target_price")
+                       or thesis.get("intrinsic_value") or 0)
+            stop    = thesis.get("stop_loss") or 0
+            cur     = price or entry
+
+            pos["thesis"] = {
+                "id":                      thesis.get("id"),
+                "title":                   thesis.get("title"),
+                "investment_case":         thesis.get("investment_case"),
+                "risk_factors":            thesis.get("risk_factors"),
+                "sell_trigger":            thesis.get("sell_trigger"),
+                "key_90d_metric":          thesis.get("key_90d_metric"),
+                "strategy":               thesis.get("strategy"),
+                "verdict":                 thesis.get("verdict"),
+                "conviction_tier":         thesis.get("conviction_tier"),
+                "moat_rating":             thesis.get("moat_rating"),
+                "moat_type":               thesis.get("moat_type"),
+                "target_price":            t_price or None,
+                "bear_target":             thesis.get("bear_target"),
+                "bull_target":             thesis.get("bull_target"),
+                "intrinsic_value":         thesis.get("intrinsic_value"),
+                "stop_loss":               stop or None,
+                "revenue_growth_assumption": thesis.get("revenue_growth_assumption"),
+                "margin_assumption":       thesis.get("margin_assumption"),
+                "position_size_pct":       thesis.get("position_size_pct"),
+                "report_date":             thesis.get("report_date"),
+                # Derived
+                "upside_pct": round((t_price - cur) / cur * 100, 1) if t_price and cur else None,
+                "vs_stop_pct": round((cur - stop) / stop * 100, 1) if stop and cur else None,
+                "stop_breached": bool(stop and cur and cur < stop),
+                "near_target":   bool(t_price and cur and cur >= t_price * 0.95),
+            }
+        else:
+            pos["thesis"] = None
+
         enriched.append(pos)
     return jsonify(enriched)
 
@@ -403,51 +444,98 @@ def delete_thesis(thesis_id):
 @app.route("/api/thesis/weekly-tracker", methods=["GET"])
 def thesis_weekly_tracker():
     """
-    For each active thesis, return current live metrics (price, P/E, ROE, etc.)
-    alongside the entry-snapshot metrics saved when the thesis was created.
-    Also pulls recent news for each ticker.
+    Portfolio tracker — enriches active theses with live metrics, BUT only
+    for tickers held in the open portfolio.  Includes thesis-breaking alerts.
     """
     from concurrent.futures import ThreadPoolExecutor, as_completed as afc
+
+    # ── Filter to open portfolio tickers only ─────────────────────
+    portfolio = db.get_portfolio()
+    portfolio_tickers = {p["ticker"] for p in portfolio if p.get("status") == "open"}
+
     theses = db.get_thesis()
-    active = [t for t in theses if t.get("status", "active") == "active"]
+    active = [t for t in theses
+              if t.get("status", "active") == "active"
+              and t["ticker"] in portfolio_tickers]
 
     def enrich(t):
         ticker = t["ticker"]
         try:
-            info = sd.get_stock_info(ticker)
-            news_raw = []
+            info      = sd.get_stock_info(ticker)
+            cur_price = info.get("current_price") or 0
+            entry_p   = t.get("current_price") or 0   # price at thesis creation
+
+            # Price change since thesis written
+            price_chg = round((cur_price - entry_p) / entry_p * 100, 1) if entry_p else None
+
+            # Margin of safety vs target
+            target  = t.get("target_price_36m") or t.get("target_price") or t.get("intrinsic_value") or 0
+            mos_now = round((target - cur_price) / target * 100, 1) if target and cur_price else None
+
+            # Live metrics
+            cur_rev_gr  = round((info.get("revenue_growth") or 0) * 100, 1)
+            cur_margin  = round((info.get("net_margin")     or 0) * 100, 1)
+            cur_roe     = round((info.get("roe")            or 0) * 100, 1)
+            cur_pe      = info.get("pe_ratio")
+
+            # ── Thesis-breaking alerts ────────────────────────────
+            alerts = []
+            stop = t.get("stop_loss") or 0
+            if stop and cur_price:
+                if cur_price < stop:
+                    alerts.append({"level": "danger",
+                                   "msg": f"🚨 Stop loss breached — ${cur_price:.2f} < ${stop:.2f}"})
+                elif cur_price < stop * 1.10:
+                    alerts.append({"level": "warning",
+                                   "msg": f"⚠️ Within 10% of stop loss (${stop:.2f})"})
+
+            if target and cur_price and cur_price >= target * 0.95:
+                alerts.append({"level": "success",
+                                "msg": f"🎯 Within 5% of target (${target:.2f}) — consider trimming"})
+
+            rev_assump = t.get("revenue_growth_assumption")
+            if rev_assump is not None and cur_rev_gr is not None:
+                if cur_rev_gr < float(rev_assump) - 5:
+                    alerts.append({"level": "warning",
+                                   "msg": f"📉 Rev growth {cur_rev_gr}% below thesis assumption ({rev_assump}%)"})
+
+            margin_assump = t.get("margin_assumption")
+            if margin_assump is not None and cur_margin is not None:
+                if cur_margin < float(margin_assump) - 3:
+                    alerts.append({"level": "warning",
+                                   "msg": f"📉 Net margin {cur_margin}% below thesis assumption ({margin_assump}%)"})
+
+            # Recent news (last 7 days)
+            recent_news = []
             try:
-                stock = __import__("yfinance").Ticker(ticker)
-                news_raw = stock.news or []
+                import yfinance as _yf, time as _time, pandas as _pd
+                news_raw = _yf.Ticker(ticker).news or []
+                cutoff   = _time.time() - 7 * 86400
+                for n in news_raw[:10]:
+                    if n.get("providerPublishTime", 0) >= cutoff:
+                        recent_news.append({
+                            "title": n.get("title", ""),
+                            "url":   n.get("link", ""),
+                            "date":  _pd.Timestamp(n["providerPublishTime"], unit="s").strftime("%Y-%m-%d"),
+                        })
             except Exception:
                 pass
-            recent_news = []
-            cutoff = __import__("time").time() - 7 * 86400  # last 7 days
-            for n in news_raw[:10]:
-                if n.get("providerPublishTime", 0) >= cutoff:
-                    recent_news.append({
-                        "title": n.get("title", ""),
-                        "url":   n.get("link", ""),
-                        "date":  __import__("pandas").Timestamp(n["providerPublishTime"], unit="s").strftime("%Y-%m-%d"),
-                    })
-            current_price = info.get("current_price") or 0
-            entry_price   = t.get("current_price") or 0
-            price_chg = round((current_price - entry_price) / entry_price * 100, 1) if entry_price else None
-            target    = t.get("target_price") or t.get("intrinsic_value") or 0
-            mos_now   = round((target - current_price) / target * 100, 1) if target and current_price else None
+
             return {
                 **t,
-                "current_price_live":     current_price,
+                "current_price_live":       cur_price,
                 "price_change_since_entry": price_chg,
-                "mos_now":                mos_now,
-                "current_pe":    info.get("pe_ratio"),
-                "current_roe":   round((info.get("roe") or 0) * 100, 1),
-                "current_rev_growth": round((info.get("revenue_growth") or 0) * 100, 1),
-                "current_net_margin": round((info.get("net_margin") or 0) * 100, 1),
-                "recent_news":   recent_news[:5],
+                "mos_now":                  mos_now,
+                "target_price_effective":   target or None,
+                "current_pe":               cur_pe,
+                "current_roe":              cur_roe,
+                "current_rev_growth":       cur_rev_gr,
+                "current_net_margin":       cur_margin,
+                "alerts":                   alerts,
+                "recent_news":              recent_news[:5],
             }
         except Exception as e:
-            return {**t, "error": str(e)}
+            return {**t, "error": str(e), "alerts": []}
 
     results = []
     with ThreadPoolExecutor(max_workers=8) as ex:
@@ -457,6 +545,188 @@ def thesis_weekly_tracker():
 
     results.sort(key=lambda x: x.get("updated_date", ""), reverse=True)
     return jsonify(results)
+
+
+# ══════════════════════════════════════════════════════════════════
+# THESIS — DOCX AUTO-IMPORT
+# ══════════════════════════════════════════════════════════════════
+
+@app.route("/api/thesis/import-docx", methods=["POST"])
+def import_thesis_from_docx():
+    """Scan the workspace folder for HedgeFund*.docx files and upsert thesis rows.
+    Returns a summary of what was imported / updated."""
+    import glob, re
+
+    try:
+        from docx import Document
+    except ImportError:
+        return jsonify({"error": "python-docx not installed"}), 500
+
+    # Look in the mounted workspace folder (Vercel: /tmp or the app directory)
+    search_paths = [
+        "/mnt/Stock--Stock/ValueInvestor/*.docx",
+        "/mnt/Stock--Stock/ValueInvestor/**/*.docx",
+        os.path.join(os.path.dirname(__file__), "*.docx"),
+        "/tmp/*.docx",
+    ]
+    docx_files = []
+    for pattern in search_paths:
+        docx_files.extend(glob.glob(pattern, recursive=True))
+    docx_files = list(set(docx_files))
+
+    if not docx_files:
+        return jsonify({"status": "no_files", "message": "No .docx files found in workspace"}), 200
+
+    def _clean(text):
+        return (text or "").strip()
+
+    def _extract_val(text, keys):
+        """Extract numeric value from text near any of the given key phrases."""
+        for key in keys:
+            pat = rf"{re.escape(key)}[:\s]+\$?([\d,\.]+)"
+            m = re.search(pat, text, re.IGNORECASE)
+            if m:
+                try:
+                    return float(m.group(1).replace(",", ""))
+                except Exception:
+                    pass
+        return None
+
+    imported, updated, skipped = [], [], []
+
+    for docx_path in sorted(docx_files):
+        try:
+            doc = Document(docx_path)
+            full_text = "\n".join(p.text for p in doc.paragraphs)
+            fname = os.path.basename(docx_path)
+
+            # Detect format — "TICKER — Name" per heading vs numbered sections
+            headings = [p.text.strip() for p in doc.paragraphs
+                        if p.style.name.startswith("Heading") and p.text.strip()]
+
+            # Split into per-company blocks
+            # Format A: "TICKER — Company Name" headings
+            # Format B: numbered "1. Executive Summary" blocks
+            blocks = []
+            ticker_heading_re = re.compile(r"^([A-Z]{1,5})\s*[\u2014\-]\s+(.+)$")
+
+            if any(ticker_heading_re.match(h) for h in headings):
+                # Format A
+                current_ticker, current_name, current_lines = None, None, []
+                for p in doc.paragraphs:
+                    m = ticker_heading_re.match(p.text.strip()) if p.style.name.startswith("Heading") else None
+                    if m:
+                        if current_ticker:
+                            blocks.append((current_ticker, current_name, "\n".join(current_lines)))
+                        current_ticker = m.group(1)
+                        current_name   = m.group(2)
+                        current_lines  = []
+                    elif current_ticker:
+                        current_lines.append(p.text)
+                if current_ticker:
+                    blocks.append((current_ticker, current_name, "\n".join(current_lines)))
+            else:
+                # Format B — extract ticker from first line of each "Executive Summary" section
+                ticker_re = re.compile(r"\b([A-Z]{1,5})\b")
+                sections, buf = [], []
+                for p in doc.paragraphs:
+                    if re.match(r"^\d+\.\s+Executive Summary", p.text.strip()):
+                        if buf:
+                            sections.append("\n".join(buf))
+                        buf = [p.text]
+                    else:
+                        buf.append(p.text)
+                if buf:
+                    sections.append("\n".join(buf))
+                for sec in sections:
+                    lines = sec.splitlines()
+                    # First non-empty line after heading usually has "TICKER — Name"
+                    for line in lines[:5]:
+                        m = ticker_heading_re.match(line.strip())
+                        if m:
+                            blocks.append((m.group(1), m.group(2), sec))
+                            break
+                    else:
+                        # Fallback: scan for bold-like ticker pattern
+                        all_tickers = ticker_re.findall(sec[:200])
+                        if all_tickers:
+                            blocks.append((all_tickers[0], "", sec))
+
+            for ticker, company_name, text in blocks:
+                ticker = ticker.upper().strip()
+                if not ticker or len(ticker) > 5:
+                    continue
+
+                def _extract_section(label):
+                    pat = rf"(?:{re.escape(label)})[:\s]*\n([\s\S]+?)(?=\n[A-Z][^\n]{{3,}}:|\Z)"
+                    m = re.search(pat, text, re.IGNORECASE)
+                    return _clean(m.group(1)) if m else ""
+
+                investment_case = _extract_section("Investment Case") or _extract_section("Thesis") or _extract_section("Executive Summary")
+                risk_factors    = _extract_section("Key Risks") or _extract_section("Risks") or _extract_section("Risk Factors")
+                sell_trigger    = _extract_section("Kill Switch") or _extract_section("Sell Trigger") or _extract_section("Exit Criteria")
+                catalysts       = _extract_section("Catalysts") or _extract_section("Key Catalysts")
+                strategy        = _extract_section("Strategy") or _extract_section("Position Strategy")
+                key_90d         = _extract_section("90-Day") or _extract_section("Near-Term") or _extract_section("Key Metric")
+
+                # Extract numeric fields
+                cur_price  = _extract_val(text, ["Current Price", "Price", "Trading at"])
+                tgt_price  = _extract_val(text, ["Target Price", "Price Target", "36M Target", "Intrinsic Value"])
+                stop_loss  = _extract_val(text, ["Stop Loss", "Stop-Loss", "Stop"])
+                bear_tgt   = _extract_val(text, ["Bear Target", "Bear Case", "Bear Price"])
+                bull_tgt   = _extract_val(text, ["Bull Target", "Bull Case", "Bull Price"])
+
+                # Conviction tier
+                conv_tier = None
+                for tier in ["Tier 1", "Tier 2", "Tier 3", "High Conviction", "Medium Conviction"]:
+                    if tier.lower() in text.lower():
+                        conv_tier = tier; break
+
+                # Moat
+                moat_rating = None
+                for mr in ["Wide", "Narrow", "None"]:
+                    if re.search(rf"\b{mr}\s+Moat\b", text, re.IGNORECASE):
+                        moat_rating = mr; break
+
+                payload = {
+                    "ticker":       ticker,
+                    "title":        f"{ticker} — {company_name}" if company_name else ticker,
+                    "investment_case": investment_case[:2000] if investment_case else None,
+                    "risk_factors": risk_factors[:1500] if risk_factors else None,
+                    "sell_trigger": sell_trigger[:1000] if sell_trigger else None,
+                    "strategy":     strategy[:500] if strategy else None,
+                    "key_90d_metric": key_90d[:500] if key_90d else None,
+                    "current_price": cur_price,
+                    "target_price": tgt_price,
+                    "target_price_36m": tgt_price,
+                    "bear_target":  bear_tgt,
+                    "bull_target":  bull_tgt,
+                    "stop_loss":    stop_loss,
+                    "conviction_tier": conv_tier,
+                    "moat_rating":  moat_rating,
+                    "report_date":  fname,
+                    "status":       "active",
+                }
+                # Remove None values so we don't overwrite good data with nulls
+                payload = {k: v for k, v in payload.items() if v is not None}
+
+                existing = db.get_thesis(ticker)
+                thesis_id = db.save_thesis(payload)
+                if existing:
+                    updated.append(ticker)
+                else:
+                    imported.append(ticker)
+
+        except Exception as exc:
+            skipped.append({"file": os.path.basename(docx_path), "error": str(exc)})
+
+    return jsonify({
+        "status": "ok",
+        "imported": imported,
+        "updated":  updated,
+        "skipped":  skipped,
+        "files_scanned": [os.path.basename(f) for f in docx_files],
+    })
 
 
 # ══════════════════════════════════════════════════════════════════

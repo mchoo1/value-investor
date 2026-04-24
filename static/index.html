@@ -773,7 +773,10 @@
       <h1 class="text-2xl font-bold text-white">Investment Thesis</h1>
       <p class="text-slate-400 text-sm">Record your thesis, track weekly, monitor assumptions</p>
     </div>
-    <button onclick="openThesisForm()" class="btn-primary">+ New Thesis</button>
+    <div class="flex gap-2">
+      <button onclick="importThesisFromDocs()" id="importDocxBtn" class="btn-secondary text-sm">📥 Import from Research Docs</button>
+      <button onclick="openThesisForm()" class="btn-primary">+ New Thesis</button>
+    </div>
   </div>
 
   <div class="grid grid-cols-3 gap-6">
@@ -800,8 +803,8 @@
 <div id="section-tracker" class="section p-6 max-w-7xl mx-auto">
   <div class="flex items-center justify-between mb-6">
     <div>
-      <h1 class="text-2xl font-bold text-white">📋 Weekly Thesis Tracker</h1>
-      <p class="text-slate-400 text-sm">Live metrics vs your entry snapshot + recent news for each active thesis</p>
+      <h1 class="text-2xl font-bold text-white">📊 Portfolio Tracker</h1>
+      <p class="text-slate-400 text-sm">Live metrics vs thesis assumptions · alerts for thesis breaks + stop-loss triggers · portfolio positions only</p>
     </div>
     <button onclick="loadWeeklyTracker()" class="btn-secondary text-sm">↻ Refresh</button>
   </div>
@@ -826,7 +829,7 @@
   </div>
 
   <!-- Summary Row -->
-  <div class="grid grid-cols-4 gap-4 mb-6" id="portfolioSummary"></div>
+  <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6" id="portfolioSummary"></div>
 
   <!-- Positions Table -->
   <div class="card" id="portfolioTable">
@@ -1012,6 +1015,6 @@
   </div>
 </div>
 
-<script src="/static/app.js?v=17"></script>
+<script src="/static/app.js?v=18"></script>
 </body>
 </html>

@@ -1919,22 +1919,28 @@ async function runComp() {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// WEEKLY THESIS TRACKER
+// PORTFOLIO TRACKER (only portfolio positions with active theses)
 // ═══════════════════════════════════════════════════════════════
 async function loadWeeklyTracker() {
   const el = document.getElementById("weeklyTrackerContent");
-  el.innerHTML = `<div class="flex justify-center py-12"><div class="loader"></div><span class="text-slate-500 text-sm ml-3">Loading live data for all theses…</span></div>`;
+  el.innerHTML = `<div class="flex justify-center py-12"><div class="loader"></div><span class="text-slate-500 text-sm ml-3">Loading live data for portfolio positions…</span></div>`;
   try {
     const data = await api("/api/thesis/weekly-tracker", "GET", null, 120000);
     if (!data.length) {
       el.innerHTML = `<div class="card text-center py-12 text-slate-500">
-        <div class="text-4xl mb-3">📋</div>
-        <div class="mb-2">No active theses yet.</div>
-        <div class="text-sm">Go to <a class="text-emerald-400 cursor-pointer" onclick="showSection('thesis')">Thesis</a> to write your first investment thesis, or use the "Thesis" button in the Screener.</div>
+        <div class="text-4xl mb-3">📊</div>
+        <div class="mb-2">No portfolio positions with active theses.</div>
+        <div class="text-sm">Add positions in <a class="text-emerald-400 cursor-pointer" onclick="showSection('portfolio')">Portfolio</a>, then create a thesis for each ticker.</div>
       </div>`;
       return;
     }
-    el.innerHTML = `<div class="space-y-6">${data.map(t => renderTrackerCard(t)).join("")}</div>`;
+    // Show alert count in header
+    const alertCount = data.reduce((s,t) => s + (t.alerts||[]).length, 0);
+    const alertBanner = alertCount > 0
+      ? `<div class="bg-amber-900 border border-amber-700 text-amber-200 text-sm px-4 py-2 rounded mb-4">
+           ⚠️ ${alertCount} alert${alertCount>1?"s":""} across your portfolio — review below
+         </div>` : "";
+    el.innerHTML = alertBanner + `<div class="space-y-6">${data.map(t => renderTrackerCard(t)).join("")}</div>`;
   } catch(e) {
     el.innerHTML = `<div class="card text-red-400 text-sm p-4">Error: ${e.message}</div>`;
   }
@@ -1945,6 +1951,13 @@ function renderTrackerCard(t) {
   const priceColor = priceChg > 5 ? "text-emerald-400" : priceChg < -5 ? "text-red-400" : "text-yellow-400";
   const mosColor  = (t.mos_now||0) > 20 ? "text-emerald-400" : (t.mos_now||0) > 0 ? "text-yellow-400" : "text-red-400";
   const statusColors = { active: "bg-emerald-900 text-emerald-300", monitoring: "bg-yellow-900 text-yellow-300", closed: "bg-slate-700 text-slate-400" };
+
+  // ── Alerts section ──────────────────────────────────────────
+  const alertLevelClass = { danger: "bg-red-900 border-red-700 text-red-200", warning: "bg-amber-900 border-amber-700 text-amber-200", success: "bg-emerald-900 border-emerald-700 text-emerald-200" };
+  const alertsHtml = (t.alerts||[]).length
+    ? `<div class="space-y-1 mb-4">${(t.alerts||[]).map(a =>
+        `<div class="border text-xs px-3 py-1.5 rounded font-medium ${alertLevelClass[a.level]||alertLevelClass.warning}">${a.msg}</div>`
+      ).join("")}</div>` : "";
 
   function metricDelta(label, entryVal, currentVal, higherIsBetter=true) {
     if (entryVal == null && currentVal == null) return "";
@@ -1968,21 +1981,48 @@ function renderTrackerCard(t) {
       </div>`
     : `<div class="mt-4 text-xs text-slate-600">No news this week.</div>`;
 
+  // Thesis assumption vs current comparison row
+  const assumptionRow = (t.revenue_growth_assumption != null || t.margin_assumption != null) ? `
+    <div class="mt-3 pt-3 border-t border-slate-700">
+      <div class="text-slate-500 text-xs mb-2 font-medium uppercase tracking-wide">Thesis Assumptions vs Live</div>
+      <div class="grid grid-cols-2 gap-2 text-xs">
+        ${t.revenue_growth_assumption != null ? `
+          <div class="bg-slate-800 rounded p-2">
+            <div class="text-slate-400 mb-0.5">Rev Growth</div>
+            <div class="flex items-center gap-2">
+              <span class="text-slate-300">Assumed: <b>${t.revenue_growth_assumption}%</b></span>
+              <span class="${t.current_rev_growth >= t.revenue_growth_assumption ? 'text-emerald-400' : 'text-red-400'} font-bold">Now: ${t.current_rev_growth??'—'}%</span>
+            </div>
+          </div>` : ""}
+        ${t.margin_assumption != null ? `
+          <div class="bg-slate-800 rounded p-2">
+            <div class="text-slate-400 mb-0.5">Net Margin</div>
+            <div class="flex items-center gap-2">
+              <span class="text-slate-300">Assumed: <b>${t.margin_assumption}%</b></span>
+              <span class="${t.current_net_margin >= t.margin_assumption ? 'text-emerald-400' : 'text-red-400'} font-bold">Now: ${t.current_net_margin??'—'}%</span>
+            </div>
+          </div>` : ""}
+      </div>
+    </div>` : "";
+
   return `
     <div class="card">
+      ${alertsHtml}
       <div class="flex items-start justify-between mb-4 flex-wrap gap-2">
         <div>
-          <div class="flex items-center gap-2 mb-1">
+          <div class="flex items-center gap-2 mb-1 flex-wrap">
             <h3 class="font-bold text-white text-lg cursor-pointer hover:text-emerald-400" onclick="openResearch('${t.ticker}')">${t.ticker}</h3>
             <span class="text-xs px-2 py-0.5 rounded ${statusColors[t.status] || statusColors.active}">${t.status||"active"}</span>
+            ${t.conviction_tier ? `<span class="text-xs px-2 py-0.5 rounded bg-slate-700 text-slate-300">${t.conviction_tier}</span>` : ""}
           </div>
           <div class="text-slate-400 text-sm">${t.title || ""}</div>
           <div class="text-slate-500 text-xs mt-0.5">Written ${t.created_date||"—"} · Updated ${t.updated_date||"—"}</div>
         </div>
         <div class="text-right">
-          <div class="text-2xl font-bold text-white">${fmt(t.current_price_live)}</div>
+          <div class="text-2xl font-bold text-white">$${(t.current_price_live||0).toFixed(2)}</div>
           <div class="${priceColor} text-sm font-medium">${priceChg != null ? (priceChg > 0 ? '+' : '') + priceChg + '% since entry' : '—'}</div>
-          ${t.mos_now != null ? `<div class="${mosColor} text-xs">${t.mos_now > 0 ? '▲' : '▼'} ${Math.abs(t.mos_now)}% MoS vs target</div>` : ""}
+          ${t.target_price_effective ? `<div class="text-amber-400 text-xs">Target: $${t.target_price_effective.toFixed(2)}</div>` : ""}
+          ${t.mos_now != null ? `<div class="${mosColor} text-xs">${t.mos_now > 0 ? '▲' : '▼'} ${Math.abs(t.mos_now)}% MoS remaining</div>` : ""}
         </div>
       </div>
 
@@ -1995,11 +2035,14 @@ function renderTrackerCard(t) {
       </div>
       <div class="text-xs text-slate-600 mb-3">Green/red delta = change since thesis was written. Higher is better for ROE, margins, growth. Lower is better for P/E.</div>
 
+      ${assumptionRow}
       ${newsHtml}
 
-      <div class="flex gap-2 mt-4">
-        <button onclick="openResearch('${t.ticker}')" class="btn-secondary text-xs py-1 px-3">Research →</button>
-        <button onclick="prefillValuation('${t.ticker}',0,0,0,0,${t.current_price_live||0})" class="btn-secondary text-xs py-1 px-3">Value It →</button>
+      <div class="flex gap-2 mt-4 flex-wrap">
+        <button onclick="openResearch('${t.ticker}')" class="btn-secondary text-xs py-1 px-3">📄 Research</button>
+        <button onclick="prefillValuation('${t.ticker}',0,0,0,0,${t.current_price_live||0})" class="btn-secondary text-xs py-1 px-3">📊 Value It</button>
+        ${t.id ? `<button onclick="showSection('thesis');setTimeout(()=>viewThesisDetail(${t.id}),100)" class="btn-secondary text-xs py-1 px-3">📋 Thesis</button>` : ""}
+        <button onclick="showSection('portfolio')" class="btn-secondary text-xs py-1 px-3">💼 Portfolio</button>
       </div>
     </div>`;
 }
@@ -2240,55 +2283,188 @@ async function loadPortfolio() {
     const totalCost = open.reduce((s,p) => s+(p.cost_basis||0), 0);
     const totalVal  = open.reduce((s,p) => s+(p.current_value||0), 0);
     const gainLoss  = totalVal - totalCost;
-    const pct = totalCost ? (gainLoss/totalCost*100).toFixed(1) : 0;
+    const pct       = totalCost ? (gainLoss/totalCost*100).toFixed(1) : 0;
+    // Weighted avg upside vs thesis targets
+    const withTarget = open.filter(p => p.thesis?.upside_pct != null);
+    const avgUpside  = withTarget.length
+      ? (withTarget.reduce((s,p) => s + p.thesis.upside_pct, 0) / withTarget.length).toFixed(1)
+      : null;
 
     document.getElementById("portfolioSummary").innerHTML = `
       <div class="card text-center"><div class="text-slate-400 text-xs mb-1">Positions</div><div class="text-2xl font-bold text-white">${open.length}</div></div>
       <div class="card text-center"><div class="text-slate-400 text-xs mb-1">Total Cost</div><div class="text-2xl font-bold text-white">${fmtBig(totalCost)}</div></div>
       <div class="card text-center"><div class="text-slate-400 text-xs mb-1">Market Value</div><div class="text-2xl font-bold text-white">${fmtBig(totalVal)}</div></div>
-      <div class="card text-center"><div class="text-slate-400 text-xs mb-1">Unrealised P&L</div><div class="text-2xl font-bold ${gainLoss>=0?'text-emerald-400':'text-red-400'}">${gainLoss>=0?"+":""}${fmtBig(gainLoss)} <span class="text-sm">(${pct>=0?"+":""}${pct}%)</span></div></div>`;
+      <div class="card text-center"><div class="text-slate-400 text-xs mb-1">Unrealised P&L</div><div class="text-2xl font-bold ${gainLoss>=0?'text-emerald-400':'text-red-400'}">${gainLoss>=0?"+":""}${fmtBig(gainLoss)} <span class="text-sm">(${pct>=0?"+":""}${pct}%)</span></div></div>
+      ${avgUpside!=null?`<div class="card text-center"><div class="text-slate-400 text-xs mb-1">Avg Thesis Upside</div><div class="text-2xl font-bold ${parseFloat(avgUpside)>0?'text-emerald-400':'text-red-400'}">${parseFloat(avgUpside)>0?"+":""}${avgUpside}%</div></div>`:""}`;
 
     if (!positions.length) {
       document.getElementById("portfolioTable").innerHTML = `<div class="text-center py-12 text-slate-500">No positions yet. Click "+ Add Position".</div>`;
       return;
     }
+
     document.getElementById("portfolioTable").innerHTML = `
       <h2 class="font-semibold text-white mb-4">Open Positions</h2>
-      <div class="overflow-x-auto">
-        <table class="w-full text-sm">
-          <thead><tr class="text-slate-400 text-xs border-b border-slate-700">
-            <th class="text-left pb-3">Ticker</th><th class="text-right pb-3">Entry</th><th class="text-right pb-3">Current</th>
-            <th class="text-right pb-3">Shares</th><th class="text-right pb-3">Cost</th><th class="text-right pb-3">Value</th>
-            <th class="text-right pb-3">P&L</th><th class="text-right pb-3">Target</th><th class="text-right pb-3">vs Target</th><th class="text-right pb-3"></th>
-          </tr></thead>
-          <tbody>
-            ${open.map(p => `
-              <tr class="table-row border-b border-slate-800">
-                <td class="py-3"><div class="font-bold text-white">${p.ticker}</div><div class="text-slate-500 text-xs">${p.entry_date||""}</div></td>
-                <td class="py-3 text-right">${fmt(p.entry_price)}</td>
-                <td class="py-3 text-right">${p.current_price?fmt(p.current_price):"—"}</td>
-                <td class="py-3 text-right">${p.shares}</td>
-                <td class="py-3 text-right">${fmtBig(p.cost_basis)}</td>
-                <td class="py-3 text-right">${fmtBig(p.current_value)}</td>
-                <td class="py-3 text-right">
-                  <div class="${(p.gain_loss||0)>=0?'text-emerald-400':'text-red-400'} font-semibold">${(p.gain_loss||0)>=0?"+":""}${fmtBig(p.gain_loss)}</div>
-                  <div class="${(p.gain_loss_pct||0)>=0?'text-emerald-400':'text-red-400'} text-xs">${(p.gain_loss_pct||0)>=0?"+":""}${fmt(p.gain_loss_pct,1)}%</div>
-                </td>
-                <td class="py-3 text-right text-amber-400">${fmt(p.target_price)}</td>
-                <td class="py-3 text-right ${(p.vs_target||0)>0?'text-emerald-400':'text-slate-400'}">${p.vs_target!==undefined?(p.vs_target>0?"+":"")+p.vs_target+"%":"—"}</td>
-                <td class="py-3 text-right">
-                  <div class="flex gap-2 justify-end">
-                    <button onclick="openResearch('${p.ticker}')" class="text-blue-400 text-xs">Research</button>
-                    <button onclick="deletePosition(${p.id})" class="text-red-400 text-xs">✕</button>
-                  </div>
-                </td>
-              </tr>`).join("")}
-          </tbody>
-        </table>
-      </div>`;
+      <div class="space-y-4">${open.map(p => renderPositionCard(p)).join("")}</div>
+      ${positions.filter(p=>p.status!=="open").length ? `
+        <div class="mt-6 border-t border-slate-700 pt-4">
+          <h3 class="text-slate-400 text-sm font-medium mb-3">Closed Positions</h3>
+          <div class="overflow-x-auto">
+            <table class="w-full text-xs">
+              <thead><tr class="text-slate-500 border-b border-slate-800">
+                <th class="text-left pb-2">Ticker</th><th class="text-right pb-2">Entry</th><th class="text-right pb-2">Exit</th><th class="text-right pb-2">P&L</th>
+              </tr></thead>
+              <tbody>${positions.filter(p=>p.status!=="open").map(p=>`
+                <tr class="border-b border-slate-800 py-1">
+                  <td class="py-1.5 text-slate-300">${p.ticker}</td>
+                  <td class="py-1.5 text-right text-slate-400">${fmt(p.entry_price)}</td>
+                  <td class="py-1.5 text-right text-slate-400">${fmt(p.exit_price)}</td>
+                  <td class="py-1.5 text-right ${(p.exit_price-p.entry_price)>=0?'text-emerald-400':'text-red-400'}">${((p.exit_price-p.entry_price)/p.entry_price*100).toFixed(1)}%</td>
+                </tr>`).join("")}
+              </tbody>
+            </table>
+          </div>
+        </div>` : ""}`;
   } catch (e) {
     document.getElementById("portfolioTable").innerHTML = `<div class="text-red-400 text-sm p-4">Error loading portfolio: ${e.message}</div>`;
   }
+}
+
+function renderPositionCard(p) {
+  const th = p.thesis || {};
+  const gl = p.gain_loss || 0;
+  const glPct = p.gain_loss_pct || 0;
+  const cur = p.current_price || p.entry_price || 0;
+
+  // Conviction badge
+  const convColors = {"Tier 1":"bg-emerald-900 text-emerald-300","Tier 2":"bg-blue-900 text-blue-300","Tier 3":"bg-slate-700 text-slate-300","High Conviction":"bg-emerald-900 text-emerald-300","Medium Conviction":"bg-yellow-900 text-yellow-300"};
+  const convBadge = th.conviction_tier
+    ? `<span class="text-xs px-2 py-0.5 rounded ${convColors[th.conviction_tier]||'bg-slate-700 text-slate-300'}">${th.conviction_tier}</span>` : "";
+  const moatBadge = th.moat_rating
+    ? `<span class="text-xs px-1.5 py-0.5 rounded bg-slate-700 text-slate-300">${th.moat_rating==="Wide"?"🏰":"🧱"} ${th.moat_rating} Moat</span>` : "";
+
+  // Stop-loss alert banner
+  const stopAlert = th.stop_breached
+    ? `<div class="bg-red-900 border border-red-700 text-red-200 text-xs px-3 py-1.5 rounded mb-3 font-semibold">🚨 STOP LOSS BREACHED — Current $${cur.toFixed(2)} &lt; Stop $${th.stop_loss?.toFixed(2)}</div>`
+    : (th.vs_stop_pct != null && th.vs_stop_pct < 10)
+      ? `<div class="bg-orange-900 border border-orange-700 text-orange-200 text-xs px-3 py-1.5 rounded mb-3">⚠️ Within ${th.vs_stop_pct?.toFixed(1)}% of stop loss ($${th.stop_loss?.toFixed(2)})</div>`
+      : "";
+
+  const nearTargetAlert = th.near_target
+    ? `<div class="bg-emerald-900 border border-emerald-700 text-emerald-200 text-xs px-3 py-1.5 rounded mb-3">🎯 Near thesis target ($${th.target_price?.toFixed(2)}) — consider trimming</div>`
+    : "";
+
+  // Price path: Entry → Current → Target
+  const upside = th.upside_pct;
+  const upsideColor = upside == null ? "text-slate-400" : upside >= 20 ? "text-emerald-400" : upside >= 0 ? "text-yellow-400" : "text-red-400";
+
+  const pricePath = `
+    <div class="flex items-center gap-2 text-sm mt-2 flex-wrap">
+      <div class="text-center">
+        <div class="text-slate-500 text-xs">Entry</div>
+        <div class="font-semibold text-slate-300">$${(p.entry_price||0).toFixed(2)}</div>
+      </div>
+      <div class="text-slate-600 text-lg">→</div>
+      <div class="text-center">
+        <div class="text-slate-500 text-xs">Current</div>
+        <div class="font-bold text-white text-base">$${cur.toFixed(2)}</div>
+        <div class="${gl>=0?'text-emerald-400':'text-red-400'} text-xs">${gl>=0?"+":""}${glPct.toFixed(1)}%</div>
+      </div>
+      ${th.target_price ? `
+        <div class="text-slate-600 text-lg">→</div>
+        <div class="text-center">
+          <div class="text-slate-500 text-xs">Thesis Target</div>
+          <div class="font-semibold text-amber-400">$${th.target_price.toFixed(2)}</div>
+          ${upside != null ? `<div class="${upsideColor} text-xs font-medium">${upside>=0?"+":""}${upside}% upside</div>` : ""}
+        </div>` : ""}
+      ${th.stop_loss ? `
+        <div class="ml-auto text-center">
+          <div class="text-slate-500 text-xs">Stop Loss</div>
+          <div class="text-red-400 font-semibold">$${th.stop_loss.toFixed(2)}</div>
+          ${th.vs_stop_pct != null ? `<div class="text-slate-500 text-xs">${th.vs_stop_pct.toFixed(1)}% buffer</div>` : ""}
+        </div>` : ""}
+    </div>`;
+
+  // Valuation row: Intrinsic (DCF), Bear, Bull
+  const hasVal = th.intrinsic_value || th.bear_target || th.bull_target;
+  const valRow = hasVal ? `
+    <div class="mt-3 pt-3 border-t border-slate-700">
+      <div class="text-slate-500 text-xs mb-2 font-medium uppercase tracking-wide">Valuations vs $${cur.toFixed(2)}</div>
+      <div class="grid grid-cols-3 gap-2 text-xs text-center">
+        ${th.bear_target ? `<div class="bg-slate-800 rounded p-2">
+          <div class="text-slate-400 mb-0.5">Bear</div>
+          <div class="font-bold text-red-400">$${th.bear_target.toFixed(2)}</div>
+          <div class="text-slate-500">${((th.bear_target-cur)/cur*100).toFixed(0)}%</div>
+        </div>` : ""}
+        ${th.intrinsic_value ? `<div class="bg-slate-800 rounded p-2">
+          <div class="text-slate-400 mb-0.5">DCF / Base</div>
+          <div class="font-bold ${th.intrinsic_value>cur?'text-emerald-400':'text-red-400'}">$${th.intrinsic_value.toFixed(2)}</div>
+          <div class="text-slate-500">${((th.intrinsic_value-cur)/cur*100).toFixed(0)}%</div>
+        </div>` : ""}
+        ${th.bull_target ? `<div class="bg-slate-800 rounded p-2">
+          <div class="text-slate-400 mb-0.5">Bull</div>
+          <div class="font-bold text-emerald-400">$${th.bull_target.toFixed(2)}</div>
+          <div class="text-slate-500">+${((th.bull_target-cur)/cur*100).toFixed(0)}%</div>
+        </div>` : ""}
+      </div>
+    </div>` : "";
+
+  // Exit thesis
+  const exitSection = th.sell_trigger ? `
+    <div class="mt-3 pt-3 border-t border-slate-700">
+      <div class="text-slate-500 text-xs mb-1 font-medium uppercase tracking-wide">Exit Conditions</div>
+      <p class="text-slate-400 text-xs leading-relaxed">${th.sell_trigger.slice(0,400)}${th.sell_trigger.length>400?"…":""}</p>
+    </div>` : "";
+
+  // Investment case (truncated)
+  const caseSection = th.investment_case ? `
+    <div class="mt-3 pt-3 border-t border-slate-700">
+      <div class="text-slate-500 text-xs mb-1 font-medium uppercase tracking-wide">Thesis</div>
+      <p class="text-slate-300 text-xs leading-relaxed">${th.investment_case.slice(0,300)}${th.investment_case.length>300?"…":""}</p>
+    </div>` : "";
+
+  // Key 90-day metric
+  const keyMetric = th.key_90d_metric ? `
+    <div class="mt-2 bg-slate-800 rounded px-3 py-2 text-xs">
+      <span class="text-slate-400">Key Watch (90d): </span><span class="text-amber-300">${th.key_90d_metric}</span>
+    </div>` : "";
+
+  return `
+    <div class="card border border-slate-700">
+      ${stopAlert}${nearTargetAlert}
+
+      <!-- Header row -->
+      <div class="flex items-start justify-between flex-wrap gap-2">
+        <div>
+          <div class="flex items-center gap-2 mb-1 flex-wrap">
+            <span class="font-bold text-white text-lg">${p.ticker}</span>
+            <span class="text-slate-400 text-sm">${p.name||""}</span>
+            ${convBadge}${moatBadge}
+          </div>
+          <div class="text-slate-500 text-xs">
+            Entered ${p.entry_date||"—"} · ${p.shares} shares · Cost basis ${fmtBig(p.cost_basis)}
+            ${th.report_date ? ` · Research: ${th.report_date}` : ""}
+          </div>
+        </div>
+        <div class="text-right">
+          <div class="text-xl font-bold ${gl>=0?'text-emerald-400':'text-red-400'}">${gl>=0?"+":""}${fmtBig(gl)}</div>
+          <div class="text-slate-400 text-xs">Market value: ${fmtBig(p.current_value||0)}</div>
+        </div>
+      </div>
+
+      ${pricePath}
+      ${valRow}
+      ${caseSection}
+      ${keyMetric}
+      ${exitSection}
+
+      <!-- Action row -->
+      <div class="flex gap-2 mt-4 flex-wrap">
+        <button onclick="openResearch('${p.ticker}')" class="btn-secondary text-xs py-1 px-3">📄 Research</button>
+        <button onclick="prefillValuation('${p.ticker}',0,0,0,0,${cur})" class="btn-secondary text-xs py-1 px-3">📊 Value It</button>
+        ${th.id ? `<button onclick="showSection('thesis');setTimeout(()=>viewThesisDetail(${th.id}),100)" class="btn-secondary text-xs py-1 px-3">📋 View Thesis</button>` : ""}
+        <button onclick="deletePosition(${p.id})" class="text-red-400 text-xs hover:underline ml-auto">Remove</button>
+      </div>
+    </div>`;
 }
 
 function openPortfolioForm() {
@@ -2319,6 +2495,31 @@ async function deletePosition(id) {
   if (!confirm("Remove this position?")) return;
   await api("/api/portfolio/" + id, "DELETE");
   loadPortfolio();
+}
+
+// ── Import thesis from DOCX research docs ───────────────────────
+async function importThesisFromDocs() {
+  const btn = document.getElementById("importDocxBtn");
+  if (btn) { btn.textContent = "⏳ Importing…"; btn.disabled = true; }
+  try {
+    const res = await api("/api/thesis/import-docx", "POST", {}, 60000);
+    const imported = (res.imported||[]).length;
+    const updated  = (res.updated||[]).length;
+    const skipped  = (res.skipped||[]).length;
+    const total    = imported + updated;
+    if (res.status === "no_files") {
+      alert("No .docx research files found in the workspace folder. Place HedgeFund*.docx files in your ValueInvestor folder and try again.");
+    } else if (total === 0 && skipped > 0) {
+      alert(`Import failed for all ${skipped} file(s). Check that the DOCX files are formatted correctly.`);
+    } else {
+      alert(`✅ Import complete!\n• ${imported} new theses created\n• ${updated} existing theses updated\n• Files scanned: ${(res.files_scanned||[]).join(", ")}`);
+      loadThesisList(); // refresh thesis list
+    }
+  } catch(e) {
+    alert("Import error: " + e.message);
+  } finally {
+    if (btn) { btn.textContent = "📥 Import from Research Docs"; btn.disabled = false; }
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
