@@ -102,13 +102,16 @@
     <span class="font-bold text-lg text-white">Value<span class="text-emerald-400">Investor</span></span>
   </div>
   <div class="flex gap-1">
-    <button onclick="showSection('dashboard')" class="nav-btn tab-btn active" id="nav-dashboard">Dashboard</button>
-    <button onclick="showSection('screener')" class="nav-btn tab-btn" id="nav-screener">Screener</button>
-    <button onclick="showSection('research')" class="nav-btn tab-btn" id="nav-research">Research</button>
-    <button onclick="showSection('valuation')" class="nav-btn tab-btn" id="nav-valuation">Valuation</button>
-    <button onclick="showSection('thesis')" class="nav-btn tab-btn" id="nav-thesis">Thesis</button>
-    <button onclick="showSection('tracker')" class="nav-btn tab-btn" id="nav-tracker">📋 Weekly</button>
-    <button onclick="showSection('portfolio')" class="nav-btn tab-btn" id="nav-portfolio">Portfolio</button>
+    <button onclick="showSection('dashboard')"  class="nav-btn tab-btn active" id="nav-dashboard">Dashboard</button>
+    <button onclick="showSection('screener')"   class="nav-btn tab-btn" id="nav-screener">Screen</button>
+    <button onclick="showSection('shortlist')"  class="nav-btn tab-btn" id="nav-shortlist">Shortlist</button>
+    <button onclick="showSection('analyse')"    class="nav-btn tab-btn" id="nav-analyse">Analyse</button>
+    <button onclick="showSection('research')"   class="nav-btn tab-btn" id="nav-research">Research</button>
+    <button onclick="showSection('portfolio')"  class="nav-btn tab-btn" id="nav-portfolio">Portfolio</button>
+    <!-- Hidden: Valuation, Thesis, Tracker kept as sections for back-compat / deep links -->
+    <button id="nav-valuation" class="hidden"></button>
+    <button id="nav-thesis"    class="hidden"></button>
+    <button id="nav-tracker"   class="hidden"></button>
   </div>
   <div class="flex items-center gap-2">
     <input id="quickSearch" class="input-field" style="width:180px;font-size:13px" placeholder="Search ticker..." onkeydown="if(event.key==='Enter')quickLookup()">
@@ -226,29 +229,29 @@
     </div>
   </div>
 
-  <!-- Weekly Action Items -->
+  <!-- Workflow Pipeline -->
   <div class="card mt-6">
-    <h2 class="font-semibold text-white mb-4">📋 Weekly Workflow</h2>
+    <h2 class="font-semibold text-white mb-4">Your Investing Pipeline</h2>
     <div class="grid grid-cols-4 gap-4 text-sm">
-      <div class="metric-box">
-        <div class="text-emerald-400 font-semibold mb-1">Monday</div>
-        <div class="text-slate-300">Run screener → shortlist 5 stocks</div>
-        <button onclick="showSection('screener')" class="mt-2 text-emerald-400 text-xs">Open Screener →</button>
+      <div class="metric-box border-l-2 border-blue-500 pl-3">
+        <div class="text-blue-400 font-semibold mb-1 text-xs uppercase tracking-wide">① Screen</div>
+        <div class="text-slate-300 text-xs mb-2">Filter by ROIC, P/E, FCF yield, rev growth — use strategy presets</div>
+        <button onclick="showSection('screener')" class="text-blue-400 text-xs hover:underline">Open Screener →</button>
       </div>
-      <div class="metric-box">
-        <div class="text-blue-400 font-semibold mb-1">Midweek</div>
-        <div class="text-slate-300">Deep dive into shortlisted stocks</div>
-        <button onclick="showSection('research')" class="mt-2 text-blue-400 text-xs">Open Research →</button>
+      <div class="metric-box border-l-2 border-emerald-500 pl-3">
+        <div class="text-emerald-400 font-semibold mb-1 text-xs uppercase tracking-wide">② Shortlist</div>
+        <div class="text-slate-300 text-xs mb-2">Track ideas through Watching → Analysing → Thesis Ready</div>
+        <button onclick="showSection('shortlist')" class="text-emerald-400 text-xs hover:underline">Open Shortlist →</button>
       </div>
-      <div class="metric-box">
-        <div class="text-amber-400 font-semibold mb-1">Weekend</div>
-        <div class="text-slate-300">Run valuation → buy / watchlist decision</div>
-        <button onclick="showSection('valuation')" class="mt-2 text-amber-400 text-xs">Open Valuation →</button>
+      <div class="metric-box border-l-2 border-purple-500 pl-3">
+        <div class="text-purple-400 font-semibold mb-1 text-xs uppercase tracking-wide">③ Analyse</div>
+        <div class="text-slate-300 text-xs mb-2">Exit multiple valuation + conviction thesis in one view</div>
+        <button onclick="showSection('analyse')" class="text-purple-400 text-xs hover:underline">Open Analyse →</button>
       </div>
-      <div class="metric-box">
-        <div class="text-purple-400 font-semibold mb-1">Sunday</div>
-        <div class="text-slate-300">Review thesis & log weekly update</div>
-        <button onclick="showSection('thesis')" class="mt-2 text-purple-400 text-xs">Open Thesis →</button>
+      <div class="metric-box border-l-2 border-amber-500 pl-3">
+        <div class="text-amber-400 font-semibold mb-1 text-xs uppercase tracking-wide">④ Portfolio</div>
+        <div class="text-slate-300 text-xs mb-2">Track P&L, thesis health, stop-loss alerts for held positions</div>
+        <button onclick="showSection('portfolio')" class="text-amber-400 text-xs hover:underline">Open Portfolio →</button>
       </div>
     </div>
   </div>
@@ -317,55 +320,61 @@
         </div>
       </div>
 
+      <!-- Core filters (always visible) -->
       <div class="space-y-2 text-sm">
         <div>
           <label class="text-slate-400 text-xs block mb-1">Max P/E Ratio</label>
           <input id="fMaxPe" type="number" class="input-field" placeholder="e.g. 20">
         </div>
         <div>
-          <label class="text-slate-400 text-xs block mb-1">Max P/B Ratio</label>
-          <input id="fMaxPb" type="number" class="input-field" placeholder="e.g. 3">
+          <label class="text-slate-400 text-xs block mb-1">Min ROIC (%)</label>
+          <input id="fMinRoic" type="number" class="input-field" placeholder="e.g. 12">
         </div>
         <div>
-          <label class="text-slate-400 text-xs block mb-1">Min ROE (%)</label>
-          <input id="fMinRoe" type="number" class="input-field" placeholder="e.g. 12">
+          <label class="text-slate-400 text-xs block mb-1">Min FCF Yield (%)</label>
+          <input id="fMinFcfYield" type="number" class="input-field" placeholder="e.g. 4">
         </div>
         <div>
-          <label class="text-slate-400 text-xs block mb-1">Max Debt/Equity</label>
-          <input id="fMaxDe" type="number" class="input-field" placeholder="e.g. 1.5">
+          <label class="text-slate-400 text-xs block mb-1">Min Rev Growth (%)</label>
+          <input id="fMinRevGrowth" type="number" class="input-field" placeholder="e.g. 20">
         </div>
-        <div class="border-t border-slate-700 pt-2 mt-2">
-          <label class="text-slate-400 text-xs block mb-1.5">Strategy Filters</label>
-          <div class="space-y-2">
-            <div>
-              <label class="text-slate-400 text-xs block mb-1">Min Market Cap ($B)</label>
-              <input id="fMinMarketCap" type="number" class="input-field" placeholder="e.g. 20">
-            </div>
-            <div>
-              <label class="text-slate-400 text-xs block mb-1">Min FCF Yield (%)</label>
-              <input id="fMinFcfYield" type="number" class="input-field" placeholder="e.g. 4">
-            </div>
-            <div>
-              <label class="text-slate-400 text-xs block mb-1">Min ROIC (%)</label>
-              <input id="fMinRoic" type="number" class="input-field" placeholder="e.g. 12">
-            </div>
-            <div>
-              <label class="text-slate-400 text-xs block mb-1">Min Rev Growth (%)</label>
-              <input id="fMinRevGrowth" type="number" class="input-field" placeholder="e.g. 20">
-            </div>
-            <div>
-              <label class="text-slate-400 text-xs block mb-1">Max Net Debt/EBITDA</label>
-              <input id="fMaxNetDebtEbitda" type="number" class="input-field" placeholder="e.g. 3">
-            </div>
+        <div>
+          <label class="text-slate-400 text-xs block mb-1">Min Market Cap ($B)</label>
+          <input id="fMinMarketCap" type="number" class="input-field" placeholder="e.g. 20">
+        </div>
+      </div>
+
+      <!-- Advanced filters (collapsed) -->
+      <div class="mt-3 border-t border-slate-700 pt-2">
+        <button onclick="toggleAdvancedFilters()" id="advFilterToggle"
+          class="text-slate-400 text-xs hover:text-white flex items-center gap-1 w-full">
+          <span id="advFilterIcon">▶</span> Advanced Filters
+        </button>
+        <div id="advancedFilters" class="hidden mt-2 space-y-2 text-sm">
+          <div>
+            <label class="text-slate-400 text-xs block mb-1">Max P/B Ratio</label>
+            <input id="fMaxPb" type="number" class="input-field" placeholder="e.g. 3">
           </div>
-        </div>
-        <div class="flex items-center gap-2 mt-1">
-          <input id="fFcfPositive" type="checkbox">
-          <label class="text-slate-300 text-xs">Positive Free Cash Flow only</label>
-        </div>
-        <div class="flex items-center gap-2 mt-2 border-t border-slate-700 pt-2">
-          <input id="fInsiderBuying" type="checkbox">
-          <label class="text-slate-300 text-xs">🔍 Insider buying last 60 days <span class="text-slate-500">(slower)</span></label>
+          <div>
+            <label class="text-slate-400 text-xs block mb-1">Min ROE (%)</label>
+            <input id="fMinRoe" type="number" class="input-field" placeholder="e.g. 12">
+          </div>
+          <div>
+            <label class="text-slate-400 text-xs block mb-1">Max Debt/Equity</label>
+            <input id="fMaxDe" type="number" class="input-field" placeholder="e.g. 1.5">
+          </div>
+          <div>
+            <label class="text-slate-400 text-xs block mb-1">Max Net Debt/EBITDA</label>
+            <input id="fMaxNetDebtEbitda" type="number" class="input-field" placeholder="e.g. 3">
+          </div>
+          <div class="flex items-center gap-2 pt-1">
+            <input id="fFcfPositive" type="checkbox">
+            <label class="text-slate-300 text-xs">Positive FCF only</label>
+          </div>
+          <div class="flex items-center gap-2">
+            <input id="fInsiderBuying" type="checkbox">
+            <label class="text-slate-300 text-xs">🔍 Insider buying (slower)</label>
+          </div>
         </div>
       </div>
 
@@ -401,6 +410,164 @@
         </div>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════
+     SHORTLIST
+═══════════════════════════════════════════ -->
+<div id="section-shortlist" class="section p-6 max-w-7xl mx-auto">
+  <div class="flex items-center justify-between mb-6 flex-wrap gap-3">
+    <div>
+      <h1 class="text-2xl font-bold text-white">Shortlist</h1>
+      <p class="text-slate-400 text-sm">Your research pipeline — from idea to portfolio</p>
+    </div>
+    <div class="flex gap-2">
+      <input id="slAddTicker" class="input-field" style="width:130px" placeholder="Add ticker…" onkeydown="if(event.key==='Enter')quickAddToShortlist()">
+      <button onclick="quickAddToShortlist()" class="btn-secondary text-sm">+ Add</button>
+      <button onclick="loadShortlist()" class="btn-secondary text-sm">↻</button>
+    </div>
+  </div>
+
+  <!-- Status filter pills -->
+  <div class="flex gap-2 mb-4 flex-wrap">
+    <button onclick="filterShortlist('all')"       id="sl-filter-all"       class="sl-filter tab-btn active text-xs px-3 py-1">All</button>
+    <button onclick="filterShortlist('watching')"  id="sl-filter-watching"  class="sl-filter tab-btn text-xs px-3 py-1">👁 Watching</button>
+    <button onclick="filterShortlist('thesis')"    id="sl-filter-thesis"    class="sl-filter tab-btn text-xs px-3 py-1">📋 Thesis Ready</button>
+    <button onclick="filterShortlist('held')"      id="sl-filter-held"      class="sl-filter tab-btn text-xs px-3 py-1">💼 Held</button>
+  </div>
+
+  <div id="shortlistContent">
+    <div class="card text-center py-12 text-slate-500">
+      <div class="text-3xl mb-2">📌</div>
+      <div>Loading shortlist…</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════
+     ANALYSE — unified valuation + thesis
+═══════════════════════════════════════════ -->
+<div id="section-analyse" class="section p-6 max-w-7xl mx-auto">
+  <div class="flex items-center justify-between mb-4 flex-wrap gap-3">
+    <div>
+      <h1 class="text-2xl font-bold text-white">Analyse</h1>
+      <p class="text-slate-400 text-sm">Valuation + thesis in one view — from shortlist to conviction</p>
+    </div>
+    <div class="flex gap-2 items-center">
+      <input id="anTicker" class="input-field font-bold" style="width:120px;font-size:15px" placeholder="Ticker…">
+      <button onclick="loadAnalyse()" id="anLoadBtn" class="btn-primary px-5">Load →</button>
+      <span id="anStatus" class="text-xs text-slate-500"></span>
+    </div>
+  </div>
+
+  <!-- Live data strip -->
+  <div id="anLiveStrip" class="hidden grid grid-cols-3 md:grid-cols-6 gap-3 mb-5">
+    <div class="card text-center py-2"><div class="text-slate-400 text-xs mb-0.5">Price</div><div class="font-bold text-white text-base" id="anPrice">—</div></div>
+    <div class="card text-center py-2"><div class="text-slate-400 text-xs mb-0.5">P/E</div><div class="font-bold text-emerald-400 text-base" id="anPe">—</div></div>
+    <div class="card text-center py-2"><div class="text-slate-400 text-xs mb-0.5">Fwd P/E</div><div class="font-bold text-emerald-400 text-base" id="anFwdPe">—</div></div>
+    <div class="card text-center py-2"><div class="text-slate-400 text-xs mb-0.5">ROIC</div><div class="font-bold text-base" id="anRoic">—</div></div>
+    <div class="card text-center py-2"><div class="text-slate-400 text-xs mb-0.5">Rev Gr</div><div class="font-bold text-base" id="anRevGr">—</div></div>
+    <div class="card text-center py-2"><div class="text-slate-400 text-xs mb-0.5">FCF Margin</div><div class="font-bold text-base" id="anFcfM">—</div></div>
+  </div>
+
+  <div id="anContent" class="hidden">
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
+      <!-- Historical Anchors (reuse Exit Multiple anchors panel) -->
+      <div class="card">
+        <h3 class="font-semibold text-white mb-2">Historical Anchors <span class="text-slate-500 text-xs font-normal">1Y (TTM) · 5Y avg</span></h3>
+        <div id="anAnchors" class="text-slate-400 text-xs italic">Load a ticker to see historical data.</div>
+        <div class="mt-3 hidden" id="anCurrentMetrics">
+          <div class="grid grid-cols-3 gap-2 text-xs text-center mt-2">
+            <div class="bg-slate-800 rounded p-2"><div class="text-slate-400 mb-0.5">EPS TTM</div><div class="font-bold text-white" id="anEpsTtm">—</div></div>
+            <div class="bg-slate-800 rounded p-2"><div class="text-slate-400 mb-0.5">EPS Fwd</div><div class="font-bold text-white" id="anEpsFwd">—</div></div>
+            <div class="bg-slate-800 rounded p-2"><div class="text-slate-400 mb-0.5">Rev TTM</div><div class="font-bold text-white" id="anRevTtm">—</div></div>
+          </div>
+        </div>
+        <button onclick="showSection('research')" class="mt-3 text-blue-400 text-xs hover:underline">Open full Research Hub →</button>
+      </div>
+
+      <!-- Quick Exit Multiple -->
+      <div class="card">
+        <h3 class="font-semibold text-white mb-2">Exit Multiple — 3 Scenarios</h3>
+        <div class="space-y-2 text-sm">
+          <div class="grid grid-cols-2 gap-2">
+            <div><label class="text-slate-400 text-xs block mb-1">Holding Years</label><input id="anEmYears" type="number" class="input-field" value="3"></div>
+            <div><label class="text-slate-400 text-xs block mb-1">EPS Growth %/yr</label><input id="anEmEpsGrowth" type="number" class="input-field" placeholder="e.g. 15"></div>
+          </div>
+          <div>
+            <label class="text-slate-400 text-xs block mb-1">P/E Exit Multiples (Bear / Base / Bull)</label>
+            <div class="grid grid-cols-3 gap-2">
+              <input id="anEmPeBear" type="number" class="input-field text-red-400" placeholder="Bear">
+              <input id="anEmPeBase" type="number" class="input-field" placeholder="Base">
+              <input id="anEmPeBull" type="number" class="input-field text-emerald-400" placeholder="Bull">
+            </div>
+          </div>
+          <button onclick="calcAnalyseExitMultiple()" class="btn-primary w-full text-sm">Calculate Implied Price →</button>
+        </div>
+        <div id="anEmResults" class="mt-3 hidden space-y-1.5"></div>
+        <button onclick="showSection('valuation');switchValTab('exit-multiple')" class="mt-3 text-blue-400 text-xs hover:underline">Open full Valuation Engine →</button>
+      </div>
+    </div>
+
+    <!-- Simplified thesis form (7 fields) -->
+    <div class="card">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="font-semibold text-white">Investment Thesis</h3>
+        <span id="anThesisStatus" class="text-xs text-slate-500"></span>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+        <div>
+          <label class="text-slate-400 text-xs block mb-1">Conviction Tier</label>
+          <select id="anConviction" class="input-field">
+            <option value="">Select…</option>
+            <option value="Tier 1">Tier 1 — High Conviction</option>
+            <option value="Tier 2">Tier 2 — Medium Conviction</option>
+            <option value="Tier 3">Tier 3 — Watching</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-slate-400 text-xs block mb-1">Moat Rating</label>
+          <select id="anMoat" class="input-field">
+            <option value="">Select…</option>
+            <option value="Wide">🏰 Wide Moat</option>
+            <option value="Narrow">🧱 Narrow Moat</option>
+            <option value="None">No Moat</option>
+          </select>
+        </div>
+        <div class="md:col-span-2">
+          <label class="text-slate-400 text-xs block mb-1">Investment Case — why are you buying?</label>
+          <textarea id="anCase" class="input-field" style="height:80px" placeholder="Business quality, growth driver, why it's mispriced…"></textarea>
+        </div>
+        <div>
+          <label class="text-slate-400 text-xs block mb-1">Target Price ($)</label>
+          <input id="anTarget" type="number" step="0.01" class="input-field" placeholder="From scenarios above">
+        </div>
+        <div>
+          <label class="text-slate-400 text-xs block mb-1">Stop Loss ($)</label>
+          <input id="anStop" type="number" step="0.01" class="input-field" placeholder="e.g. 15% below entry">
+        </div>
+        <div>
+          <label class="text-slate-400 text-xs block mb-1">Key Metric to Watch (90 days)</label>
+          <input id="an90d" class="input-field" placeholder="e.g. Monthly active users, operating margin">
+        </div>
+        <div>
+          <label class="text-slate-400 text-xs block mb-1">Sell / Exit Condition</label>
+          <input id="anExit" class="input-field" placeholder="e.g. If rev growth falls below 10%…">
+        </div>
+      </div>
+      <div class="flex gap-3 mt-5 flex-wrap">
+        <button onclick="saveAnalyseThesis()" class="btn-primary">💾 Save Thesis</button>
+        <button onclick="promoteAnalyseToPortfolio()" class="btn-secondary">💼 Add to Portfolio</button>
+        <button onclick="showSection('thesis');setTimeout(loadThesisList,100)" class="text-slate-400 text-xs hover:underline self-center">View full thesis list →</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="anEmpty" class="card text-center py-16 text-slate-500">
+    <div class="text-4xl mb-3">🔬</div>
+    <div class="text-base mb-2">Enter a ticker to begin analysis</div>
+    <div class="text-sm">Or click <strong>Analyse</strong> on any screener result or shortlist item</div>
   </div>
 </div>
 
@@ -828,12 +995,32 @@
     <button onclick="openPortfolioForm()" class="btn-primary">+ Add Position</button>
   </div>
 
+  <!-- Sub-tabs -->
+  <div class="flex gap-2 mb-5">
+    <button onclick="switchPortfolioTab('positions')" id="pft-positions" class="tab-btn active text-sm">💼 Positions</button>
+    <button onclick="switchPortfolioTab('monitor')"   id="pft-monitor"   class="tab-btn text-sm">📊 Monitor</button>
+  </div>
+
+  <!-- Positions sub-tab -->
+  <div id="portfolioTab-positions">
   <!-- Summary Row -->
   <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6" id="portfolioSummary"></div>
 
   <!-- Positions Table -->
   <div class="card" id="portfolioTable">
     <div class="text-slate-500 text-center py-8">Loading positions...</div>
+  </div>
+
+  </div><!-- /portfolioTab-positions -->
+
+  <!-- Monitor sub-tab (embedded tracker) -->
+  <div id="portfolioTab-monitor" class="hidden">
+    <div id="portfolioMonitorContent">
+      <div class="card text-center py-12 text-slate-500">
+        <div class="text-3xl mb-2">📊</div>
+        <div>Click Monitor to load live portfolio tracking</div>
+      </div>
+    </div>
   </div>
 
   <!-- Add Position Form Modal -->
@@ -1015,6 +1202,6 @@
   </div>
 </div>
 
-<script src="/static/app.js?v=18"></script>
+<script src="/static/app.js?v=20"></script>
 </body>
 </html>

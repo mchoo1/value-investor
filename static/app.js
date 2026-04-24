@@ -48,13 +48,53 @@ async function api(path, method = "GET", body = null, timeoutMs = 60000) {
 function showSection(name) {
   document.querySelectorAll(".section").forEach(s => s.classList.remove("active"));
   document.querySelectorAll(".nav-btn").forEach(b => b.classList.remove("active"));
-  document.getElementById("section-" + name).classList.add("active");
-  document.getElementById("nav-" + name).classList.add("active");
-  if (name === "dashboard") loadDashboard();
+  const sec = document.getElementById("section-" + name);
+  if (sec) sec.classList.add("active");
+  const btn = document.getElementById("nav-" + name);
+  if (btn) btn.classList.add("active");
+  if (name === "dashboard")  loadDashboard();
   if (name === "screener" && !screenerRan) { screenerRan = true; runScreener(); }
-  if (name === "thesis") loadThesisList();
-  if (name === "tracker") loadWeeklyTracker();
-  if (name === "portfolio") loadPortfolio();
+  if (name === "shortlist")  loadShortlist();
+  if (name === "analyse")    { /* loads on ticker entry */ }
+  if (name === "thesis")     loadThesisList();
+  if (name === "tracker")    loadWeeklyTracker();
+  if (name === "portfolio")  loadPortfolio();
+}
+
+function toggleAdvancedFilters() {
+  const el   = document.getElementById("advancedFilters");
+  const icon = document.getElementById("advFilterIcon");
+  const open = el.classList.toggle("hidden");
+  icon.textContent = open ? "▶" : "▼";
+}
+
+// ─── Portfolio sub-tabs ──────────────────────────────────────────
+function switchPortfolioTab(tab) {
+  ["positions","monitor"].forEach(t => {
+    document.getElementById("portfolioTab-" + t).classList.toggle("hidden", t !== tab);
+    document.getElementById("pft-" + t).classList.toggle("active", t === tab);
+  });
+  if (tab === "monitor") {
+    // Render tracker content into the embedded div
+    const target = document.getElementById("portfolioMonitorContent");
+    target.innerHTML = `<div class="flex justify-center py-12"><div class="loader"></div><span class="text-slate-500 text-sm ml-3">Loading portfolio tracker…</span></div>`;
+    api("/api/thesis/weekly-tracker", "GET", null, 120000).then(data => {
+      if (!data.length) {
+        target.innerHTML = `<div class="card text-center py-12 text-slate-500">
+          <div class="text-3xl mb-3">📊</div>
+          <div>No portfolio positions with active theses yet.</div>
+          <div class="text-sm mt-2">Add positions and write a thesis for each ticker to enable tracking.</div>
+        </div>`;
+        return;
+      }
+      const alertCount = data.reduce((s,t) => s + (t.alerts||[]).length, 0);
+      const banner = alertCount > 0
+        ? `<div class="bg-amber-900 border border-amber-700 text-amber-200 text-sm px-4 py-2 rounded mb-4">⚠️ ${alertCount} alert${alertCount>1?"s":""} across your portfolio</div>` : "";
+      target.innerHTML = banner + `<div class="space-y-6">${data.map(t => renderTrackerCard(t)).join("")}</div>`;
+    }).catch(e => {
+      target.innerHTML = `<div class="card text-red-400 text-sm p-4">Error: ${e.message}</div>`;
+    });
+  }
 }
 
 function quickLookup() {
@@ -655,9 +695,9 @@ function renderScreenerTable(results) {
             const isSelected = _screenerSelected.has(r.ticker);
             // Action cell: badges + buttons
             const watchBtn = isWatching
-              ? `<span class="text-emerald-400 text-xs" title="Already in watchlist">👁 Watching</span>`
+              ? `<span class="text-emerald-400 text-xs" title="On shortlist">✓ Shortlisted</span>`
               : `<button onclick="event.stopPropagation();addToWatchlistFromScreen('${r.ticker}',this)"
-                   class="text-blue-400 text-xs hover:underline">Watch</button>`;
+                   class="text-emerald-400 text-xs hover:underline font-medium">+ Shortlist</button>`;
             const priorBadge  = isPrior  ? `<span class="text-amber-400 text-xs" title="In prior AI research">★ Prior</span>` : '';
             const queueBadge  = isQueued ? `<span class="text-violet-400 text-xs" title="Queued for Monday AI run">⏱</span>` : '';
             return `
@@ -703,8 +743,8 @@ function renderScreenerTable(results) {
                   <div class="flex flex-col items-end gap-0.5">
                     ${priorBadge}
                     ${watchBtn}
-                    <button onclick="startThesisFromScreener('${r.ticker}','${r.name.replace(/'/g,"")}',${r.price||0})"
-                      class="text-emerald-400 text-xs hover:underline">Thesis</button>
+                    <button onclick="event.stopPropagation();openAnalyse('${r.ticker}')"
+                      class="text-purple-400 text-xs hover:underline">Analyse</button>
                   </div>
                 </td>
               </tr>`;
@@ -2671,6 +2711,356 @@ function calcExitMultiple() {
     : "";
 
   document.getElementById("emResults").classList.remove("hidden");
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SHORTLIST — unified watchlist + thesis status view
+// ═══════════════════════════════════════════════════════════════
+let _shortlistData = [];
+
+async function loadShortlist() {
+  const el = document.getElementById("shortlistContent");
+  if (!el) return;
+  el.innerHTML = `<div class="flex justify-center py-12"><div class="loader"></div><span class="text-slate-500 text-sm ml-3">Loading shortlist…</span></div>`;
+  try {
+    const [watchlist, theses, portfolio] = await Promise.all([
+      api("/api/watchlist"),
+      api("/api/thesis"),
+      api("/api/portfolio"),
+    ]);
+    const thesisTickers  = new Set((theses  || []).map(t => t.ticker));
+    const portfolioMap   = {};
+    (portfolio || []).forEach(p => { portfolioMap[p.ticker] = p; });
+
+    // Build unified list: watchlist + any thesis tickers not already in watchlist
+    const allTickers = new Set((watchlist || []).map(w => w.ticker));
+    (theses || []).forEach(t => allTickers.add(t.ticker));
+
+    _shortlistData = Array.from(allTickers).map(ticker => {
+      const w    = (watchlist || []).find(x => x.ticker === ticker);
+      const t    = (theses    || []).find(x => x.ticker === ticker);
+      const p    = portfolioMap[ticker];
+      const status = p ? "held" : (t ? "thesis" : "watching");
+      return { ticker, watchNote: w?.notes || "", thesis: t || null, portfolio: p || null, status };
+    }).sort((a,b) => {
+      const order = { held: 0, thesis: 1, watching: 2 };
+      return (order[a.status] ?? 3) - (order[b.status] ?? 3) || a.ticker.localeCompare(b.ticker);
+    });
+
+    renderShortlist(_shortlistData);
+  } catch(e) {
+    el.innerHTML = `<div class="card text-red-400 text-sm p-4">Error loading shortlist: ${e.message}</div>`;
+  }
+}
+
+function renderShortlist(items) {
+  const el = document.getElementById("shortlistContent");
+  if (!items || !items.length) {
+    el.innerHTML = `<div class="card text-center py-16 text-slate-500">
+      <div class="text-3xl mb-3">📋</div>
+      <div class="text-base font-medium">Your shortlist is empty</div>
+      <div class="text-sm mt-2">Add tickers via the screener or the input above.</div>
+    </div>`;
+    return;
+  }
+
+  const statusBadge = s => ({
+    held:     `<span class="bg-emerald-900 text-emerald-300 text-xs px-2 py-0.5 rounded-full">💼 Held</span>`,
+    thesis:   `<span class="bg-blue-900 text-blue-300 text-xs px-2 py-0.5 rounded-full">📋 Thesis Ready</span>`,
+    watching: `<span class="bg-slate-700 text-slate-300 text-xs px-2 py-0.5 rounded-full">👁 Watching</span>`,
+  }[s] || "");
+
+  const convictionBadge = tier => tier
+    ? `<span class="bg-amber-900 text-amber-300 text-xs px-1.5 py-0.5 rounded">${tier}</span>` : "";
+
+  const cards = items.map(item => {
+    const t = item.thesis;
+    const p = item.portfolio;
+    const targetLine = t?.target_price_36m || t?.target_price || t?.intrinsic_value;
+    const stopLine   = t?.stop_loss;
+    const moatLine   = t?.moat_rating ? `<span class="text-xs text-slate-400">Moat: ${t.moat_rating}</span>` : "";
+    const caseLine   = t?.investment_case
+      ? `<div class="text-xs text-slate-400 mt-1 line-clamp-2">${t.investment_case}</div>` : "";
+    const priceLine  = p
+      ? `<div class="text-xs text-slate-400 mt-1">Entry $${p.entry_price?.toFixed(2)} · ${p.shares} shares</div>` : "";
+
+    return `<div class="card p-4 flex items-start justify-between gap-3" data-status="${item.status}">
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center gap-2 flex-wrap">
+          <span class="font-bold text-white text-base">${item.ticker}</span>
+          ${statusBadge(item.status)}
+          ${convictionBadge(t?.conviction_tier)}
+          ${moatLine}
+        </div>
+        ${caseLine}
+        ${priceLine}
+        ${targetLine ? `<div class="text-xs text-slate-400 mt-1">Target $${Number(targetLine).toFixed(2)}${stopLine ? ` · Stop $${Number(stopLine).toFixed(2)}` : ""}</div>` : ""}
+        ${item.watchNote ? `<div class="text-xs text-slate-500 mt-1 italic">${item.watchNote}</div>` : ""}
+      </div>
+      <div class="flex flex-col gap-2 shrink-0">
+        <button onclick="openAnalyse('${item.ticker}')" class="btn-primary text-xs px-3 py-1.5">Analyse →</button>
+        ${item.status !== "held"
+          ? `<button onclick="removeFromShortlist('${item.ticker}')" class="btn-secondary text-xs px-3 py-1.5 text-red-400">✕</button>`
+          : ""}
+      </div>
+    </div>`;
+  }).join("");
+
+  el.innerHTML = `<div class="space-y-3">${cards}</div>`;
+}
+
+function filterShortlist(status) {
+  // Update pill active state
+  document.querySelectorAll(".sl-filter").forEach(btn => btn.classList.remove("active"));
+  const activeBtn = document.getElementById("sl-filter-" + status);
+  if (activeBtn) activeBtn.classList.add("active");
+
+  const filtered = status === "all" ? _shortlistData : _shortlistData.filter(x => x.status === status);
+  renderShortlist(filtered);
+}
+
+async function quickAddToShortlist() {
+  const input  = document.getElementById("slAddTicker");
+  const ticker = input.value.trim().toUpperCase();
+  if (!ticker) return;
+  try {
+    await api("/api/watchlist", "POST", { ticker, notes: "" });
+    input.value = "";
+    loadShortlist();
+  } catch(e) {
+    alert("Failed to add: " + e.message);
+  }
+}
+
+async function removeFromShortlist(ticker) {
+  if (!confirm(`Remove ${ticker} from shortlist?`)) return;
+  try {
+    await api("/api/watchlist/" + ticker, "DELETE");
+  } catch(e) { /* ignore */ }
+  loadShortlist();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ANALYSE — historical anchors + exit multiple + thesis form
+// ═══════════════════════════════════════════════════════════════
+let _anMetrics = null;
+
+function openAnalyse(ticker) {
+  showSection("analyse");
+  document.getElementById("anTicker").value = ticker;
+  loadAnalyse();
+}
+
+async function loadAnalyse() {
+  const ticker = (document.getElementById("anTicker")?.value || "").trim().toUpperCase();
+  if (!ticker) { return; }
+
+  const btn    = document.getElementById("anLoadBtn");
+  const status = document.getElementById("anStatus");
+  if (btn) btn.textContent = "Loading…";
+  if (status) status.textContent = "";
+
+  try {
+    // Fetch live info + historical metrics in parallel
+    const [info, metrics, existingThesis] = await Promise.all([
+      api("/api/stock/" + ticker),
+      api("/api/stock/" + ticker + "/metrics-history"),
+      api("/api/thesis").then(all => (all || []).find(t => t.ticker === ticker) || null),
+    ]);
+
+    _anMetrics = { ...metrics, current_price: info?.current_price, eps_ttm: info?.trailing_eps, eps_fwd: info?.forward_eps };
+
+    // ── Live strip ──
+    const anLiveStrip = document.getElementById("anLiveStrip");
+    if (anLiveStrip) {
+      document.getElementById("anPrice").textContent  = info?.current_price ? `$${info.current_price.toFixed(2)}` : "—";
+      const peVal = info?.trailing_pe;
+      document.getElementById("anPe").textContent     = peVal ? peVal.toFixed(1) + "×" : "—";
+      document.getElementById("anPe").className       = "font-bold text-base " + (peVal < 20 ? "text-emerald-400" : peVal < 35 ? "text-yellow-400" : "text-red-400");
+      const fwdPe = info?.forward_pe;
+      document.getElementById("anFwdPe").textContent  = fwdPe ? fwdPe.toFixed(1) + "×" : "—";
+      document.getElementById("anFwdPe").className    = "font-bold text-base " + (fwdPe < 20 ? "text-emerald-400" : fwdPe < 35 ? "text-yellow-400" : "text-red-400");
+      const roic = metrics?.roic?.["1y"];
+      document.getElementById("anRoic").textContent   = roic != null ? roic.toFixed(1) + "%" : "—";
+      document.getElementById("anRoic").className     = "font-bold text-base " + (roic > 15 ? "text-emerald-400" : roic > 8 ? "text-yellow-400" : "text-red-400");
+      const revGr = metrics?.rev_growth?.["1y"];
+      document.getElementById("anRevGr").textContent  = revGr != null ? (revGr > 0 ? "+" : "") + revGr.toFixed(1) + "%" : "—";
+      document.getElementById("anRevGr").className    = "font-bold text-base " + (revGr > 10 ? "text-emerald-400" : revGr > 0 ? "text-yellow-400" : "text-red-400");
+      const fcfM = metrics?.fcf_margin?.["1y"];
+      document.getElementById("anFcfM").textContent   = fcfM != null ? fcfM.toFixed(1) + "%" : "—";
+      document.getElementById("anFcfM").className     = "font-bold text-base " + (fcfM > 15 ? "text-emerald-400" : fcfM > 5 ? "text-yellow-400" : "text-red-400");
+      anLiveStrip.classList.remove("hidden");
+    }
+
+    // ── Current metrics for exit multiple ──
+    const cm = document.getElementById("anCurrentMetrics");
+    if (cm) {
+      document.getElementById("anEpsTtm").textContent = info?.trailing_eps ? `$${info.trailing_eps.toFixed(2)}` : "—";
+      document.getElementById("anEpsFwd").textContent = info?.forward_eps  ? `$${info.forward_eps.toFixed(2)}`  : "—";
+      document.getElementById("anRevTtm").textContent = info?.total_revenue ? fmtBig(info.total_revenue)        : "—";
+      cm.classList.remove("hidden");
+    }
+
+    // ── Historical anchors ──
+    const anAnchors = document.getElementById("anAnchors");
+    if (anAnchors && metrics) {
+      const m = metrics;
+      const anchor = (label, key, suffix="%", dec=1) => {
+        const v1 = m[key]?.["1y"];
+        const v5 = m[key]?.["5y"];
+        const fmt1 = v1 != null ? v1.toFixed(dec) + suffix : "—";
+        const fmt5 = v5 != null ? v5.toFixed(dec) + suffix : "—";
+        const color1 = (key === "rev_growth" || key === "roic" || key === "fcf_margin" || key === "net_margin")
+          ? (v1 > 10 ? "text-emerald-400" : v1 > 0 ? "text-yellow-400" : "text-red-400") : "text-white";
+        return `<div class="bg-slate-800 rounded p-2.5 text-center">
+          <div class="text-slate-400 text-xs mb-1">${label}</div>
+          <div class="${color1} font-bold text-sm">${fmt1} <span class="text-slate-500 text-xs font-normal">1Y</span></div>
+          <div class="text-slate-400 text-xs">${fmt5} <span class="text-slate-500 text-xs">5Y</span></div>
+        </div>`;
+      };
+      anAnchors.innerHTML = `<div class="grid grid-cols-2 md:grid-cols-5 gap-2">
+        ${anchor("Rev Growth", "rev_growth")}
+        ${anchor("Net Margin", "net_margin")}
+        ${anchor("FCF Margin", "fcf_margin")}
+        ${anchor("Op Margin",  "op_margin")}
+        ${anchor("ROIC",       "roic")}
+      </div>`;
+    }
+
+    // ── Auto-fill exit multiple inputs ──
+    const trailingPe = info?.trailing_pe;
+    if (trailingPe && !document.getElementById("anEmPeBase").value) {
+      const base = Math.round(trailingPe);
+      document.getElementById("anEmPeBase").value = base;
+      document.getElementById("anEmPeBear").value = Math.max(8, Math.round(base * 0.7));
+      document.getElementById("anEmPeBull").value = Math.round(base * 1.35);
+    }
+    const revGr5 = metrics?.rev_growth?.["5y"];
+    if (!document.getElementById("anEmEpsGrowth").value && revGr5 != null) {
+      document.getElementById("anEmEpsGrowth").value = Math.max(0, revGr5).toFixed(0);
+    }
+
+    // ── Pre-fill thesis form from existing thesis ──
+    if (existingThesis) {
+      const ts = document.getElementById("anThesisStatus");
+      if (ts) ts.textContent = "✓ Thesis on file — editing existing";
+      const setVal = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.value = v; };
+      setVal("anConviction", existingThesis.conviction_tier);
+      setVal("anMoat",       existingThesis.moat_rating);
+      setVal("anCase",       existingThesis.investment_case);
+      setVal("anTarget",     existingThesis.target_price_36m || existingThesis.target_price || existingThesis.intrinsic_value);
+      setVal("anStop",       existingThesis.stop_loss);
+      setVal("an90d",        existingThesis.key_90d_metric);
+      setVal("anExit",       existingThesis.sell_trigger);
+    } else {
+      const ts = document.getElementById("anThesisStatus");
+      if (ts) ts.textContent = "New thesis";
+    }
+
+    // ── Show content, hide empty state ──
+    document.getElementById("anContent").classList.remove("hidden");
+    document.getElementById("anEmpty").classList.add("hidden");
+    document.getElementById("anLiveStrip").classList.remove("hidden");
+
+    if (status) status.textContent = ticker;
+  } catch(e) {
+    if (status) status.textContent = "Error: " + e.message;
+  } finally {
+    if (btn) btn.textContent = "Load →";
+  }
+}
+
+function calcAnalyseExitMultiple() {
+  const ticker  = (document.getElementById("anTicker")?.value || "").trim().toUpperCase();
+  const info    = _anMetrics || {};
+  const price   = info.current_price || 0;
+  const epsNow  = info.eps_ttm || 0;
+  const years   = parseInt(document.getElementById("anEmYears").value) || 3;
+  const epsGrowth = parseFloat(document.getElementById("anEmEpsGrowth").value) / 100 || 0;
+  const peBear  = parseFloat(document.getElementById("anEmPeBear").value) || 0;
+  const peBase  = parseFloat(document.getElementById("anEmPeBase").value) || 0;
+  const peBull  = parseFloat(document.getElementById("anEmPeBull").value) || 0;
+
+  if (!epsNow) { alert("No EPS available — load a ticker first."); return; }
+  if (!peBase) { alert("Enter exit P/E multiples first."); return; }
+
+  const epsFuture = epsNow * Math.pow(1 + epsGrowth, years);
+  const annReturn = ip => price > 0 ? ((Math.pow(ip / price, 1/years) - 1) * 100).toFixed(1) : null;
+  const colorRet  = r => parseFloat(r) >= 15 ? "text-emerald-400 font-bold" : parseFloat(r) >= 10 ? "text-yellow-400" : "text-red-400";
+
+  const row = (label, multiple, colorCls) => {
+    if (!multiple) return "";
+    const implied = epsFuture * multiple;
+    const ret     = annReturn(implied);
+    const mos     = price > 0 ? (((implied - price) / price) * 100).toFixed(1) : null;
+    return `<div class="flex items-center justify-between bg-slate-800 rounded px-3 py-2">
+      <span class="${colorCls} text-sm font-semibold w-14">${label}</span>
+      <span class="text-slate-400 text-xs">${multiple}× EPS</span>
+      <span class="text-white font-bold">$${implied.toFixed(2)}</span>
+      <span class="${ret != null ? colorRet(ret) : "text-slate-400"} text-sm">${ret != null ? (ret>0?"+":"")+ret+"% /yr" : "—"}</span>
+      <span class="text-slate-400 text-xs">${mos != null ? (mos>0?"+":"")+mos+"% vs today" : ""}</span>
+    </div>`;
+  };
+
+  const html = [
+    row("Bear 🐻", peBear, "text-red-400"),
+    row("Base ⚖️", peBase, "text-slate-200"),
+    row("Bull 🐂", peBull, "text-emerald-400"),
+  ].join("");
+
+  const resultsEl = document.getElementById("anEmResults");
+  resultsEl.innerHTML = `<div class="text-xs text-slate-500 mb-2">${ticker} @ $${price.toFixed(2)} · EPS $${epsNow.toFixed(2)} → $${epsFuture.toFixed(2)} in ${years}yr (${(epsGrowth*100).toFixed(0)}%/yr growth)</div>`
+    + (html || `<div class="text-slate-500 text-sm">Enter exit multiples to calculate.</div>`);
+  resultsEl.classList.remove("hidden");
+
+  // Auto-suggest target from Base scenario
+  if (peBase && !document.getElementById("anTarget").value) {
+    const baseImplied = epsFuture * peBase;
+    document.getElementById("anTarget").value = baseImplied.toFixed(2);
+  }
+}
+
+async function saveAnalyseThesis() {
+  const ticker = (document.getElementById("anTicker")?.value || "").trim().toUpperCase();
+  if (!ticker) { alert("Load a ticker first."); return; }
+
+  const payload = {
+    ticker,
+    conviction_tier:  document.getElementById("anConviction").value,
+    moat_rating:      document.getElementById("anMoat").value,
+    investment_case:  document.getElementById("anCase").value,
+    target_price_36m: parseFloat(document.getElementById("anTarget").value) || null,
+    stop_loss:        parseFloat(document.getElementById("anStop").value)   || null,
+    key_90d_metric:   document.getElementById("an90d").value,
+    sell_trigger:     document.getElementById("anExit").value,
+    status: "active",
+  };
+
+  const ts = document.getElementById("anThesisStatus");
+  if (ts) ts.textContent = "Saving…";
+  try {
+    await api("/api/thesis", "POST", payload);
+    if (ts) ts.textContent = "✓ Saved";
+    setTimeout(() => { if (ts) ts.textContent = "✓ Thesis on file — editing existing"; }, 2000);
+  } catch(e) {
+    if (ts) ts.textContent = "Error: " + e.message;
+  }
+}
+
+function promoteAnalyseToPortfolio() {
+  const ticker = (document.getElementById("anTicker")?.value || "").trim().toUpperCase();
+  if (!ticker) { alert("Load a ticker first."); return; }
+
+  // Pre-fill portfolio modal fields from Analyse context
+  document.getElementById("pfTicker").value = ticker;
+  document.getElementById("pfDate").value   = new Date().toISOString().slice(0,10);
+
+  // Pre-fill notes from investment case if available
+  const investCase = document.getElementById("anCase")?.value;
+  if (investCase) document.getElementById("pfNotes").value = investCase.slice(0, 200);
+
+  document.getElementById("portfolioFormModal").classList.remove("hidden");
+  document.getElementById("pfEntry").focus();
 }
 
 // ─── Init ────────────────────────────────────────────────────────
