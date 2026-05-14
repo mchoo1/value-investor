@@ -999,6 +999,220 @@ def get_shortlist_ticker(ticker):
 
 
 # ══════════════════════════════════════════════════════════════════
+# FIRST-CUT — Upload memo (PDF / DOCX / TXT / MD)
+# ══════════════════════════════════════════════════════════════════
+
+@app.route("/api/shortlist/upload-memo", methods=["POST"])
+def upload_first_cut_memo():
+    """Parse a first-cut memo document and PATCH matching shortlist entries.
+    Supports Task B PDF/DOCX output or any structured text.
+    Returns a list of tickers updated + any parse warnings."""
+    import re, tempfile, json as _json
+
+    if "file" not in request.files:
+        return jsonify({"error": "No file uploaded"}), 400
+
+    f = request.files["file"]
+    filename = (f.filename or "").lower()
+    text = ""
+
+    # ── Extract text ─────────────────────────────────────────────────────────
+    try:
+        if filename.endswith(".docx"):
+            try:
+                from docx import Document
+            except ImportError:
+                return jsonify({"error": "python-docx not installed"}), 500
+            with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as tmp:
+                f.save(tmp.name)
+                doc = Document(tmp.name)
+                text = "\n".join(p.text for p in doc.paragraphs if p.text.strip())
+
+        elif filename.endswith(".pdf"):
+            try:
+                import pypdf
+                with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+                    f.save(tmp.name)
+                    reader = pypdf.PdfReader(tmp.name)
+                    text = "\n".join(page.extract_text() or "" for page in reader.pages)
+            except ImportError:
+                try:
+                    import pdfplumber
+                    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+                        f.save(tmp.name)
+                        with pdfplumber.open(tmp.name) as pdf:
+                            text = "\n".join(pg.extract_text() or "" for pg in pdf.pages)
+                except ImportError:
+                    return jsonify({"error": "No PDF library available"}), 500
+
+        elif filename.endswith((".txt", ".md")):
+            text = f.read().decode("utf-8", errors="replace")
+        else:
+            return jsonify({"error": f"Unsupported file type: {filename}"}), 400
+
+    except Exception as e:
+        return jsonify({"error": f"Extraction failed: {str(e)}"}), 500
+
+    if not text.strip():
+        return jsonify({"error": "No text extracted from file"}), 400
+
+    # ── Split into per-ticker sections ───────────────────────────────────────
+    # Detect section breaks: "TICKER | Company Name" patterns at line start
+    ticker_pattern = re.compile(r"^\s*([A-Z]{1,5})\s*[|\-]\s*(.+?)(?:\s*\|.*)?$", re.MULTILINE)
+    sections = []
+    matches = list(ticker_pattern.finditer(text))
+    for i, m in enumerate(matches):
+        start = m.start()
+        end = matches[i+1].start() if i+1 < len(matches) else len(text)
+        possible_ticker = m.group(1).strip()
+        # Filter out common false positives (section labels)
+        if possible_ticker in ("N", "A", "IF", "DO", "IT", "THE", "OR"):
+            continue
+        sections.append({"ticker": possible_ticker, "text": text[start:end]})
+
+    # If no section breaks found, treat the whole doc as one memo
+    if not sections:
+        # Try to find any ticker mentions in the first 200 chars
+        t_match = re.search(r"\b([A-Z]{2,5})\b", text[:300])
+        if t_match:
+            sections = [{"ticker": t_match.group(1), "text": text}]
+
+    if not sections:
+        return jsonify({"error": "No ticker sections found in document", "preview": text[:500]}), 422
+
+    # ── Parse each section ───────────────────────────────────────────────────
+    def find_val(pattern, txt, cast=None):
+        m = re.search(pattern, txt, re.IGNORECASE)
+        if not m: return None
+        raw = m.group(1).replace(",", "").replace("$", "").strip()
+        if cast:
+            try: return cast(raw)
+            except: return raw
+        return raw
+
+    def extract_verdict(txt):
+        m = re.search(r"\b(ADVANCE|BENCH|KILL)\b", txt, re.IGNORECASE)
+        return m.group(1).upper() if m else None
+
+    def extract_test_results(txt):
+        results = {}
+        for test in ["business", "thesis", "competition", "valuation", "bear"]:
+            m = re.search(rf"test\s*\d*[:\s]+{test}[^\n]*\n.*?(PASS|FAIL)[^\n]*", txt, re.IGNORECASE | re.DOTALL)
+            if not m:
+                m = re.search(rf"{test}[^\n]*:[^\n]*(PASS|FAIL)", txt, re.IGNORECASE)
+            results[f"{test}_test"] = m.group(1).upper() if m else "N/A"
+        return results
+
+    updated = []
+    skipped = []
+    warnings = []
+
+    for sec in sections:
+        ticker = sec["ticker"].upper()
+        sec_text = sec["text"]
+        verdict = extract_verdict(sec_text)
+
+        # Map verdict to stage
+        stage_map = {"ADVANCE": "FIRST_CUT_ADVANCE", "BENCH": "FIRST_CUT_BENCH", "KILL": "ARCHIVED"}
+        stage = stage_map.get(verdict) if verdict else None
+
+        # Extract snapshot metrics
+        snap = {}
+        snap["price"]                    = find_val(r"price[:\s]+\$?([\d.]+)", sec_text, float)
+        snap["market_cap_b"]             = find_val(r"market cap[:\s]+\$?([\d.]+)B", sec_text, float)
+        snap["ev_b"]                     = find_val(r"\bEV[:\s]+\$?([\d.]+)B", sec_text, float)
+        snap["drawdown_from_high_pct"]   = find_val(r"drawdown[:\s]+-?([\d.]+)%", sec_text, float)
+        snap["revenue_ttm_b"]            = find_val(r"revenue.{0,10}TTM[:\s]+\$?([\d.]+)B", sec_text, float)
+        snap["revenue_growth_yoy_pct"]   = find_val(r"revenue growth[:\s]+([\d.]+)%", sec_text, float)
+        snap["gross_margin_pct"]         = find_val(r"gross margin[:\s]+([\d.]+)%", sec_text, float)
+        snap["ebitda_margin_pct"]        = find_val(r"ebitda margin[:\s]+([\d.]+)%", sec_text, float)
+        snap["pe_ntm"]                   = find_val(r"P/E NTM[:\s]+([\d.]+)", sec_text, float)
+        snap["ev_ebitda_ntm"]            = find_val(r"EV/EBITDA NTM[:\s]+([\d.]+)", sec_text, float)
+        snap["consensus_pt_mean"]        = find_val(r"consensus PT[:\s]+\$?([\d.]+)", sec_text, float)
+        snap["short_interest_pct_float"] = find_val(r"short interest[:\s]+([\d.]+)%", sec_text, float)
+        snap["next_earnings_date"]       = find_val(r"next earnings[:\s]+(\d{4}-\d{2}-\d{2})", sec_text)
+        snap = {k: v for k, v in snap.items() if v is not None}  # strip nulls
+
+        # Extract initial rationale (paragraph after "Initial Rationale" heading)
+        rat_match = re.search(r"initial rationale[:\s]*\n+(.+?)(?:\n\n|\nTest\s*1|\nStep)", sec_text, re.IGNORECASE | re.DOTALL)
+        initial_rationale = rat_match.group(1).strip()[:2000] if rat_match else None
+
+        # Extract test results into first_cut_summary JSON
+        test_results = extract_test_results(sec_text)
+        rough_iv = find_val(r"(?:rough IV|intrinsic value)[:\s]+\$?([\d.]+)", sec_text, float)
+        rough_mos = find_val(r"(?:MoS|margin of safety)[:\s]+([\d.]+)%", sec_text, float)
+        variant   = find_val(r"variant insight[:\s]+(.{10,200})", sec_text)
+        catalyst  = find_val(r"primary catalyst[:\s]+(.{5,200})", sec_text)
+
+        first_cut_summary = {**test_results}
+        if rough_iv:  first_cut_summary["rough_iv"]  = rough_iv
+        if rough_mos: first_cut_summary["rough_mos_pct"] = rough_mos
+        if variant:   first_cut_summary["variant_insight"] = variant
+        if catalyst:  first_cut_summary["primary_catalyst"] = catalyst
+
+        # Conviction (look for x/5 pattern)
+        conviction_match = re.search(r"conviction[:\s]+(\d)/5", sec_text, re.IGNORECASE)
+        conviction = int(conviction_match.group(1)) if conviction_match else None
+
+        # Build PATCH payload — only send non-null fields
+        patch = {}
+        if verdict:     patch["verdict"] = verdict
+        if stage:       patch["stage"]   = stage
+        if snap:        patch["snapshot_metrics"] = _json.dumps(snap)
+        if initial_rationale: patch["initial_rationale"] = initial_rationale
+        if first_cut_summary: patch["first_cut_summary"] = _json.dumps(first_cut_summary)
+        if conviction:  patch["first_cut_conviction"] = conviction
+        patch["first_cut_date"] = datetime.now().strftime("%Y-%m-%d")
+
+        if not patch.get("verdict"):
+            warnings.append(f"{ticker}: no verdict found")
+            skipped.append(ticker)
+            continue
+
+        # Apply PATCH
+        updated_ok = db.patch_shortlist(ticker, patch)
+        if updated_ok:
+            updated.append({"ticker": ticker, "verdict": verdict, "stage": stage,
+                            "tests_parsed": list(test_results.keys()),
+                            "snapshot_fields": list(snap.keys())})
+        else:
+            # Ticker not in shortlist yet — create it
+            db.save_shortlist_ticker({
+                "ticker": ticker,
+                "stage": stage or "SHORTLISTED",
+                "verdict": verdict,
+                "source": "memo_upload",
+                "snapshot_metrics": _json.dumps(snap) if snap else None,
+                "initial_rationale": initial_rationale,
+                "first_cut_summary": _json.dumps(first_cut_summary) if first_cut_summary else None,
+                "first_cut_conviction": conviction,
+                "first_cut_date": datetime.now().strftime("%Y-%m-%d"),
+                "created_date": datetime.now().strftime("%Y-%m-%d"),
+                "updated_date": datetime.now().strftime("%Y-%m-%d"),
+            })
+            updated.append({"ticker": ticker, "verdict": verdict, "stage": stage, "created": True})
+            warnings.append(f"{ticker}: not in shortlist — created new entry")
+
+        # If KILL, push to research_history
+        if verdict == "KILL":
+            kill_test = next((k for k, v in test_results.items() if v == "FAIL"), "unknown")
+            db.save_research_history({
+                "ticker": ticker,
+                "archived_date": datetime.now().strftime("%Y-%m-%d"),
+                "archive_reason": f"killed_at_first_cut_{kill_test}",
+                "final_stage": "FIRST_CUT_KILL",
+                "thesis_status": "rejected",
+            })
+
+    return jsonify({
+        "updated": updated,
+        "skipped": skipped,
+        "warnings": warnings,
+        "sections_found": len(sections),
+    })
+
+
+# ══════════════════════════════════════════════════════════════════
 # SPRINT 1 — Triggers endpoints
 # ══════════════════════════════════════════════════════════════════
 

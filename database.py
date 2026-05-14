@@ -233,6 +233,11 @@ def init_db():
                 one_line_thesis TEXT,
                 verdict TEXT,
                 first_cut_summary TEXT,
+                initial_rationale TEXT,
+                snapshot_metrics TEXT,
+                first_cut_conviction INTEGER,
+                first_cut_date TEXT,
+                first_cut_memo_path TEXT,
                 source TEXT DEFAULT 'task_a',
                 weeks_in_pool INTEGER DEFAULT 0,
                 expires_date TEXT,
@@ -240,6 +245,18 @@ def init_db():
                 updated_date TEXT
             )
         """)
+        # ── Task B: extend shortlist (Postgres — ALTER for existing tables) ──
+        c.execute("SELECT column_name FROM information_schema.columns WHERE table_name='shortlist'")
+        existing_sl_pg = {r[0] for r in c.fetchall()}
+        for col, col_type in [
+            ("initial_rationale",    "TEXT"),
+            ("snapshot_metrics",     "TEXT"),
+            ("first_cut_conviction", "INTEGER"),
+            ("first_cut_date",       "TEXT"),
+            ("first_cut_memo_path",  "TEXT"),
+        ]:
+            if col not in existing_sl_pg:
+                c.execute(f"ALTER TABLE shortlist ADD COLUMN {col} {col_type}")
 
         # ── Sprint 1: triggers table ──
         c.execute("""
@@ -445,6 +462,21 @@ def init_db():
                 updated_date TEXT
             )
         """)
+
+        # ── Task B: extend shortlist with first-cut fields ──
+        c.execute("SELECT name FROM pragma_table_info('shortlist')" if not _USE_PG else
+                  "SELECT column_name FROM information_schema.columns WHERE table_name='shortlist'")
+        existing_sl_cols = {r[0] for r in c.fetchall()}
+        for col, col_type in [
+            ("initial_rationale",    "TEXT"),
+            ("snapshot_metrics",     "TEXT"),
+            ("first_cut_summary",    "TEXT"),   # already in CREATE but safe to guard
+            ("first_cut_conviction", "INTEGER"),
+            ("first_cut_date",       "TEXT"),
+            ("first_cut_memo_path",  "TEXT"),
+        ]:
+            if col not in existing_sl_cols:
+                c.execute(f"ALTER TABLE shortlist ADD COLUMN {col} {col_type}")
 
         # ── Sprint 1: triggers table ──
         c.execute("""

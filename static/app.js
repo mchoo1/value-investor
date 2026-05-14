@@ -3140,9 +3140,67 @@ function renderFirstCutCard(item) {
     } catch(e) {}
   }
 
-  // First-cut summary
-  const summaryHtml = item.first_cut_summary
-    ? `<div class="mt-2 text-xs text-slate-400 bg-slate-800 rounded p-2 line-clamp-3">${item.first_cut_summary}</div>` : "";
+  // ── First-cut summary (test results) ────────────────────────────────────
+  let summaryHtml = "";
+  if (item.first_cut_summary) {
+    try {
+      const fc = typeof item.first_cut_summary === "string" ? JSON.parse(item.first_cut_summary) : item.first_cut_summary;
+      const tests = ["business","thesis","competition","valuation","bear"];
+      const testRows = tests.map(t => {
+        const val = fc[`${t}_test`] || "N/A";
+        const pass = val === "PASS";
+        const fail = val.startsWith("FAIL");
+        const color = pass ? "text-emerald-400" : fail ? "text-red-400" : "text-slate-500";
+        const icon  = pass ? "✓" : fail ? "✕" : "—";
+        return `<span class="text-xs ${color}" title="${t}">${icon} ${t.slice(0,3).toUpperCase()}</span>`;
+      }).join(" ");
+      const mos  = fc.rough_mos_pct != null ? `<span class="text-xs text-yellow-400 ml-2">MoS ${fc.rough_mos_pct}%</span>` : "";
+      const iv   = fc.rough_iv      != null ? `<span class="text-xs text-slate-400 ml-1">IV $${fc.rough_iv}</span>` : "";
+      const vi   = fc.variant_insight ? `<div class="text-xs text-blue-300 mt-1 italic">💡 ${fc.variant_insight.slice(0,120)}${fc.variant_insight.length>120?"…":""}</div>` : "";
+      summaryHtml = `<div class="mt-2 bg-slate-800 rounded px-3 py-2">
+        <div class="flex items-center gap-1 flex-wrap">${testRows}${mos}${iv}</div>${vi}
+      </div>`;
+    } catch(e) {
+      summaryHtml = `<div class="mt-2 text-xs text-slate-400 bg-slate-800 rounded p-2 line-clamp-3">${item.first_cut_summary}</div>`;
+    }
+  }
+
+  // ── Initial rationale (from Task B memo) ─────────────────────────────────
+  const rationaleFromMemo = item.initial_rationale
+    ? `<div class="mt-2 border-l-2 border-blue-700 pl-3 text-xs text-slate-300 leading-relaxed">${item.initial_rationale.slice(0,400)}${item.initial_rationale.length>400?"…":""}</div>`
+    : "";
+
+  // ── Snapshot metrics table (Task B data) ─────────────────────────────────
+  let snapshotHtml = "";
+  if (item.snapshot_metrics) {
+    try {
+      const snap = typeof item.snapshot_metrics === "string" ? JSON.parse(item.snapshot_metrics) : item.snapshot_metrics;
+      const fmt = (v, prefix="$", suffix="") => v != null ? `${prefix}${typeof v==="number"?v.toFixed(v<10?2:1):v}${suffix}` : "—";
+      const rows = [
+        snap.price        != null ? `<tr><td class="pr-3 text-slate-500">Price</td><td class="text-white font-semibold">${fmt(snap.price)}</td><td class="text-slate-400 text-xs">${snap.drawdown_from_high_pct!=null?`${snap.drawdown_from_high_pct}% from 52w high`:""}</td></tr>` : "",
+        snap.market_cap_b != null ? `<tr><td class="pr-3 text-slate-500">Mkt Cap / EV</td><td>${fmt(snap.market_cap_b,"$","B")} / ${fmt(snap.ev_b,"$","B")}</td><td></td></tr>` : "",
+        snap.revenue_ttm_b != null ? `<tr><td class="pr-3 text-slate-500">Rev TTM / Growth</td><td>${fmt(snap.revenue_ttm_b,"$","B")}</td><td class="text-xs ${(snap.revenue_growth_yoy_pct||0)>0?"text-emerald-400":"text-red-400"}">${snap.revenue_growth_yoy_pct!=null?`+${snap.revenue_growth_yoy_pct}% YoY`:""}</td></tr>` : "",
+        snap.pe_ntm       != null ? `<tr><td class="pr-3 text-slate-500">P/E NTM / EV/EBITDA</td><td>${fmt(snap.pe_ntm,"","x")} / ${fmt(snap.ev_ebitda_ntm,"","x")}</td><td></td></tr>` : "",
+        snap.consensus_pt_mean != null ? `<tr><td class="pr-3 text-slate-500">Consensus PT</td><td>${fmt(snap.consensus_pt_mean)}</td><td class="text-xs text-slate-400">${snap.pt_low&&snap.pt_high?`$${snap.pt_low}–$${snap.pt_high}`:""}</td></tr>` : "",
+        snap.short_interest_pct_float != null ? `<tr><td class="pr-3 text-slate-500">Short Interest</td><td>${snap.short_interest_pct_float}%</td><td class="text-xs text-slate-400">${snap.short_interest_trend||""}</td></tr>` : "",
+        snap.next_earnings_date ? `<tr><td class="pr-3 text-slate-500">Next Earnings</td><td>${snap.next_earnings_date}</td><td></td></tr>` : "",
+      ].filter(Boolean);
+
+      if (rows.length) {
+        snapshotHtml = `
+          <div class="mt-2 border border-slate-700 rounded overflow-hidden">
+            <button onclick="this.nextElementSibling.classList.toggle('hidden');this.querySelector('span').textContent=this.nextElementSibling.classList.contains('hidden')?'▶':'▼'"
+              class="w-full text-left px-3 py-1.5 bg-slate-800 text-xs text-slate-400 hover:text-slate-200 flex items-center gap-1.5">
+              <span>▶</span> Snapshot Metrics
+            </button>
+            <div class="hidden px-3 py-2 bg-slate-900">
+              <table class="text-xs w-full">${rows.join("")}</table>
+              ${snap.insider_net_6mo ? `<div class="text-xs text-slate-400 mt-1.5">👤 Insider (6mo): ${snap.insider_net_6mo}</div>` : ""}
+            </div>
+          </div>`;
+      }
+    } catch(e) {}
+  }
 
   // ── Rationale block — why this name is in First Cut ──────────────────────
   let rationaleHtml = "";
@@ -3229,9 +3287,11 @@ function renderFirstCutCard(item) {
           ${strategy}${tier}${archetype}
           ${expiryHtml}
         </div>
-        ${item.one_line_thesis ? `<div class="text-slate-300 text-sm">${item.one_line_thesis}</div>` : ""}
+        ${item.one_line_thesis ? `<div class="text-slate-300 text-sm mb-1">${item.one_line_thesis}</div>` : ""}
+        ${rationaleFromMemo}
         ${axisHtml}
         ${summaryHtml}
+        ${snapshotHtml}
         ${rationaleHtml}
         ${verdictButtons}
       </div>
@@ -3276,6 +3336,52 @@ async function assignVerdict(ticker, newStage) {
   } catch(e) {
     alert("Failed to update " + ticker + ": " + e.message);
   }
+}
+
+// ── First-Cut memo upload ────────────────────────────────────────────────────
+async function uploadFirstCutMemo(input) {
+  const file = input?.files?.[0];
+  if (!file) return;
+  const status = document.getElementById("fcUploadStatus");
+  if (status) status.textContent = `Parsing ${file.name}…`;
+
+  try {
+    const formData = new FormData();
+    formData.append("file", file);
+    const res = await fetch("/api/shortlist/upload-memo", { method: "POST", body: formData });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || res.statusText);
+
+    const updated = data.updated || [];
+    const warns   = data.warnings || [];
+    const advance = updated.filter(u => u.verdict === "ADVANCE").length;
+    const bench   = updated.filter(u => u.verdict === "BENCH").length;
+    const kill    = updated.filter(u => u.verdict === "KILL").length;
+
+    if (status) {
+      status.textContent = `✓ ${updated.length} tickers updated — ${advance} ADVANCE / ${bench} BENCH / ${kill} KILL`;
+      if (warns.length) status.textContent += ` | ⚠ ${warns.length} warning(s)`;
+    }
+
+    // Show summary toast
+    const summary = updated.map(u => `${u.ticker}: ${u.verdict}${u.created ? " (new)" : ""}`).join(" · ");
+    if (summary) {
+      const toast = document.createElement("div");
+      toast.className = "fixed bottom-4 right-4 bg-slate-800 border border-slate-600 rounded-lg p-4 text-sm text-slate-200 z-50 max-w-sm shadow-xl";
+      toast.innerHTML = `<div class="font-semibold text-emerald-400 mb-1">📋 Memo imported</div>
+        <div class="text-xs text-slate-400 mb-2">${summary}</div>
+        ${warns.length ? `<div class="text-xs text-amber-400">${warns.join("<br>")}</div>` : ""}
+        <button onclick="this.parentElement.remove()" class="mt-2 text-xs text-slate-500 hover:text-white">✕ dismiss</button>`;
+      document.body.appendChild(toast);
+      setTimeout(() => toast.remove(), 8000);
+    }
+
+    await loadFirstCut();
+    refreshNavBadges();
+  } catch(e) {
+    if (status) status.textContent = "Upload error: " + e.message;
+  }
+  input.value = "";
 }
 
 async function addToFirstCutPool() {
