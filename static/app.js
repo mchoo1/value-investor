@@ -54,6 +54,7 @@ function showSection(name) {
   if (btn) btn.classList.add("active");
   if (name === "dashboard")  loadDashboard();
   if (name === "screener" && !screenerRan) { screenerRan = true; runScreener(); }
+  if (name === "firstcut")   loadFirstCut();
   if (name === "shortlist")  loadShortlist();
   if (name === "triggers")   loadTriggers();
   if (name === "analyse")    { /* loads on ticker entry */ }
@@ -131,14 +132,12 @@ function metricRow(label, value) {
 // ═══════════════════════════════════════════════════════════════
 function loadDashboard() {
   document.getElementById("dashDate").textContent = "Updated: " + new Date().toLocaleString();
-  // Load DB-backed panels immediately (fast, no network calls)
   loadWatchlistPanel();
   loadPortfolioPanel();
   loadThesisPanel();
-  // Delay market data by 1s so the fast panels render first
-  setTimeout(loadMarketOverview, 1000);
-  // Buffett Indicator — cached 6h server-side, loads fast after first call
+  setTimeout(loadMarketOverview,   1000);
   setTimeout(loadBuffettIndicator, 1500);
+  setTimeout(loadIntelligence,     2000);
 }
 
 async function loadWatchlistPanel() {
@@ -814,9 +813,13 @@ function startThesisFromScreener(ticker, name, price) {
 let _currentResearchTicker = null;
 
 function switchResTab(tab) {
-  ["overview","insiders","catalysts","redflags","competitors"].forEach(t => {
-    const panel = document.getElementById(t === "overview" ? "researchContent" :
-      t === "redflags" ? "resRedFlags" : `res${t.charAt(0).toUpperCase()+t.slice(1)}`);
+  ["overview","insiders","catalysts","redflags","competitors","killswitch","timeline"].forEach(t => {
+    const panelId = t === "overview"   ? "researchContent"
+                  : t === "redflags"   ? "resRedFlags"
+                  : t === "killswitch" ? "resKillSwitch"
+                  : t === "timeline"   ? "resTimeline"
+                  : `res${t.charAt(0).toUpperCase()+t.slice(1)}`;
+    const panel = document.getElementById(panelId);
     const btn   = document.getElementById("rt-" + t);
     if (panel) panel.classList.toggle("hidden", t !== tab);
     if (btn)   btn.classList.toggle("active", t === tab);
@@ -826,6 +829,8 @@ function switchResTab(tab) {
   if (tab === "catalysts"   && document.getElementById("catalystsContent").textContent.includes("Run analysis"))   loadCatalystsPanel(_currentResearchTicker);
   if (tab === "redflags"    && document.getElementById("redflagsContent").textContent.includes("Run analysis"))    loadRedFlagsPanel(_currentResearchTicker);
   if (tab === "competitors" && document.getElementById("competitorsContent").textContent.includes("Run analysis")) loadCompetitorsPanel(_currentResearchTicker);
+  if (tab === "killswitch"  && document.getElementById("killSwitchContent").textContent.includes("Run analysis"))  loadKillSwitchPanel(_currentResearchTicker);
+  if (tab === "timeline"    && document.getElementById("timelineContent").textContent.includes("Run analysis"))    loadTimelinePanel(_currentResearchTicker);
 }
 
 async function loadResearch() {
@@ -1167,6 +1172,241 @@ function prefillThesis(ticker, name, price) {
   document.getElementById("thCurrentPrice").value = price;
   document.getElementById("thEditId").value = "";
   document.getElementById("thesisFormModal").classList.remove("hidden");
+}
+
+// ═══════════════════════════════════════════════════════════════
+// KILL-SWITCH PANEL — Sprint 3
+// ═══════════════════════════════════════════════════════════════
+async function loadKillSwitchPanel(ticker) {
+  const el = document.getElementById("killSwitchContent");
+  if (!el) return;
+  el.innerHTML = `<div class="flex justify-center py-8"><div class="loader"></div></div>`;
+  try {
+    const baseTicker = ticker.split(".")[0];
+    const theses     = await api("/api/thesis");
+    const thesis     = (theses || []).find(t => t.ticker === baseTicker);
+
+    if (!thesis) {
+      el.innerHTML = `<div class="card text-center py-10 text-slate-500">
+        <div class="text-2xl mb-2">🛡</div>
+        <div>No thesis on file for ${baseTicker}.</div>
+        <div class="text-sm mt-2">Write a thesis in the <a onclick="openAnalyse('${baseTicker}')" class="text-emerald-400 cursor-pointer hover:underline">Analyse</a> tab to define kill-switch conditions.</div>
+      </div>`;
+      return;
+    }
+
+    let config = {};
+    try { config = JSON.parse(thesis.kill_switch_config || "{}"); } catch(e) {}
+
+    const f = (key, label, placeholder) => `
+      <div>
+        <label class="text-slate-400 text-xs block mb-1">${label}</label>
+        <input id="ks-${key}" class="input-field" value="${config[key] ?? ""}" placeholder="${placeholder}">
+      </div>`;
+
+    el.innerHTML = `
+      <div class="card mb-4">
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <div class="text-slate-200 font-semibold">${baseTicker} — Kill-Switch Configuration</div>
+            <div class="text-slate-500 text-xs mt-0.5">Task D evaluates these triggers on every monitoring run. Edit and save to update what it watches.</div>
+          </div>
+          <button onclick="saveKillSwitchConfig('${baseTicker}')" class="btn-primary text-sm">💾 Save Config</button>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+          <div class="bg-slate-800 rounded-lg p-3">
+            <div class="text-red-400 text-xs font-semibold uppercase tracking-wide mb-3">🛑 Price Stops</div>
+            <div class="space-y-3">
+              ${f("hard_stop_pct",    "Hard Stop (% below entry)", "e.g. -20")}
+              ${f("warning_stop_pct", "Warning Stop (%)",           "e.g. -12")}
+              ${f("take_profit_1_pct","Take-Profit 1 (%)",           "e.g. +50")}
+              ${f("take_profit_2_pct","Take-Profit 2 (%)",           "e.g. +100")}
+            </div>
+          </div>
+          <div class="bg-slate-800 rounded-lg p-3">
+            <div class="text-amber-400 text-xs font-semibold uppercase tracking-wide mb-3">📊 KPI Thresholds</div>
+            <div class="space-y-3">
+              ${f("kpi_hard_threshold",    "KPI Hard Threshold",    "e.g. Rev growth < 5%")}
+              ${f("kpi_warning_threshold", "KPI Warning Threshold", "e.g. Rev growth < 10%")}
+              ${f("primary_kpi_metric",    "Primary KPI Metric",    "e.g. revenue_growth")}
+              ${f("margin_floor",          "Margin Floor",          "e.g. Net margin < 8%")}
+            </div>
+          </div>
+          <div class="bg-slate-800 rounded-lg p-3">
+            <div class="text-sky-400 text-xs font-semibold uppercase tracking-wide mb-3">📅 Catalyst & Review</div>
+            <div class="space-y-3">
+              ${f("primary_catalyst",       "Primary Catalyst",     "e.g. FDA approval Q3 2026")}
+              ${f("catalyst_deadline",      "Catalyst Deadline",    "e.g. 2026-09-30")}
+              ${f("review_cadence_days",    "Review Cadence (days)","e.g. 90")}
+              ${f("next_review_date",       "Next Review Date",     "e.g. 2026-08-01")}
+            </div>
+          </div>
+          <div class="bg-slate-800 rounded-lg p-3">
+            <div class="text-purple-400 text-xs font-semibold uppercase tracking-wide mb-3">📰 Narrative Breakers</div>
+            <div class="space-y-3">
+              ${f("narrative_breaker_1","Narrative Breaker 1","e.g. CEO departure")}
+              ${f("narrative_breaker_2","Narrative Breaker 2","e.g. Regulatory block")}
+              ${f("macro_trigger",      "Macro Trigger",       "e.g. Fed rate +200bps")}
+            </div>
+          </div>
+        </div>
+
+        <!-- Active triggers for this ticker -->
+        <div id="ksActiveTriggers"></div>
+      </div>`;
+
+    // Load active triggers for this ticker inline
+    const triggers = await api("/api/triggers?ticker=" + baseTicker + "&addressed=false");
+    const trigEl   = document.getElementById("ksActiveTriggers");
+    if (trigEl && triggers?.length) {
+      const rows = triggers.map(t => `
+        <div class="flex items-center justify-between bg-slate-800 rounded px-3 py-2 text-sm">
+          <div class="flex items-center gap-2">
+            <span class="${t.severity === "critical" ? "text-red-400" : t.severity === "warning" ? "text-amber-400" : "text-sky-400"} font-bold text-xs">${t.severity.toUpperCase()}</span>
+            <span class="text-slate-300">${t.details || t.trigger_type}</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-slate-500 text-xs">${t.fired_date || ""}</span>
+            <button onclick="markAddressed(${t.id},'')" class="text-xs text-emerald-400 hover:underline">✓ Dismiss</button>
+          </div>
+        </div>`).join("");
+      trigEl.innerHTML = `
+        <div class="border-t border-slate-700 pt-4 mt-4">
+          <div class="text-slate-400 text-xs font-semibold uppercase tracking-wide mb-2">⚡ Active Triggers (${triggers.length})</div>
+          <div class="space-y-1.5">${rows}</div>
+        </div>`;
+    }
+  } catch(e) {
+    el.innerHTML = `<div class="card text-red-400 text-sm p-4">Error: ${e.message}</div>`;
+  }
+}
+
+async function saveKillSwitchConfig(ticker) {
+  const keys = ["hard_stop_pct","warning_stop_pct","take_profit_1_pct","take_profit_2_pct",
+                 "kpi_hard_threshold","kpi_warning_threshold","primary_kpi_metric","margin_floor",
+                 "primary_catalyst","catalyst_deadline","review_cadence_days","next_review_date",
+                 "narrative_breaker_1","narrative_breaker_2","macro_trigger"];
+  const config = {};
+  keys.forEach(k => {
+    const v = document.getElementById("ks-" + k)?.value?.trim();
+    if (v) config[k] = v;
+  });
+  try {
+    await api("/api/thesis/" + ticker, "PATCH", {
+      kill_switch_config: JSON.stringify(config),
+      next_review_date: config.next_review_date || null,
+    });
+    // Flash success
+    const btn = document.querySelector("button[onclick*='saveKillSwitchConfig']");
+    if (btn) { btn.textContent = "✓ Saved"; setTimeout(() => btn.textContent = "💾 Save Config", 2000); }
+  } catch(e) {
+    alert("Failed to save: " + e.message);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// LIFECYCLE TIMELINE PANEL — Sprint 3
+// ═══════════════════════════════════════════════════════════════
+async function loadTimelinePanel(ticker) {
+  const el = document.getElementById("timelineContent");
+  if (!el) return;
+  el.innerHTML = `<div class="flex justify-center py-8"><div class="loader"></div></div>`;
+  try {
+    const baseTicker = ticker.split(".")[0];
+    const [history, theses, shortlistAll, portfolio] = await Promise.all([
+      api("/api/research-history?ticker=" + baseTicker).catch(() => []),
+      api("/api/thesis").then(all => (all || []).filter(t => t.ticker === baseTicker)).catch(() => []),
+      api("/api/shortlist/" + baseTicker).catch(() => null),
+      api("/api/portfolio").catch(() => []),
+    ]);
+
+    // Build event log from all sources
+    const events = [];
+    const push = (date, icon, label, detail, color) => {
+      if (date) events.push({ date, icon, label, detail, color });
+    };
+
+    // Research history events
+    (history || []).forEach(h => {
+      push(h.first_researched_date, "🔬", "First Researched", h.final_stage || "", "text-blue-400");
+      if (h.archived_date) push(h.archived_date, "📁", "Archived", h.archive_reason || "", "text-slate-500");
+    });
+
+    // Shortlist/stage transitions
+    if (shortlistAll) {
+      push(shortlistAll.created_date, "📋", "Added to Pool", `Stage: ${shortlistAll.stage}`, "text-slate-300");
+      if (shortlistAll.verdict && shortlistAll.verdict !== shortlistAll.stage) {
+        push(shortlistAll.updated_date, "⚖️", "Verdict Assigned", shortlistAll.verdict.replace(/_/g, " "), "text-yellow-400");
+      }
+    }
+
+    // Thesis events
+    theses.forEach(t => {
+      push(t.created_date,  "📝", "Thesis Created",  `v${t.version || 1} · ${t.conviction_tier || ""}`, "text-emerald-400");
+      if (t.updated_date && t.updated_date !== t.created_date)
+        push(t.updated_date, "🔄", "Thesis Updated", `Status: ${t.thesis_status || t.status || "active"}`, "text-sky-400");
+    });
+
+    // Portfolio entries
+    (portfolio || []).filter(p => p.ticker === baseTicker).forEach(p => {
+      push(p.entry_date, "💼", "Position Opened", `${p.shares} shares @ $${p.entry_price}`, "text-emerald-400");
+      if (p.exit_date) push(p.exit_date, "🏁", "Position Closed", `Exit @ $${p.exit_price || "—"}`, "text-slate-400");
+    });
+
+    // Sort chronologically
+    events.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+    if (!events.length) {
+      el.innerHTML = `<div class="card text-center py-10 text-slate-500">
+        <div class="text-2xl mb-2">📅</div>
+        <div>No history yet for ${baseTicker}.</div>
+        <div class="text-sm mt-2">Events will appear here as the ticker moves through the research funnel.</div>
+      </div>`;
+      return;
+    }
+
+    // Render horizontal timeline for ≤8 events, vertical for more
+    const isHorizontal = events.length <= 8;
+    if (isHorizontal) {
+      const nodes = events.map((e, i) => `
+        <div class="flex flex-col items-center flex-1 min-w-0 relative">
+          ${i > 0 ? '<div class="absolute top-4 right-1/2 w-full h-0.5 bg-slate-700 -z-0"></div>' : ""}
+          <div class="w-9 h-9 rounded-full bg-slate-800 border-2 border-slate-600 flex items-center justify-center text-base z-10 mb-2">${e.icon}</div>
+          <div class="text-center px-1">
+            <div class="${e.color} text-xs font-semibold">${e.label}</div>
+            <div class="text-slate-500 text-xs">${e.date}</div>
+            ${e.detail ? `<div class="text-slate-400 text-xs mt-0.5 line-clamp-2">${e.detail}</div>` : ""}
+          </div>
+        </div>`).join("");
+      el.innerHTML = `<div class="card p-5">
+        <div class="text-slate-400 text-xs font-semibold uppercase tracking-wide mb-4">Lifecycle Timeline — ${baseTicker}</div>
+        <div class="flex items-start gap-0 overflow-x-auto pb-2">${nodes}</div>
+      </div>`;
+    } else {
+      // Vertical timeline for many events
+      const rows = events.map(e => `
+        <div class="flex gap-4 items-start">
+          <div class="flex flex-col items-center">
+            <div class="w-8 h-8 rounded-full bg-slate-800 border border-slate-600 flex items-center justify-center text-sm flex-shrink-0">${e.icon}</div>
+            <div class="w-px flex-1 bg-slate-700 mt-1"></div>
+          </div>
+          <div class="pb-4 min-w-0">
+            <div class="flex items-baseline gap-2">
+              <span class="${e.color} text-sm font-semibold">${e.label}</span>
+              <span class="text-slate-500 text-xs">${e.date}</span>
+            </div>
+            ${e.detail ? `<div class="text-slate-400 text-xs mt-0.5">${e.detail}</div>` : ""}
+          </div>
+        </div>`).join("");
+      el.innerHTML = `<div class="card p-5">
+        <div class="text-slate-400 text-xs font-semibold uppercase tracking-wide mb-4">Lifecycle Timeline — ${baseTicker}</div>
+        <div class="space-y-0">${rows}</div>
+      </div>`;
+    }
+  } catch(e) {
+    el.innerHTML = `<div class="card text-red-400 text-sm p-4">Error: ${e.message}</div>`;
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -2752,7 +2992,244 @@ function calcExitMultiple() {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// SHORTLIST — unified watchlist + thesis status view
+// NAV BADGES — live counts on all tabs
+// ═══════════════════════════════════════════════════════════════
+async function refreshNavBadges() {
+  try {
+    const [fcItems, wlItems, trigCounts] = await Promise.all([
+      api("/api/shortlist").catch(() => []),
+      api("/api/watchlist").catch(() => []),
+      api("/api/triggers/counts").catch(() => ({})),
+    ]);
+
+    // First-Cut badge: open (non-ARCHIVED, non-KILL) items
+    const fcOpen = (fcItems || []).filter(x =>
+      !["ARCHIVED"].includes(x.stage) && x.verdict !== "KILL"
+    ).length;
+    const fcBadge = document.getElementById("fcBadge");
+    if (fcBadge) {
+      if (fcOpen > 0) { fcBadge.textContent = fcOpen; fcBadge.classList.remove("hidden"); }
+      else fcBadge.classList.add("hidden");
+    }
+
+    // Watchlist badge: count of watchlist items
+    const wlCount = (wlItems || []).length;
+    const wlBadge = document.getElementById("wlBadge");
+    if (wlBadge) {
+      if (wlCount > 0) { wlBadge.textContent = wlCount; wlBadge.classList.remove("hidden"); }
+      else wlBadge.classList.add("hidden");
+    }
+
+    // Trigger badge (already handled in refreshTriggerBadge, just re-use counts here)
+    const total    = trigCounts.total || 0;
+    const critical = trigCounts.critical || 0;
+    const tBadge   = document.getElementById("triggerBadge");
+    if (tBadge) {
+      if (total > 0) {
+        tBadge.textContent = total;
+        tBadge.className = `ml-1 text-xs font-bold px-1.5 py-0.5 rounded-full ${critical > 0 ? "bg-red-600" : "bg-amber-600"} text-white`;
+        tBadge.classList.remove("hidden");
+      } else tBadge.classList.add("hidden");
+    }
+  } catch(e) { /* badges are non-critical */ }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// FIRST-CUT — Task B interface (SHORTLISTED → ADVANCE/BENCH/KILL)
+// ═══════════════════════════════════════════════════════════════
+let _firstcutData  = [];
+let _fcFilter      = "all";
+
+const FC_STAGE_CONFIG = {
+  CANDIDATE_POOL:    { label: "Pool",     color: "bg-slate-700 text-slate-300",   icon: "🌊" },
+  SCORED_BENCH:      { label: "Bench",    color: "bg-slate-700 text-slate-300",   icon: "📊" },
+  SHORTLISTED:       { label: "Shortlisted", color: "bg-blue-900 text-blue-300",  icon: "📋" },
+  FIRST_CUT_ADVANCE: { label: "Advance",  color: "bg-emerald-900 text-emerald-300", icon: "✅" },
+  FIRST_CUT_BENCH:   { label: "Benched",  color: "bg-yellow-900 text-yellow-300", icon: "⏸" },
+  ARCHIVED:          { label: "Archived", color: "bg-slate-800 text-slate-500",   icon: "📁" },
+};
+
+async function loadFirstCut() {
+  const el = document.getElementById("firstcutContent");
+  if (!el) return;
+  el.innerHTML = `<div class="flex justify-center py-16"><div class="loader"></div><span class="text-slate-500 text-sm ml-3">Loading…</span></div>`;
+  try {
+    _firstcutData = await api("/api/shortlist") || [];
+    renderFirstCut(_firstcutData, _fcFilter);
+  } catch(e) {
+    el.innerHTML = `<div class="card text-red-400 text-sm p-4">Error: ${e.message}</div>`;
+  }
+}
+
+function renderFirstCut(items, filter) {
+  const el = document.getElementById("firstcutContent");
+  const showing = filter === "all"
+    ? items.filter(x => x.stage !== "ARCHIVED")
+    : items.filter(x => x.stage === filter);
+
+  if (!showing.length) {
+    const emptyMessages = {
+      all:              { icon: "🔍", msg: "No candidates yet", sub: "Task A will populate this on Monday, or add tickers manually below." },
+      SHORTLISTED:      { icon: "📋", msg: "No shortlisted names", sub: "Task A shortlists the top 10 each Monday." },
+      FIRST_CUT_ADVANCE:{ icon: "✅", msg: "No names advanced yet", sub: "Assign ADVANCE to shortlisted names to see them here." },
+      FIRST_CUT_BENCH:  { icon: "⏸", msg: "No benched names", sub: "" },
+      SCORED_BENCH:     { icon: "📊", msg: "No pool candidates", sub: "Task A writes scored candidates here each week." },
+    };
+    const e = emptyMessages[filter] || emptyMessages.all;
+    el.innerHTML = `<div class="card text-center py-16 text-slate-500">
+      <div class="text-3xl mb-3">${e.icon}</div>
+      <div class="font-medium">${e.msg}</div>
+      ${e.sub ? `<div class="text-sm mt-2">${e.sub}</div>` : ""}
+    </div>`;
+    return;
+  }
+
+  // Group by stage for display order
+  const order = ["SHORTLISTED","FIRST_CUT_ADVANCE","FIRST_CUT_BENCH","SCORED_BENCH","CANDIDATE_POOL"];
+  showing.sort((a, b) => {
+    const ai = order.indexOf(a.stage), bi = order.indexOf(b.stage);
+    const stageSort = (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+    if (stageSort !== 0) return stageSort;
+    return (b.composite_score || 0) - (a.composite_score || 0);
+  });
+
+  el.innerHTML = `<div class="space-y-3">${showing.map(item => renderFirstCutCard(item)).join("")}</div>`;
+}
+
+function renderFirstCutCard(item) {
+  const cfg      = FC_STAGE_CONFIG[item.stage] || FC_STAGE_CONFIG.CANDIDATE_POOL;
+  const score    = item.composite_score != null ? item.composite_score.toFixed(1) : "—";
+  const strategy = item.strategy ? `<span class="text-xs px-2 py-0.5 rounded bg-slate-700 text-slate-300">${item.strategy}</span>` : "";
+  const tier     = item.tier     ? `<span class="text-xs px-2 py-0.5 rounded bg-slate-700 text-slate-300">${item.tier}</span>` : "";
+  const archetype= item.archetype ? `<span class="text-xs px-2 py-0.5 rounded bg-indigo-900 text-indigo-300">${item.archetype}</span>` : "";
+
+  // Expiry countdown
+  let expiryHtml = "";
+  if (item.expires_date) {
+    const daysLeft = Math.ceil((new Date(item.expires_date) - Date.now()) / 86400000);
+    const expired  = daysLeft <= 0;
+    expiryHtml = `<span class="text-xs ${expired ? "text-red-400" : daysLeft <= 3 ? "text-amber-400" : "text-slate-500"}">
+      ${expired ? "⚠ Expired" : `Expires in ${daysLeft}d`}
+    </span>`;
+  }
+
+  // Axis scores (if available)
+  let axisHtml = "";
+  if (item.axis_scores) {
+    try {
+      const axes = typeof item.axis_scores === "string" ? JSON.parse(item.axis_scores) : item.axis_scores;
+      axisHtml = `<div class="flex gap-3 flex-wrap mt-2">` +
+        Object.entries(axes).map(([k, v]) =>
+          `<div class="text-center">
+            <div class="text-slate-500 text-xs">${k}</div>
+            <div class="font-bold text-sm ${v >= 7 ? "text-emerald-400" : v >= 4 ? "text-yellow-400" : "text-red-400"}">${v}</div>
+          </div>`
+        ).join("") + `</div>`;
+    } catch(e) {}
+  }
+
+  // First-cut summary
+  const summaryHtml = item.first_cut_summary
+    ? `<div class="mt-2 text-xs text-slate-400 bg-slate-800 rounded p-2 line-clamp-3">${item.first_cut_summary}</div>` : "";
+
+  // Verdict buttons — only show for SHORTLISTED
+  const verdictButtons = item.stage === "SHORTLISTED" ? `
+    <div class="flex gap-2 mt-3 flex-wrap">
+      <button onclick="assignVerdict('${item.ticker}', 'FIRST_CUT_ADVANCE')"
+        class="text-xs px-3 py-1.5 rounded border border-emerald-700 text-emerald-300 hover:bg-emerald-900 font-semibold">✅ Advance</button>
+      <button onclick="assignVerdict('${item.ticker}', 'FIRST_CUT_BENCH')"
+        class="text-xs px-3 py-1.5 rounded border border-yellow-700 text-yellow-300 hover:bg-yellow-900">⏸ Bench</button>
+      <button onclick="assignVerdict('${item.ticker}', 'ARCHIVED')"
+        class="text-xs px-3 py-1.5 rounded border border-red-800 text-red-400 hover:bg-red-950">✕ Kill</button>
+    </div>` : item.stage === "FIRST_CUT_ADVANCE" ? `
+    <div class="flex gap-2 mt-3 flex-wrap">
+      <button onclick="openAnalyse('${item.ticker}')" class="btn-primary text-xs px-3 py-1.5">📊 Deep Dive →</button>
+      <button onclick="assignVerdict('${item.ticker}', 'FIRST_CUT_BENCH')" class="btn-secondary text-xs px-3 py-1.5 text-yellow-400">⏸ Bench</button>
+    </div>` : `
+    <div class="flex gap-2 mt-3">
+      <button onclick="openAnalyse('${item.ticker}')" class="btn-secondary text-xs px-3 py-1.5">Analyse →</button>
+      ${item.stage === "FIRST_CUT_BENCH"
+        ? `<button onclick="assignVerdict('${item.ticker}', 'SHORTLISTED')" class="btn-secondary text-xs px-3 py-1.5 text-blue-400">↑ Re-shortlist</button>` : ""}
+    </div>`;
+
+  return `<div class="card p-4" id="fc-card-${item.ticker}">
+    <div class="flex items-start justify-between gap-3">
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center gap-2 flex-wrap mb-1">
+          <span class="font-bold text-white text-base cursor-pointer hover:text-emerald-400"
+                onclick="openAnalyse('${item.ticker}')">${item.ticker}</span>
+          <span class="text-xs px-2 py-0.5 rounded ${cfg.color}">${cfg.icon} ${cfg.label}</span>
+          ${strategy}${tier}${archetype}
+          ${expiryHtml}
+        </div>
+        ${item.one_line_thesis ? `<div class="text-slate-300 text-sm">${item.one_line_thesis}</div>` : ""}
+        ${axisHtml}
+        ${summaryHtml}
+        ${verdictButtons}
+      </div>
+      <div class="text-right shrink-0 ml-2">
+        <div class="text-2xl font-bold text-white">${score}</div>
+        <div class="text-slate-500 text-xs">Score</div>
+        ${item.updated_date ? `<div class="text-slate-600 text-xs mt-1">${item.updated_date}</div>` : ""}
+      </div>
+    </div>
+  </div>`;
+}
+
+function filterFirstCut(filter) {
+  _fcFilter = filter;
+  document.querySelectorAll(".fc-filter").forEach(b => b.classList.remove("active"));
+  const btn = document.getElementById("fc-filter-" + filter);
+  if (btn) btn.classList.add("active");
+  renderFirstCut(_firstcutData, filter);
+}
+
+async function assignVerdict(ticker, newStage) {
+  const card = document.getElementById("fc-card-" + ticker);
+  try {
+    await api("/api/shortlist/" + ticker, "PATCH", { stage: newStage, verdict: newStage });
+    // Update in-memory + re-render without full reload
+    const item = _firstcutData.find(x => x.ticker === ticker);
+    if (item) { item.stage = newStage; item.verdict = newStage; }
+    renderFirstCut(_firstcutData, _fcFilter);
+    refreshNavBadges();
+    // If advancing, nudge user toward Analyse
+    if (newStage === "FIRST_CUT_ADVANCE") {
+      setTimeout(() => {
+        if (confirm(`${ticker} advanced. Open in Analyse for deep-dive?`)) openAnalyse(ticker);
+      }, 200);
+    }
+    // If killing, offer to add to research_history novelty gate
+    if (newStage === "ARCHIVED") {
+      api("/api/research-history", "POST", {
+        ticker, final_stage: "FIRST_CUT_KILL", archive_reason: "Killed at first-cut",
+      }).catch(() => {});
+    }
+  } catch(e) {
+    alert("Failed to update " + ticker + ": " + e.message);
+  }
+}
+
+async function addToFirstCutPool() {
+  const ticker   = (document.getElementById("fcAddTicker")?.value || "").trim().toUpperCase();
+  const strategy = document.getElementById("fcAddStrategy")?.value || "value";
+  const thesis   = document.getElementById("fcAddThesis")?.value?.trim() || "";
+  if (!ticker) { alert("Enter a ticker."); return; }
+  try {
+    await api("/api/shortlist", "POST", {
+      ticker, stage: "SHORTLISTED", strategy, one_line_thesis: thesis, source: "manual",
+    });
+    document.getElementById("fcAddTicker").value  = "";
+    document.getElementById("fcAddThesis").value  = "";
+    loadFirstCut();
+    refreshNavBadges();
+  } catch(e) {
+    alert("Failed: " + e.message);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// WATCHLIST (formerly Shortlist) — unified watchlist + thesis status view
 // ═══════════════════════════════════════════════════════════════
 let _shortlistData = [];
 
@@ -3000,6 +3477,9 @@ async function loadAnalyse() {
     document.getElementById("anEmpty").classList.add("hidden");
     document.getElementById("anLiveStrip").classList.remove("hidden");
 
+    // Load valuation history in background
+    loadValuationHistory(ticker);
+
     if (status) status.textContent = ticker;
   } catch(e) {
     if (status) status.textContent = "Error: " + e.message;
@@ -3099,6 +3579,164 @@ function promoteAnalyseToPortfolio() {
 
   document.getElementById("portfolioFormModal").classList.remove("hidden");
   document.getElementById("pfEntry").focus();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// CROSS-NAME INTELLIGENCE — Sprint 4
+// ═══════════════════════════════════════════════════════════════
+async function loadIntelligence() {
+  const el = document.getElementById("intelligenceContent");
+  if (!el) return;
+  try {
+    const [portfolio, theses, shortlist, triggers] = await Promise.all([
+      api("/api/portfolio").catch(() => []),
+      api("/api/thesis").catch(() => []),
+      api("/api/shortlist").catch(() => []),
+      api("/api/triggers/counts").catch(() => ({})),
+    ]);
+
+    const open    = (portfolio || []).filter(p => p.status === "open");
+    const thList  = theses || [];
+    const slList  = shortlist || [];
+
+    if (!open.length && !thList.length && !slList.length) {
+      el.innerHTML = `<div class="text-slate-600 text-sm text-center py-4">Add positions and theses to see intelligence views.</div>`;
+      return;
+    }
+
+    // ── Conviction distribution ──
+    const convictionMap = {};
+    thList.forEach(t => {
+      const c = t.conviction_tier || "Unrated";
+      convictionMap[c] = (convictionMap[c] || 0) + 1;
+    });
+    const convOrder = ["High Conviction","Core","Watch","Speculative","Unrated"];
+    const convColors = { "High Conviction":"bg-emerald-500","Core":"bg-blue-500","Watch":"bg-yellow-500","Speculative":"bg-orange-500","Unrated":"bg-slate-600" };
+    const totalConv  = Object.values(convictionMap).reduce((a,b) => a+b, 0);
+    const convBars   = convOrder.filter(k => convictionMap[k]).map(k => {
+      const pct = Math.round((convictionMap[k] / totalConv) * 100);
+      return `<div class="flex items-center gap-2 text-xs">
+        <div class="w-24 shrink-0 text-slate-400">${k}</div>
+        <div class="flex-1 bg-slate-800 rounded-full h-2 overflow-hidden">
+          <div class="${convColors[k] || "bg-slate-500"} h-2 rounded-full" style="width:${pct}%"></div>
+        </div>
+        <div class="w-6 text-right text-slate-300">${convictionMap[k]}</div>
+      </div>`;
+    }).join("");
+
+    // ── Strategy / archetype mix ──
+    const stratMap = {};
+    slList.forEach(s => {
+      const k = s.archetype || s.strategy || "other";
+      stratMap[k] = (stratMap[k] || 0) + 1;
+    });
+    const stratColors = ["text-blue-400","text-emerald-400","text-purple-400","text-amber-400","text-red-400","text-sky-400"];
+    const stratBadges = Object.entries(stratMap).map(([k,v],i) =>
+      `<span class="text-xs px-2 py-1 rounded bg-slate-800 ${stratColors[i % stratColors.length]}">${k} (${v})</span>`
+    ).join("");
+
+    // ── Macro sensitivity ──
+    const macroMap = {};
+    thList.forEach(t => {
+      const m = t.macro_sensitivity;
+      if (m) { macroMap[m] = (macroMap[m] || 0) + 1; }
+    });
+    const macroBadges = Object.entries(macroMap).map(([k,v]) =>
+      `<span class="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300">${k}: ${v}</span>`
+    ).join("") || `<span class="text-slate-600 text-xs">Tag theses with macro_sensitivity to see groupings</span>`;
+
+    // ── Funnel counts ──
+    const stageCount = {};
+    slList.forEach(s => { stageCount[s.stage] = (stageCount[s.stage] || 0) + 1; });
+    const funnelRows = [
+      { stage: "SHORTLISTED",       label: "Shortlisted",   color: "text-blue-400" },
+      { stage: "FIRST_CUT_ADVANCE", label: "Advancing",     color: "text-emerald-400" },
+      { stage: "FIRST_CUT_BENCH",   label: "Benched",       color: "text-yellow-400" },
+      { stage: "CANDIDATE_POOL",    label: "In Pool",       color: "text-slate-400" },
+    ].filter(r => stageCount[r.stage]).map(r =>
+      `<div class="flex justify-between text-xs"><span class="text-slate-400">${r.label}</span><span class="${r.color} font-semibold">${stageCount[r.stage]}</span></div>`
+    ).join("");
+
+    // ── Alert summary ──
+    const alertHtml = (triggers.total || 0) > 0
+      ? `<div class="${triggers.critical > 0 ? "text-red-400" : "text-amber-400"} font-bold">${triggers.total}</div>
+         <div class="text-slate-500 text-xs">open trigger${triggers.total > 1 ? "s" : ""}${triggers.critical > 0 ? ` · ${triggers.critical} critical` : ""}</div>`
+      : `<div class="text-emerald-400 font-bold text-sm">All clear</div><div class="text-slate-500 text-xs">No open triggers</div>`;
+
+    el.innerHTML = `
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+
+        <div class="bg-slate-800 rounded-lg p-3">
+          <div class="text-slate-400 text-xs font-semibold uppercase tracking-wide mb-3">Conviction Mix</div>
+          ${convBars || '<div class="text-slate-600 text-xs">No theses with conviction tiers yet.</div>'}
+        </div>
+
+        <div class="bg-slate-800 rounded-lg p-3">
+          <div class="text-slate-400 text-xs font-semibold uppercase tracking-wide mb-3">Funnel Status</div>
+          <div class="space-y-1.5">
+            ${funnelRows || '<div class="text-slate-600 text-xs">Funnel is empty.</div>'}
+            <div class="flex justify-between text-xs border-t border-slate-700 pt-1.5 mt-1.5">
+              <span class="text-slate-400">Portfolio (open)</span>
+              <span class="text-white font-semibold">${open.length}</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="bg-slate-800 rounded-lg p-3">
+          <div class="text-slate-400 text-xs font-semibold uppercase tracking-wide mb-3">Strategy / Archetype</div>
+          <div class="flex flex-wrap gap-1.5">${stratBadges || '<span class="text-slate-600 text-xs">No archetype data yet.</span>'}</div>
+        </div>
+
+        <div class="bg-slate-800 rounded-lg p-3">
+          <div class="text-slate-400 text-xs font-semibold uppercase tracking-wide mb-2">Macro Sensitivity</div>
+          <div class="flex flex-wrap gap-1.5 mb-4">${macroBadges}</div>
+          <div class="text-slate-400 text-xs font-semibold uppercase tracking-wide mb-2">Open Triggers</div>
+          <div class="text-center cursor-pointer" onclick="showSection('triggers')">${alertHtml}</div>
+        </div>
+
+      </div>`;
+  } catch(e) {
+    el.innerHTML = `<div class="text-red-400 text-xs p-2">Failed to load intelligence: ${e.message}</div>`;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// VALUATION HISTORY — Sprint 4
+// ═══════════════════════════════════════════════════════════════
+async function loadValuationHistory(ticker) {
+  const baseTicker = (ticker || "").split(".")[0];
+  if (!baseTicker) return;
+  try {
+    const runs = await api("/api/valuation-runs?ticker=" + baseTicker);
+    if (!runs?.length) return;
+
+    // Inject history panel below exit multiple results in Analyse section
+    const target = document.getElementById("anEmResults");
+    if (!target) return;
+
+    const rows = runs.slice(0, 5).map(r => {
+      let assumptions = {};
+      try { assumptions = JSON.parse(r.assumptions || "{}"); } catch(e) {}
+      return `<div class="flex items-center justify-between bg-slate-800 rounded px-3 py-2 text-xs">
+        <span class="text-slate-400">${r.run_date}</span>
+        <span class="text-slate-300">${r.run_type === "manual" ? "Manual" : "Task C"}</span>
+        ${r.blended_iv ? `<span class="text-white font-bold">IV $${Number(r.blended_iv).toFixed(2)}</span>` : ""}
+        <span class="text-slate-500">${r.created_by || "—"}</span>
+      </div>`;
+    }).join("");
+
+    const histEl = document.getElementById("anValHistory");
+    if (!histEl) {
+      const div = document.createElement("div");
+      div.id = "anValHistory";
+      div.className = "mt-4";
+      div.innerHTML = `<div class="text-slate-400 text-xs font-semibold uppercase tracking-wide mb-2">Valuation History (${runs.length} runs)</div>
+        <div class="space-y-1">${rows}</div>`;
+      target.parentNode.insertBefore(div, target.nextSibling);
+    } else {
+      histEl.querySelector(".space-y-1").innerHTML = rows;
+    }
+  } catch(e) { /* non-critical */ }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -3293,6 +3931,6 @@ function triggerRefreshResearch(ticker) {
 // ─── Init ────────────────────────────────────────────────────────
 document.addEventListener("DOMContentLoaded", () => {
   loadDashboard();
-  // Refresh trigger badge in background on every page load
-  refreshTriggerBadge();
+  // Populate all nav badges in background on load
+  refreshNavBadges();
 });

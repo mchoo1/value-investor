@@ -104,14 +104,19 @@
   <div class="flex gap-1">
     <button onclick="showSection('dashboard')"  class="nav-btn tab-btn active" id="nav-dashboard">Dashboard</button>
     <button onclick="showSection('screener')"   class="nav-btn tab-btn" id="nav-screener">Screen</button>
-    <button onclick="showSection('shortlist')"  class="nav-btn tab-btn" id="nav-shortlist">Shortlist</button>
-    <button onclick="showSection('analyse')"    class="nav-btn tab-btn" id="nav-analyse">Analyse</button>
+    <button onclick="showSection('firstcut')"   class="nav-btn tab-btn" id="nav-firstcut">
+      First-Cut <span id="fcBadge" class="hidden ml-1 text-xs font-bold px-1.5 py-0.5 rounded-full bg-blue-600 text-white"></span>
+    </button>
+    <button onclick="showSection('shortlist')"  class="nav-btn tab-btn" id="nav-shortlist">
+      Watchlist <span id="wlBadge" class="hidden ml-1 text-xs font-bold px-1.5 py-0.5 rounded-full bg-slate-600 text-white"></span>
+    </button>
     <button onclick="showSection('research')"   class="nav-btn tab-btn" id="nav-research">Research</button>
     <button onclick="showSection('portfolio')"  class="nav-btn tab-btn" id="nav-portfolio">Portfolio</button>
     <button onclick="showSection('triggers')"   class="nav-btn tab-btn" id="nav-triggers">
       Triggers <span id="triggerBadge" class="hidden ml-1 text-xs font-bold px-1.5 py-0.5 rounded-full bg-red-600 text-white"></span>
     </button>
-    <!-- Hidden: Valuation, Thesis, Tracker kept as sections for back-compat / deep links -->
+    <!-- Hidden: Analyse, Valuation, Thesis, Tracker kept for back-compat / deep links -->
+    <button id="nav-analyse"   class="hidden"></button>
     <button id="nav-valuation" class="hidden"></button>
     <button id="nav-thesis"    class="hidden"></button>
     <button id="nav-tracker"   class="hidden"></button>
@@ -232,30 +237,51 @@
     </div>
   </div>
 
-  <!-- Workflow Pipeline -->
+  <!-- Workflow Pipeline — funnel-aligned -->
   <div class="card mt-6">
-    <h2 class="font-semibold text-white mb-4">Your Investing Pipeline</h2>
-    <div class="grid grid-cols-4 gap-4 text-sm">
+    <h2 class="font-semibold text-white mb-4">Weekly Funnel</h2>
+    <div class="grid grid-cols-2 md:grid-cols-6 gap-3 text-sm">
+      <div class="metric-box border-l-2 border-slate-500 pl-3">
+        <div class="text-slate-300 font-semibold mb-1 text-xs uppercase tracking-wide">① Screen</div>
+        <div class="text-slate-400 text-xs mb-2">Task A scores ~110 candidates weekly</div>
+        <button onclick="showSection('screener')" class="text-slate-400 text-xs hover:underline">Run Screen →</button>
+      </div>
       <div class="metric-box border-l-2 border-blue-500 pl-3">
-        <div class="text-blue-400 font-semibold mb-1 text-xs uppercase tracking-wide">① Screen</div>
-        <div class="text-slate-300 text-xs mb-2">Filter by ROIC, P/E, FCF yield, rev growth — use strategy presets</div>
-        <button onclick="showSection('screener')" class="text-blue-400 text-xs hover:underline">Open Screener →</button>
+        <div class="text-blue-400 font-semibold mb-1 text-xs uppercase tracking-wide">② First-Cut</div>
+        <div class="text-slate-400 text-xs mb-2">Assign ADVANCE / BENCH / KILL to shortlisted names</div>
+        <button onclick="showSection('firstcut')" class="text-blue-400 text-xs hover:underline">Review →</button>
+      </div>
+      <div class="metric-box border-l-2 border-indigo-500 pl-3">
+        <div class="text-indigo-400 font-semibold mb-1 text-xs uppercase tracking-wide">③ Deep Dive</div>
+        <div class="text-slate-400 text-xs mb-2">Task C produces 5-page thesis for ADVANCE names</div>
+        <button onclick="showSection('research')" class="text-indigo-400 text-xs hover:underline">Research →</button>
       </div>
       <div class="metric-box border-l-2 border-emerald-500 pl-3">
-        <div class="text-emerald-400 font-semibold mb-1 text-xs uppercase tracking-wide">② Shortlist</div>
-        <div class="text-slate-300 text-xs mb-2">Track ideas through Watching → Analysing → Thesis Ready</div>
-        <button onclick="showSection('shortlist')" class="text-emerald-400 text-xs hover:underline">Open Shortlist →</button>
-      </div>
-      <div class="metric-box border-l-2 border-purple-500 pl-3">
-        <div class="text-purple-400 font-semibold mb-1 text-xs uppercase tracking-wide">③ Analyse</div>
-        <div class="text-slate-300 text-xs mb-2">Exit multiple valuation + conviction thesis in one view</div>
-        <button onclick="showSection('analyse')" class="text-purple-400 text-xs hover:underline">Open Analyse →</button>
+        <div class="text-emerald-400 font-semibold mb-1 text-xs uppercase tracking-wide">④ Watchlist</div>
+        <div class="text-slate-400 text-xs mb-2">Researched names pending position decision</div>
+        <button onclick="showSection('shortlist')" class="text-emerald-400 text-xs hover:underline">View →</button>
       </div>
       <div class="metric-box border-l-2 border-amber-500 pl-3">
-        <div class="text-amber-400 font-semibold mb-1 text-xs uppercase tracking-wide">④ Portfolio</div>
-        <div class="text-slate-300 text-xs mb-2">Track P&L, thesis health, stop-loss alerts for held positions</div>
-        <button onclick="showSection('portfolio')" class="text-amber-400 text-xs hover:underline">Open Portfolio →</button>
+        <div class="text-amber-400 font-semibold mb-1 text-xs uppercase tracking-wide">⑤ Portfolio</div>
+        <div class="text-slate-400 text-xs mb-2">Open positions with P&L and thesis tracking</div>
+        <button onclick="showSection('portfolio')" class="text-amber-400 text-xs hover:underline">View →</button>
       </div>
+      <div class="metric-box border-l-2 border-red-600 pl-3">
+        <div class="text-red-400 font-semibold mb-1 text-xs uppercase tracking-wide">⑥ Triggers</div>
+        <div class="text-slate-400 text-xs mb-2">Task D fires alerts — address daily</div>
+        <button onclick="showSection('triggers')" class="text-red-400 text-xs hover:underline">Review →</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Cross-name intelligence panel -->
+  <div id="dashIntelligence" class="card mt-6">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="font-semibold text-white">Portfolio Intelligence</h2>
+      <button onclick="loadIntelligence()" class="text-xs text-slate-500 hover:text-white">↻</button>
+    </div>
+    <div id="intelligenceContent">
+      <div class="text-slate-600 text-sm text-center py-4">Loading…</div>
     </div>
   </div>
 </div>
@@ -417,13 +443,56 @@
 </div>
 
 <!-- ═══════════════════════════════════════════
-     SHORTLIST
+     FIRST-CUT — Task B interface (SHORTLISTED → verdict)
+═══════════════════════════════════════════ -->
+<div id="section-firstcut" class="section p-6 max-w-7xl mx-auto">
+  <div class="flex items-center justify-between mb-5 flex-wrap gap-3">
+    <div>
+      <h1 class="text-2xl font-bold text-white">First-Cut</h1>
+      <p class="text-slate-400 text-sm">Task A output — assign ADVANCE / BENCH / KILL to each candidate</p>
+    </div>
+    <div class="flex gap-2">
+      <button onclick="loadFirstCut()" class="btn-secondary text-sm">↻ Refresh</button>
+    </div>
+  </div>
+
+  <!-- Stage filter pills -->
+  <div class="flex gap-2 mb-4 flex-wrap">
+    <button onclick="filterFirstCut('all')"            id="fc-filter-all"       class="fc-filter tab-btn active text-xs px-3 py-1">All</button>
+    <button onclick="filterFirstCut('SHORTLISTED')"    id="fc-filter-SHORTLISTED"    class="fc-filter tab-btn text-xs px-3 py-1">📋 Shortlisted</button>
+    <button onclick="filterFirstCut('FIRST_CUT_ADVANCE')" id="fc-filter-FIRST_CUT_ADVANCE" class="fc-filter tab-btn text-xs px-3 py-1 text-emerald-400">✅ Advance</button>
+    <button onclick="filterFirstCut('FIRST_CUT_BENCH')"   id="fc-filter-FIRST_CUT_BENCH"   class="fc-filter tab-btn text-xs px-3 py-1 text-yellow-400">⏸ Bench</button>
+    <button onclick="filterFirstCut('SCORED_BENCH')"   id="fc-filter-SCORED_BENCH"   class="fc-filter tab-btn text-xs px-3 py-1 text-slate-400">📊 Pool</button>
+  </div>
+
+  <div id="firstcutContent">
+    <div class="flex justify-center py-16"><div class="loader"></div><span class="text-slate-500 text-sm ml-3">Loading…</span></div>
+  </div>
+
+  <!-- Manual add to shortlist pool -->
+  <div class="card mt-6">
+    <div class="text-slate-400 text-xs font-semibold uppercase tracking-wide mb-3">+ Add Ticker to Pool</div>
+    <div class="flex gap-3 flex-wrap">
+      <input id="fcAddTicker" class="input-field" style="width:130px" placeholder="Ticker…" onkeydown="if(event.key==='Enter')addToFirstCutPool()">
+      <select id="fcAddStrategy" class="input-field" style="width:140px">
+        <option value="compounder">Compounder</option>
+        <option value="value">Value</option>
+        <option value="special_sit">Special Sit</option>
+      </select>
+      <input id="fcAddThesis" class="input-field flex-1" placeholder="One-line thesis…">
+      <button onclick="addToFirstCutPool()" class="btn-primary text-sm">Add to Pool</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════
+     WATCHLIST (formerly Shortlist)
 ═══════════════════════════════════════════ -->
 <div id="section-shortlist" class="section p-6 max-w-7xl mx-auto">
   <div class="flex items-center justify-between mb-6 flex-wrap gap-3">
     <div>
-      <h1 class="text-2xl font-bold text-white">Shortlist</h1>
-      <p class="text-slate-400 text-sm">Your research pipeline — from idea to portfolio</p>
+      <h1 class="text-2xl font-bold text-white">Watchlist</h1>
+      <p class="text-slate-400 text-sm">Names under active watch — from idea to portfolio</p>
     </div>
     <div class="flex gap-2">
       <input id="slAddTicker" class="input-field" style="width:130px" placeholder="Add ticker…" onkeydown="if(event.key==='Enter')quickAddToShortlist()">
@@ -596,12 +665,14 @@
   </div>
 
   <!-- Research Sub-tabs -->
-  <div class="flex gap-1 mb-5">
-    <button onclick="switchResTab('overview')"   id="rt-overview"   class="tab-btn active">Overview</button>
-    <button onclick="switchResTab('insiders')"   id="rt-insiders"   class="tab-btn">Insiders</button>
-    <button onclick="switchResTab('catalysts')"  id="rt-catalysts"  class="tab-btn">Catalysts</button>
-    <button onclick="switchResTab('redflags')"   id="rt-redflags"   class="tab-btn">⚠ Red Flags</button>
+  <div class="flex gap-1 mb-5 flex-wrap">
+    <button onclick="switchResTab('overview')"    id="rt-overview"    class="tab-btn active">Overview</button>
+    <button onclick="switchResTab('insiders')"    id="rt-insiders"    class="tab-btn">Insiders</button>
+    <button onclick="switchResTab('catalysts')"   id="rt-catalysts"   class="tab-btn">Catalysts</button>
+    <button onclick="switchResTab('redflags')"    id="rt-redflags"    class="tab-btn">⚠ Red Flags</button>
     <button onclick="switchResTab('competitors')" id="rt-competitors" class="tab-btn">Competitors</button>
+    <button onclick="switchResTab('killswitch')"  id="rt-killswitch"  class="tab-btn">🛡 Kill-Switch</button>
+    <button onclick="switchResTab('timeline')"    id="rt-timeline"    class="tab-btn">📅 Timeline</button>
   </div>
 
   <div id="researchContent">
@@ -630,6 +701,16 @@
   <!-- Competitors Panel -->
   <div id="resCompetitors" class="hidden">
     <div class="card"><div id="competitorsContent"><div class="text-slate-500 text-center py-8">Run analysis first.</div></div></div>
+  </div>
+
+  <!-- Kill-Switch Panel -->
+  <div id="resKillSwitch" class="hidden">
+    <div id="killSwitchContent"><div class="text-slate-500 text-center py-8">Run analysis first.</div></div>
+  </div>
+
+  <!-- Timeline Panel -->
+  <div id="resTimeline" class="hidden">
+    <div id="timelineContent"><div class="text-slate-500 text-center py-8">Run analysis first.</div></div>
   </div>
 </div>
 
@@ -1287,6 +1368,6 @@
   </div>
 </div>
 
-<script src="/static/app.js?v=22"></script>
+<script src="/static/app.js?v=23"></script>
 </body>
 </html>
