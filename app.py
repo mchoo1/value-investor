@@ -854,6 +854,132 @@ def buffett_indicator():
         return jsonify({"error": str(exc)}), 500
 
 
+# ══════════════════════════════════════════════════════════════════
+# SPRINT 1 — Shortlist endpoints
+# ══════════════════════════════════════════════════════════════════
+
+@app.route("/api/shortlist", methods=["GET"])
+def get_shortlist():
+    stage = request.args.get("stage")
+    return jsonify(db.get_shortlist(stage))
+
+
+@app.route("/api/shortlist", methods=["POST"])
+def save_shortlist():
+    b = request.json or {}
+    if not b.get("ticker"):
+        return jsonify({"error": "ticker required"}), 400
+    db.save_shortlist_ticker(b)
+    return jsonify({"status": "ok"})
+
+
+@app.route("/api/shortlist/<ticker>", methods=["PATCH"])
+def patch_shortlist(ticker):
+    b = request.json or {}
+    updated = db.patch_shortlist(ticker.upper(), b)
+    if updated:
+        return jsonify({"status": "ok"})
+    return jsonify({"status": "not_found"}), 404
+
+
+@app.route("/api/shortlist/<ticker>", methods=["DELETE"])
+def delete_shortlist(ticker):
+    db.delete_shortlist_ticker(ticker.upper())
+    return jsonify({"status": "ok"})
+
+
+@app.route("/api/shortlist/<ticker>", methods=["GET"])
+def get_shortlist_ticker(ticker):
+    rows = db.get_shortlist()
+    match = next((r for r in rows if r["ticker"] == ticker.upper()), None)
+    if match:
+        return jsonify(match)
+    return jsonify({"error": "not found"}), 404
+
+
+# ══════════════════════════════════════════════════════════════════
+# SPRINT 1 — Triggers endpoints
+# ══════════════════════════════════════════════════════════════════
+
+@app.route("/api/triggers", methods=["GET"])
+def get_triggers():
+    ticker   = request.args.get("ticker")
+    # Convert query param: "false" → False, "true" → True, missing → None
+    addr_raw = request.args.get("addressed")
+    addressed = None
+    if addr_raw is not None:
+        addressed = addr_raw.lower() not in ("false", "0", "no")
+    severity = request.args.get("severity")
+    return jsonify(db.get_triggers(ticker=ticker, addressed=addressed, severity=severity))
+
+
+@app.route("/api/triggers/counts", methods=["GET"])
+def get_trigger_counts():
+    return jsonify(db.get_trigger_counts())
+
+
+@app.route("/api/triggers", methods=["POST"])
+def save_trigger():
+    b = request.json or {}
+    if not b.get("ticker") or not b.get("trigger_type"):
+        return jsonify({"error": "ticker and trigger_type required"}), 400
+    trigger_id = db.save_trigger(b)
+    return jsonify({"status": "ok", "id": trigger_id})
+
+
+@app.route("/api/triggers/<int:trigger_id>", methods=["PATCH"])
+def patch_trigger(trigger_id):
+    b = request.json or {}
+    updated = db.patch_trigger(trigger_id, b)
+    if updated:
+        return jsonify({"status": "ok"})
+    return jsonify({"status": "not_found"}), 404
+
+
+# ══════════════════════════════════════════════════════════════════
+# SPRINT 1 — Research history (novelty gate)
+# ══════════════════════════════════════════════════════════════════
+
+@app.route("/api/research-history", methods=["GET"])
+def get_research_history():
+    ticker = request.args.get("ticker")
+    return jsonify(db.get_research_history(ticker))
+
+
+@app.route("/api/research-history/tickers", methods=["GET"])
+def get_researched_tickers():
+    """Minimal novelty-gate list for Task A — just tickers."""
+    return jsonify(db.get_researched_tickers())
+
+
+@app.route("/api/research-history", methods=["POST"])
+def save_research_history():
+    b = request.json or {}
+    if not b.get("ticker"):
+        return jsonify({"error": "ticker required"}), 400
+    rec_id = db.save_research_history(b)
+    return jsonify({"status": "ok", "id": rec_id})
+
+
+# ══════════════════════════════════════════════════════════════════
+# SPRINT 1 — Valuation runs
+# ══════════════════════════════════════════════════════════════════
+
+@app.route("/api/valuation-runs", methods=["GET"])
+def get_valuation_runs():
+    ticker = request.args.get("ticker")
+    return jsonify(db.get_valuation_runs(ticker))
+
+
+@app.route("/api/valuation-runs", methods=["POST"])
+def save_valuation_run():
+    b = request.json or {}
+    if not b.get("ticker"):
+        return jsonify({"error": "ticker required"}), 400
+    run_id = db.save_valuation_run(b)
+    return jsonify({"status": "ok", "id": run_id})
+
+
 @app.route("/api/cache/clear", methods=["POST"])
 def clear_cache():
     """Clear the in-memory data cache (forces fresh fetch next request)."""

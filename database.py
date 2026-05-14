@@ -207,6 +207,88 @@ def init_db():
         ]:
             if col not in pg_thesis_cols:
                 c.execute(f"ALTER TABLE thesis ADD COLUMN {col} {col_type}")
+        # ── Postgres migrations: add Sprint 1 thesis columns ──
+        for col, col_type in [
+            ("stage",              "TEXT"),
+            ("thesis_status",      "TEXT"),
+            ("version",            "INTEGER"),
+            ("next_review_date",   "TEXT"),
+            ("kill_switch_config", "TEXT"),
+            ("deep_dive_pdf_path", "TEXT"),
+        ]:
+            if col not in pg_thesis_cols:
+                c.execute(f"ALTER TABLE thesis ADD COLUMN {col} {col_type}")
+
+        # ── Sprint 1: shortlist table ──
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS shortlist (
+                id SERIAL PRIMARY KEY,
+                ticker TEXT NOT NULL UNIQUE,
+                stage TEXT NOT NULL DEFAULT 'CANDIDATE_POOL',
+                strategy TEXT,
+                tier TEXT,
+                archetype TEXT,
+                composite_score REAL,
+                axis_scores TEXT,
+                one_line_thesis TEXT,
+                verdict TEXT,
+                first_cut_summary TEXT,
+                source TEXT DEFAULT 'task_a',
+                weeks_in_pool INTEGER DEFAULT 0,
+                expires_date TEXT,
+                created_date TEXT,
+                updated_date TEXT
+            )
+        """)
+
+        # ── Sprint 1: triggers table ──
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS triggers (
+                id SERIAL PRIMARY KEY,
+                ticker TEXT NOT NULL,
+                trigger_type TEXT NOT NULL,
+                trigger_subtype TEXT,
+                severity TEXT NOT NULL DEFAULT 'warning',
+                fired_date TEXT,
+                details TEXT,
+                suggested_action TEXT,
+                addressed BOOLEAN DEFAULT FALSE,
+                addressed_date TEXT,
+                resolution_notes TEXT,
+                created_date TEXT
+            )
+        """)
+
+        # ── Sprint 1: research_history (novelty gate, append-only) ──
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS research_history (
+                id SERIAL PRIMARY KEY,
+                ticker TEXT NOT NULL,
+                first_researched_date TEXT,
+                archived_date TEXT,
+                archive_reason TEXT,
+                final_stage TEXT,
+                thesis_status TEXT,
+                created_date TEXT
+            )
+        """)
+
+        # ── Sprint 1: valuation_runs ──
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS valuation_runs (
+                id SERIAL PRIMARY KEY,
+                ticker TEXT NOT NULL,
+                run_date TEXT,
+                run_type TEXT DEFAULT 'manual',
+                assumptions TEXT,
+                dcf_output TEXT,
+                peer_comp_output TEXT,
+                blended_iv REAL,
+                created_by TEXT DEFAULT 'user',
+                created_date TEXT
+            )
+        """)
+
         # ── Postgres migrations: research_queue ──
         c.execute("""
             SELECT column_name FROM information_schema.columns
@@ -331,9 +413,86 @@ def init_db():
             ("target_price_36m",     "REAL"),
             ("macro_sensitivity",    "TEXT"),
             ("report_date",          "TEXT"),
+            # Sprint 1 — lifecycle fields
+            ("stage",                "TEXT"),
+            ("thesis_status",        "TEXT"),
+            ("version",              "INTEGER"),
+            ("next_review_date",     "TEXT"),
+            ("kill_switch_config",   "TEXT"),
+            ("deep_dive_pdf_path",   "TEXT"),
         ]:
             if col not in existing_cols:
                 c.execute(f"ALTER TABLE thesis ADD COLUMN {col} {col_type}")
+
+        # ── Sprint 1: shortlist table ──
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS shortlist (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticker TEXT NOT NULL UNIQUE,
+                stage TEXT NOT NULL DEFAULT 'CANDIDATE_POOL',
+                strategy TEXT,
+                tier TEXT,
+                archetype TEXT,
+                composite_score REAL,
+                axis_scores TEXT,
+                one_line_thesis TEXT,
+                verdict TEXT,
+                first_cut_summary TEXT,
+                source TEXT DEFAULT 'task_a',
+                weeks_in_pool INTEGER DEFAULT 0,
+                expires_date TEXT,
+                created_date TEXT,
+                updated_date TEXT
+            )
+        """)
+
+        # ── Sprint 1: triggers table ──
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS triggers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticker TEXT NOT NULL,
+                trigger_type TEXT NOT NULL,
+                trigger_subtype TEXT,
+                severity TEXT NOT NULL DEFAULT 'warning',
+                fired_date TEXT,
+                details TEXT,
+                suggested_action TEXT,
+                addressed INTEGER DEFAULT 0,
+                addressed_date TEXT,
+                resolution_notes TEXT,
+                created_date TEXT
+            )
+        """)
+
+        # ── Sprint 1: research_history (novelty gate, append-only) ──
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS research_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticker TEXT NOT NULL,
+                first_researched_date TEXT,
+                archived_date TEXT,
+                archive_reason TEXT,
+                final_stage TEXT,
+                thesis_status TEXT,
+                created_date TEXT
+            )
+        """)
+
+        # ── Sprint 1: valuation_runs ──
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS valuation_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticker TEXT NOT NULL,
+                run_date TEXT,
+                run_type TEXT DEFAULT 'manual',
+                assumptions TEXT,
+                dcf_output TEXT,
+                peer_comp_output TEXT,
+                blended_iv REAL,
+                created_by TEXT DEFAULT 'user',
+                created_date TEXT
+            )
+        """)
 
     conn.commit()
     conn.close()
@@ -560,3 +719,271 @@ def get_weekly_reviews(ticker=None, thesis_id=None):
     rows = _rows(c)
     conn.close()
     return rows
+
+
+# ══════════════════════════════════════════════════════════════════
+# SPRINT 1 — Shortlist CRUD
+# ══════════════════════════════════════════════════════════════════
+
+def get_shortlist(stage=None):
+    conn = get_db()
+    c = conn.cursor()
+    if stage:
+        c.execute(_sql("SELECT * FROM shortlist WHERE stage=? ORDER BY composite_score DESC"),
+                  (stage,))
+    else:
+        c.execute("SELECT * FROM shortlist ORDER BY composite_score DESC NULLS LAST")
+    rows = _rows(c)
+    conn.close()
+    return rows
+
+
+def save_shortlist_ticker(data: dict):
+    """Upsert a shortlist row by ticker."""
+    conn = get_db()
+    c = conn.cursor()
+    ph = "%s" if _USE_PG else "?"
+    now = datetime.now().strftime("%Y-%m-%d")
+    ticker = data["ticker"].upper()
+    data["ticker"] = ticker
+    data.setdefault("created_date", now)
+    data["updated_date"] = now
+
+    c.execute(_sql(f"SELECT id FROM shortlist WHERE ticker={ph}"), (ticker,))
+    existing = c.fetchone()
+    if existing:
+        sets = ", ".join(f"{k}={ph}" for k in data if k not in ("id", "ticker", "created_date"))
+        vals = [data[k] for k in data if k not in ("id", "ticker", "created_date")] + [ticker]
+        c.execute(f"UPDATE shortlist SET {sets} WHERE ticker={ph}", vals)
+    else:
+        cols = ", ".join(data.keys())
+        placeholders = ", ".join([ph] * len(data))
+        c.execute(f"INSERT INTO shortlist ({cols}) VALUES ({placeholders})", list(data.values()))
+
+    conn.commit()
+    conn.close()
+
+
+def patch_shortlist(ticker: str, fields: dict):
+    """Partial update of shortlist row by ticker."""
+    if not fields:
+        return False
+    conn = get_db()
+    c = conn.cursor()
+    ph = "%s" if _USE_PG else "?"
+    now = datetime.now().strftime("%Y-%m-%d")
+    safe_keys = [k for k in fields if k not in ("id", "ticker", "created_date")]
+    sets = ", ".join(f"{k}={ph}" for k in safe_keys)
+    vals = [fields[k] for k in safe_keys] + [now, ticker.upper()]
+    c.execute(_sql(f"UPDATE shortlist SET {sets}, updated_date={ph} WHERE ticker={ph}"), vals)
+    updated = c.rowcount > 0
+    conn.commit()
+    conn.close()
+    return updated
+
+
+def delete_shortlist_ticker(ticker: str):
+    conn = get_db()
+    c = conn.cursor()
+    c.execute(_sql("DELETE FROM shortlist WHERE ticker=?"), (ticker.upper(),))
+    conn.commit()
+    conn.close()
+
+
+# ══════════════════════════════════════════════════════════════════
+# SPRINT 1 — Triggers CRUD
+# ══════════════════════════════════════════════════════════════════
+
+def get_triggers(ticker=None, addressed=None, severity=None):
+    conn = get_db()
+    c = conn.cursor()
+    ph = "%s" if _USE_PG else "?"
+    conditions = []
+    params = []
+    if ticker:
+        conditions.append(f"ticker={ph}")
+        params.append(ticker.upper())
+    if addressed is not None:
+        conditions.append(f"addressed={ph}")
+        params.append(1 if addressed else 0)
+    if severity:
+        conditions.append(f"severity={ph}")
+        params.append(severity)
+    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+    c.execute(f"SELECT * FROM triggers {where} ORDER BY "
+              f"CASE severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END, fired_date DESC",
+              params)
+    rows = _rows(c)
+    conn.close()
+    return rows
+
+
+def save_trigger(data: dict):
+    """Insert a new trigger row."""
+    conn = get_db()
+    c = conn.cursor()
+    ph = "%s" if _USE_PG else "?"
+    now = datetime.now().strftime("%Y-%m-%d")
+    data = dict(data)
+    data["ticker"] = data["ticker"].upper()
+    data.setdefault("fired_date", now)
+    data.setdefault("created_date", now)
+    data.setdefault("addressed", 0)
+
+    cols = ", ".join(data.keys())
+    placeholders = ", ".join([ph] * len(data))
+    if _USE_PG:
+        c.execute(f"INSERT INTO triggers ({cols}) VALUES ({placeholders}) RETURNING id",
+                  list(data.values()))
+        trigger_id = c.fetchone()["id"]
+    else:
+        c.execute(f"INSERT INTO triggers ({cols}) VALUES ({placeholders})", list(data.values()))
+        c.execute("SELECT last_insert_rowid()")
+        trigger_id = c.fetchone()[0]
+
+    conn.commit()
+    conn.close()
+    return trigger_id
+
+
+def patch_trigger(trigger_id: int, fields: dict):
+    """Mark addressed or update resolution notes."""
+    if not fields:
+        return False
+    conn = get_db()
+    c = conn.cursor()
+    ph = "%s" if _USE_PG else "?"
+    now = datetime.now().strftime("%Y-%m-%d")
+    safe_keys = [k for k in fields if k != "id"]
+    sets = ", ".join(f"{k}={ph}" for k in safe_keys)
+    vals = [fields[k] for k in safe_keys] + [trigger_id]
+    # Auto-stamp addressed_date when marking addressed
+    if fields.get("addressed") and "addressed_date" not in fields:
+        sets += f", addressed_date={ph}"
+        vals = [fields[k] for k in safe_keys] + [now, trigger_id]
+    c.execute(_sql(f"UPDATE triggers SET {sets} WHERE id={ph}"), vals)
+    updated = c.rowcount > 0
+    conn.commit()
+    conn.close()
+    return updated
+
+
+def get_trigger_counts():
+    """Return counts by severity for the nav badge."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute(_sql(
+        "SELECT severity, COUNT(*) as cnt FROM triggers WHERE addressed=? GROUP BY severity"
+    ), (0,))
+    rows = _rows(c)
+    conn.close()
+    counts = {"critical": 0, "warning": 0, "info": 0, "total": 0}
+    for r in rows:
+        s = r["severity"]
+        n = r["cnt"]
+        counts[s] = n
+        counts["total"] += n
+    return counts
+
+
+# ══════════════════════════════════════════════════════════════════
+# SPRINT 1 — Research History CRUD (novelty gate, append-only)
+# ══════════════════════════════════════════════════════════════════
+
+def get_research_history(ticker=None):
+    conn = get_db()
+    c = conn.cursor()
+    if ticker:
+        c.execute(_sql("SELECT * FROM research_history WHERE ticker=? ORDER BY created_date DESC"),
+                  (ticker.upper(),))
+    else:
+        c.execute("SELECT * FROM research_history ORDER BY created_date DESC")
+    rows = _rows(c)
+    conn.close()
+    return rows
+
+
+def save_research_history(data: dict):
+    """Append a new record to research_history."""
+    conn = get_db()
+    c = conn.cursor()
+    ph = "%s" if _USE_PG else "?"
+    now = datetime.now().strftime("%Y-%m-%d")
+    data = dict(data)
+    data["ticker"] = data["ticker"].upper()
+    data.setdefault("first_researched_date", now)
+    data.setdefault("created_date", now)
+
+    cols = ", ".join(data.keys())
+    placeholders = ", ".join([ph] * len(data))
+    if _USE_PG:
+        c.execute(f"INSERT INTO research_history ({cols}) VALUES ({placeholders}) RETURNING id",
+                  list(data.values()))
+        rec_id = c.fetchone()["id"]
+    else:
+        c.execute(f"INSERT INTO research_history ({cols}) VALUES ({placeholders})", list(data.values()))
+        c.execute("SELECT last_insert_rowid()")
+        rec_id = c.fetchone()[0]
+
+    conn.commit()
+    conn.close()
+    return rec_id
+
+
+def get_researched_tickers():
+    """All tickers ever researched — used by Task A novelty gate."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("SELECT DISTINCT ticker FROM research_history")
+    rows = c.fetchall()
+    conn.close()
+    return [r[0] if isinstance(r, tuple) else r["ticker"] for r in rows]
+
+
+# ══════════════════════════════════════════════════════════════════
+# SPRINT 1 — Valuation Runs CRUD
+# ══════════════════════════════════════════════════════════════════
+
+def get_valuation_runs(ticker=None):
+    conn = get_db()
+    c = conn.cursor()
+    if ticker:
+        c.execute(_sql("SELECT * FROM valuation_runs WHERE ticker=? ORDER BY run_date DESC"),
+                  (ticker.upper(),))
+    else:
+        c.execute("SELECT * FROM valuation_runs ORDER BY run_date DESC")
+    rows = _rows(c)
+    conn.close()
+    return rows
+
+
+def save_valuation_run(data: dict):
+    """Save one valuation run (manual or scheduled)."""
+    conn = get_db()
+    c = conn.cursor()
+    ph = "%s" if _USE_PG else "?"
+    now = datetime.now().strftime("%Y-%m-%d")
+    import json
+    data = dict(data)
+    data["ticker"] = data["ticker"].upper()
+    data.setdefault("run_date", now)
+    data.setdefault("created_date", now)
+    # Serialise dict fields
+    for key in ("assumptions", "dcf_output", "peer_comp_output"):
+        if isinstance(data.get(key), dict):
+            data[key] = json.dumps(data[key])
+
+    cols = ", ".join(data.keys())
+    placeholders = ", ".join([ph] * len(data))
+    if _USE_PG:
+        c.execute(f"INSERT INTO valuation_runs ({cols}) VALUES ({placeholders}) RETURNING id",
+                  list(data.values()))
+        run_id = c.fetchone()["id"]
+    else:
+        c.execute(f"INSERT INTO valuation_runs ({cols}) VALUES ({placeholders})", list(data.values()))
+        c.execute("SELECT last_insert_rowid()")
+        run_id = c.fetchone()[0]
+
+    conn.commit()
+    conn.close()
+    return run_id

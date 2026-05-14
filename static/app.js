@@ -55,6 +55,7 @@ function showSection(name) {
   if (name === "dashboard")  loadDashboard();
   if (name === "screener" && !screenerRan) { screenerRan = true; runScreener(); }
   if (name === "shortlist")  loadShortlist();
+  if (name === "triggers")   loadTriggers();
   if (name === "analyse")    { /* loads on ticker entry */ }
   if (name === "thesis")     loadThesisList();
   if (name === "tracker")    loadWeeklyTracker();
@@ -845,15 +846,52 @@ async function loadResearch() {
     `<div class="flex flex-col items-center py-20 gap-3"><div class="loader"></div><div class="text-slate-500 text-sm">Fetching data for ${ticker}...</div></div>`;
 
   try {
-    const [info, hist] = await Promise.all([
+    const baseTicker = ticker.split(".")[0];
+    const [info, hist, shortlistRow, thesisRow] = await Promise.all([
       api("/api/stock/" + ticker),
       api("/api/stock/" + ticker + "/financials"),
+      api("/api/shortlist/" + baseTicker).catch(() => null),
+      api("/api/thesis").then(all => (all || []).find(t => t.ticker === baseTicker) || null).catch(() => null),
     ]);
     document.getElementById("resLoader").classList.add("hidden");
     if (info.error) {
       document.getElementById("researchContent").innerHTML =
         `<div class="card text-red-400">Could not fetch data for <strong>${ticker}</strong>: ${info.error}</div>`;
       return;
+    }
+    // ── Stage chip ──
+    const stageChip = document.getElementById("resStageChip");
+    const stageColors = {
+      CANDIDATE_POOL:    "bg-slate-700 text-slate-300",
+      SCORED_BENCH:      "bg-slate-700 text-slate-300",
+      SHORTLISTED:       "bg-blue-900 text-blue-300",
+      FIRST_CUT_ADVANCE: "bg-indigo-900 text-indigo-300",
+      FIRST_CUT_BENCH:   "bg-yellow-900 text-yellow-300",
+      WATCHLIST:         "bg-emerald-900 text-emerald-300",
+      PORTFOLIO:         "bg-green-900 text-green-300",
+      ARCHIVED:          "bg-slate-800 text-slate-500",
+    };
+    const stage = shortlistRow?.stage || thesisRow?.stage || null;
+    if (stage && stageChip) {
+      stageChip.textContent = stage.replace(/_/g, " ");
+      stageChip.className = `text-xs font-semibold px-2.5 py-1 rounded-full ${stageColors[stage] || "bg-slate-700 text-slate-300"}`;
+      stageChip.classList.remove("hidden");
+    } else if (stageChip) {
+      stageChip.classList.add("hidden");
+    }
+    // ── Freshness chip ──
+    const freshChip = document.getElementById("resFreshnessChip");
+    const updDate   = thesisRow?.updated_date || shortlistRow?.updated_date;
+    if (freshChip && updDate) {
+      const days = Math.floor((Date.now() - new Date(updDate)) / 86400000);
+      const stale = days > 90;
+      freshChip.textContent = stale ? `⚠ Last updated ${days}d ago` : `Updated ${days}d ago`;
+      freshChip.className = `text-xs px-2 py-1 rounded border ${stale
+        ? "border-red-700 text-red-400 bg-red-950"
+        : "border-slate-700 text-slate-400"}`;
+      freshChip.classList.remove("hidden");
+    } else if (freshChip) {
+      freshChip.classList.add("hidden");
     }
     renderResearch(info, hist);
   } catch (e) {
@@ -3063,7 +3101,198 @@ function promoteAnalyseToPortfolio() {
   document.getElementById("pfEntry").focus();
 }
 
+// ═══════════════════════════════════════════════════════════════
+// TRIGGERS — Task D daily workflow surface
+// ═══════════════════════════════════════════════════════════════
+let _triggersData = [];
+let _triggersFilter = "all";
+
+async function loadTriggers() {
+  const el = document.getElementById("triggersContent");
+  if (!el) return;
+  el.innerHTML = `<div class="flex justify-center py-16"><div class="loader"></div><span class="text-slate-500 text-sm ml-3">Loading…</span></div>`;
+  try {
+    // Load open triggers; addressed ones loaded separately on filter change
+    const all = await api("/api/triggers");
+    _triggersData = all || [];
+    renderTriggers(_triggersData, _triggersFilter);
+    refreshTriggerBadge();
+  } catch(e) {
+    el.innerHTML = `<div class="card text-red-400 text-sm p-4">Error: ${e.message}</div>`;
+  }
+}
+
+function renderTriggers(data, filter) {
+  const el = document.getElementById("triggersContent");
+  const showing = filter === "all"
+    ? data.filter(t => !t.addressed)
+    : filter === "addressed"
+      ? data.filter(t => t.addressed)
+      : data.filter(t => !t.addressed && t.severity === filter);
+
+  // Critical banner
+  const criticals = data.filter(t => !t.addressed && t.severity === "critical");
+  const banner    = document.getElementById("trigCriticalBanner");
+  const bannerMsg = document.getElementById("trigCriticalMsg");
+  if (banner && criticals.length) {
+    const tickers = [...new Set(criticals.map(t => t.ticker))].join(", ");
+    bannerMsg.textContent = `${criticals.length} critical alert${criticals.length > 1 ? "s" : ""} require immediate attention — ${tickers}`;
+    banner.classList.remove("hidden");
+  } else if (banner) {
+    banner.classList.add("hidden");
+  }
+
+  if (!showing.length) {
+    el.innerHTML = `<div class="card text-center py-16 text-slate-500">
+      <div class="text-3xl mb-3">${filter === "addressed" ? "✓" : "🟢"}</div>
+      <div class="text-base font-medium">${filter === "addressed" ? "No addressed triggers" : "All clear — no open triggers"}</div>
+      <div class="text-sm mt-2">${filter === "addressed" ? "Nothing marked addressed yet." : "Task D will populate this when triggers fire."}</div>
+    </div>`;
+    return;
+  }
+
+  el.innerHTML = `<div class="space-y-3">${showing.map(t => renderTriggerRow(t)).join("")}</div>`;
+}
+
+function renderTriggerRow(t) {
+  const sevConfig = {
+    critical: { cls: "border-red-700 bg-red-950",   badge: "bg-red-600 text-white",   icon: "🔴" },
+    warning:  { cls: "border-amber-700 bg-amber-950", badge: "bg-amber-600 text-white", icon: "🟡" },
+    info:     { cls: "border-sky-800 bg-sky-950",    badge: "bg-sky-700 text-white",   icon: "🔵" },
+  };
+  const sev  = sevConfig[t.severity] || sevConfig.info;
+  const typeLabel = {
+    price: "Price", kpi: "KPI", catalyst: "Catalyst",
+    narrative: "Narrative", review_due: "Review Due",
+    macro: "Macro", manual: "Manual",
+  }[t.trigger_type] || t.trigger_type;
+
+  const actionColor = {
+    EXIT: "text-red-400", REDUCE: "text-orange-400", SCALE_OUT: "text-amber-400",
+    REVIEW: "text-yellow-300", HOLD: "text-slate-300", WATCH: "text-sky-300",
+  }[t.suggested_action] || "text-slate-300";
+
+  const addressedBadge = t.addressed
+    ? `<span class="text-xs text-emerald-400 font-medium">✓ Addressed ${t.addressed_date || ""}</span>`
+    : "";
+
+  const resolutionHtml = t.resolution_notes
+    ? `<div class="mt-2 text-xs text-slate-400 italic border-t border-slate-700 pt-2">${t.resolution_notes}</div>` : "";
+
+  const actionButtons = t.addressed ? "" : `
+    <div class="flex gap-2 mt-3 flex-wrap">
+      <button onclick="markAddressed(${t.id}, '')" class="btn-primary text-xs px-3 py-1.5">✓ Mark Addressed</button>
+      <button onclick="openAnalyse('${t.ticker}')" class="btn-secondary text-xs px-3 py-1.5">📊 Analyse</button>
+      ${t.trigger_type === "review_due"
+        ? `<button onclick="triggerRefreshResearch('${t.ticker}')" class="btn-secondary text-xs px-3 py-1.5">🔄 Refresh Research</button>`
+        : ""}
+    </div>`;
+
+  return `<div class="card border ${sev.cls} p-4" id="trigger-row-${t.id}">
+    <div class="flex items-start justify-between gap-3 flex-wrap">
+      <div class="flex items-start gap-3 flex-1 min-w-0">
+        <span class="text-xl flex-shrink-0 mt-0.5">${sev.icon}</span>
+        <div class="min-w-0">
+          <div class="flex items-center gap-2 flex-wrap mb-1">
+            <span class="font-bold text-white text-base cursor-pointer hover:text-emerald-400"
+                  onclick="openAnalyse('${t.ticker}')">${t.ticker}</span>
+            <span class="text-xs px-2 py-0.5 rounded ${sev.badge}">${t.severity.toUpperCase()}</span>
+            <span class="text-xs px-2 py-0.5 rounded bg-slate-700 text-slate-300">${typeLabel}${t.trigger_subtype ? " · " + t.trigger_subtype : ""}</span>
+            ${addressedBadge}
+          </div>
+          <div class="text-slate-200 text-sm">${t.details || "—"}</div>
+          ${resolutionHtml}
+          ${actionButtons}
+        </div>
+      </div>
+      <div class="text-right shrink-0">
+        ${t.suggested_action ? `<div class="${actionColor} font-bold text-sm">${t.suggested_action}</div>` : ""}
+        <div class="text-slate-500 text-xs mt-1">${t.fired_date || t.created_date || "—"}</div>
+      </div>
+    </div>
+  </div>`;
+}
+
+async function markAddressed(triggerId, notes) {
+  // Prompt for resolution notes if not provided
+  if (!notes) {
+    notes = prompt("Resolution notes (optional):", "") || "";
+  }
+  try {
+    await api("/api/triggers/" + triggerId, "PATCH", {
+      addressed: 1,
+      resolution_notes: notes,
+    });
+    // Remove row from UI without full reload
+    const row = document.getElementById("trigger-row-" + triggerId);
+    if (row) {
+      row.style.transition = "opacity 0.3s";
+      row.style.opacity = "0";
+      setTimeout(() => { row.remove(); refreshTriggerBadge(); }, 300);
+    }
+    // Update in-memory data
+    const t = _triggersData.find(x => x.id === triggerId);
+    if (t) { t.addressed = 1; t.resolution_notes = notes; }
+    refreshTriggerBadge();
+  } catch(e) {
+    alert("Failed to mark addressed: " + e.message);
+  }
+}
+
+function filterTriggers(filter) {
+  _triggersFilter = filter;
+  document.querySelectorAll(".trig-filter").forEach(b => b.classList.remove("active"));
+  const activeBtn = document.getElementById("trig-filter-" + filter);
+  if (activeBtn) activeBtn.classList.add("active");
+  renderTriggers(_triggersData, filter);
+}
+
+async function addManualTrigger() {
+  const ticker  = (document.getElementById("ntTicker")?.value || "").trim().toUpperCase();
+  const type    = document.getElementById("ntType")?.value;
+  const severity = document.getElementById("ntSeverity")?.value;
+  const action  = document.getElementById("ntAction")?.value;
+  const details = document.getElementById("ntDetails")?.value?.trim();
+  if (!ticker) { alert("Enter a ticker."); return; }
+  try {
+    await api("/api/triggers", "POST", {
+      ticker, trigger_type: type, severity,
+      suggested_action: action, details,
+    });
+    document.getElementById("ntTicker").value  = "";
+    document.getElementById("ntDetails").value = "";
+    loadTriggers();
+  } catch(e) {
+    alert("Failed to add trigger: " + e.message);
+  }
+}
+
+async function refreshTriggerBadge() {
+  try {
+    const counts = await api("/api/triggers/counts");
+    const badge  = document.getElementById("triggerBadge");
+    if (!badge) return;
+    const total   = counts.total || 0;
+    const critical = counts.critical || 0;
+    if (total > 0) {
+      badge.textContent = total;
+      badge.className = `ml-1 text-xs font-bold px-1.5 py-0.5 rounded-full ${critical > 0 ? "bg-red-600" : "bg-amber-600"} text-white`;
+      badge.classList.remove("hidden");
+    } else {
+      badge.classList.add("hidden");
+    }
+  } catch(e) { /* badge is non-critical */ }
+}
+
+function triggerRefreshResearch(ticker) {
+  // Ad-hoc research refresh: navigate to Analyse and load ticker
+  openAnalyse(ticker);
+  // TODO Sprint 3: wire to Task C ad-hoc run endpoint
+}
+
 // ─── Init ────────────────────────────────────────────────────────
 document.addEventListener("DOMContentLoaded", () => {
   loadDashboard();
+  // Refresh trigger badge in background on every page load
+  refreshTriggerBadge();
 });

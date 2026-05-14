@@ -108,6 +108,9 @@
     <button onclick="showSection('analyse')"    class="nav-btn tab-btn" id="nav-analyse">Analyse</button>
     <button onclick="showSection('research')"   class="nav-btn tab-btn" id="nav-research">Research</button>
     <button onclick="showSection('portfolio')"  class="nav-btn tab-btn" id="nav-portfolio">Portfolio</button>
+    <button onclick="showSection('triggers')"   class="nav-btn tab-btn" id="nav-triggers">
+      Triggers <span id="triggerBadge" class="hidden ml-1 text-xs font-bold px-1.5 py-0.5 rounded-full bg-red-600 text-white"></span>
+    </button>
     <!-- Hidden: Valuation, Thesis, Tracker kept as sections for back-compat / deep links -->
     <button id="nav-valuation" class="hidden"></button>
     <button id="nav-thesis"    class="hidden"></button>
@@ -578,7 +581,7 @@
   <h1 class="text-2xl font-bold text-white mb-1">Research Hub</h1>
   <p class="text-slate-400 text-sm mb-5">Morgan Stanley-style deep dive — understand the business before you value it</p>
 
-  <div class="flex gap-3 mb-4">
+  <div class="flex gap-3 mb-4 flex-wrap items-center">
     <input id="researchTicker" class="input-field" style="max-width:200px" placeholder="Enter ticker (e.g. AAPL)">
     <select id="researchMarket" class="input-field" style="max-width:120px">
       <option value="">US</option>
@@ -587,6 +590,9 @@
     </select>
     <button onclick="loadResearch()" class="btn-primary">Analyze →</button>
     <div id="resLoader" class="hidden flex items-center"><div class="loader"></div></div>
+    <!-- Stage chip + freshness — populated by JS after load -->
+    <span id="resStageChip" class="hidden text-xs font-semibold px-2.5 py-1 rounded-full"></span>
+    <span id="resFreshnessChip" class="hidden text-xs px-2 py-1 rounded border"></span>
   </div>
 
   <!-- Research Sub-tabs -->
@@ -1202,6 +1208,85 @@
   </div>
 </div>
 
-<script src="/static/app.js?v=20"></script>
+<!-- ══════════════════════════════════════════════════════════════
+     TRIGGERS SECTION — Task D output / daily workflow surface
+     ══════════════════════════════════════════════════════════════ -->
+<div id="section-triggers" class="section p-6 max-w-7xl mx-auto">
+  <div class="flex items-center justify-between mb-6 flex-wrap gap-3">
+    <div>
+      <h2 class="text-xl font-bold text-white">Triggers</h2>
+      <p class="text-slate-400 text-sm mt-0.5">Open alerts across your watchlist &amp; portfolio — address each to keep the system current.</p>
+    </div>
+    <div class="flex gap-2 flex-wrap">
+      <button onclick="filterTriggers('all')"      id="trig-filter-all"      class="trig-filter tab-btn active text-xs px-3 py-1.5">All</button>
+      <button onclick="filterTriggers('critical')" id="trig-filter-critical" class="trig-filter tab-btn text-xs px-3 py-1.5 text-red-400">🔴 Critical</button>
+      <button onclick="filterTriggers('warning')"  id="trig-filter-warning"  class="trig-filter tab-btn text-xs px-3 py-1.5 text-amber-400">🟡 Warning</button>
+      <button onclick="filterTriggers('info')"     id="trig-filter-info"     class="trig-filter tab-btn text-xs px-3 py-1.5 text-sky-400">🔵 Info</button>
+      <button onclick="filterTriggers('addressed')" id="trig-filter-addressed" class="trig-filter tab-btn text-xs px-3 py-1.5 text-slate-400">✓ Addressed</button>
+      <button onclick="loadTriggers()" class="btn-secondary text-xs px-3 py-1.5">↻ Refresh</button>
+    </div>
+  </div>
+
+  <!-- Critical banner — shown only when critical+unaddressed triggers exist -->
+  <div id="trigCriticalBanner" class="hidden bg-red-950 border border-red-700 rounded-lg px-4 py-3 mb-5">
+    <div class="flex items-center gap-2">
+      <span class="text-red-400 text-lg">⚠</span>
+      <span id="trigCriticalMsg" class="text-red-200 text-sm font-medium"></span>
+    </div>
+  </div>
+
+  <div id="triggersContent">
+    <div class="flex justify-center py-16"><div class="loader"></div><span class="text-slate-500 text-sm ml-3">Loading triggers…</span></div>
+  </div>
+
+  <!-- Manual trigger form (for user-added alerts or testing) -->
+  <div class="card mt-6">
+    <div class="text-slate-400 text-xs font-semibold uppercase tracking-wide mb-3">+ Add Manual Trigger</div>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+      <div>
+        <label class="text-slate-400 text-xs block mb-1">Ticker</label>
+        <input id="ntTicker" class="input-field" placeholder="AAPL">
+      </div>
+      <div>
+        <label class="text-slate-400 text-xs block mb-1">Type</label>
+        <select id="ntType" class="input-field">
+          <option value="price">Price</option>
+          <option value="kpi">KPI</option>
+          <option value="catalyst">Catalyst</option>
+          <option value="narrative">Narrative</option>
+          <option value="review_due">Review Due</option>
+          <option value="macro">Macro</option>
+          <option value="manual">Manual</option>
+        </select>
+      </div>
+      <div>
+        <label class="text-slate-400 text-xs block mb-1">Severity</label>
+        <select id="ntSeverity" class="input-field">
+          <option value="info">Info</option>
+          <option value="warning" selected>Warning</option>
+          <option value="critical">Critical</option>
+        </select>
+      </div>
+      <div>
+        <label class="text-slate-400 text-xs block mb-1">Suggested Action</label>
+        <select id="ntAction" class="input-field">
+          <option value="REVIEW">REVIEW</option>
+          <option value="REDUCE">REDUCE</option>
+          <option value="EXIT">EXIT</option>
+          <option value="SCALE_OUT">SCALE_OUT</option>
+          <option value="HOLD">HOLD</option>
+          <option value="WATCH">WATCH</option>
+        </select>
+      </div>
+    </div>
+    <div class="mb-3">
+      <label class="text-slate-400 text-xs block mb-1">Details</label>
+      <input id="ntDetails" class="input-field" placeholder="What triggered this alert?">
+    </div>
+    <button onclick="addManualTrigger()" class="btn-primary text-sm">Add Trigger</button>
+  </div>
+</div>
+
+<script src="/static/app.js?v=22"></script>
 </body>
 </html>
