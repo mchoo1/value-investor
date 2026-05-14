@@ -435,6 +435,15 @@ def save_thesis():
     return jsonify({"status": "ok", "id": thesis_id})
 
 
+@app.route("/api/thesis/<ticker>", methods=["PATCH"])
+def patch_thesis(ticker):
+    fields = request.json or {}
+    updated = db.patch_thesis(ticker.upper(), fields)
+    if updated:
+        return jsonify({"status": "ok"})
+    return jsonify({"status": "not_found"}), 404
+
+
 @app.route("/api/thesis/<int:thesis_id>", methods=["DELETE"])
 def delete_thesis(thesis_id):
     db.delete_thesis(thesis_id)

@@ -764,6 +764,27 @@ def save_shortlist_ticker(data: dict):
     conn.close()
 
 
+def patch_thesis(ticker: str, fields: dict):
+    """Partial update of thesis row by ticker (skips id, ticker, created_date)."""
+    if not fields:
+        return False
+    conn = get_db()
+    c = conn.cursor()
+    ph = "%s" if _USE_PG else "?"
+    now = datetime.now().strftime("%Y-%m-%d")
+    safe_keys = [k for k in fields if k not in ("id", "ticker", "created_date")]
+    if not safe_keys:
+        conn.close()
+        return False
+    sets = ", ".join(f"{k}={ph}" for k in safe_keys)
+    vals = [fields[k] for k in safe_keys] + [now, ticker.upper()]
+    c.execute(_sql(f"UPDATE thesis SET {sets}, updated_date={ph} WHERE ticker={ph}"), vals)
+    updated = c.rowcount > 0
+    conn.commit()
+    conn.close()
+    return updated
+
+
 def patch_shortlist(ticker: str, fields: dict):
     """Partial update of shortlist row by ticker."""
     if not fields:
