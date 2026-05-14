@@ -3054,7 +3054,19 @@ async function loadFirstCut() {
   if (!el) return;
   el.innerHTML = `<div class="flex justify-center py-16"><div class="loader"></div><span class="text-slate-500 text-sm ml-3">Loading…</span></div>`;
   try {
-    _firstcutData = await api("/api/shortlist") || [];
+    // Fetch shortlist + thesis in parallel so we can show rationale
+    const [shortlist, theses] = await Promise.all([
+      api("/api/shortlist").catch(() => []),
+      api("/api/thesis").catch(() => []),
+    ]);
+    // Build thesis lookup by ticker
+    const thesisMap = {};
+    for (const t of (theses || [])) thesisMap[t.ticker] = t;
+    // Annotate shortlist items with thesis data
+    _firstcutData = (shortlist || []).map(item => ({
+      ...item,
+      _thesis: thesisMap[item.ticker] || null,
+    }));
     renderFirstCut(_firstcutData, _fcFilter);
   } catch(e) {
     el.innerHTML = `<div class="card text-red-400 text-sm p-4">Error: ${e.message}</div>`;
@@ -3132,6 +3144,61 @@ function renderFirstCutCard(item) {
   const summaryHtml = item.first_cut_summary
     ? `<div class="mt-2 text-xs text-slate-400 bg-slate-800 rounded p-2 line-clamp-3">${item.first_cut_summary}</div>` : "";
 
+  // ── Rationale block — why this name is in First Cut ──────────────────────
+  let rationaleHtml = "";
+  {
+    const th = item._thesis;
+    const rationaleLines = [];
+
+    // 1. Screening score context
+    if (item.composite_score != null) {
+      const scoreCtx = item.composite_score >= 75 ? "Strong screening score" :
+                       item.composite_score >= 55 ? "Above-average screening score" : "Borderline screening score";
+      rationaleLines.push(`📊 ${scoreCtx} (${item.composite_score.toFixed(1)}/100)`);
+    }
+
+    // 2. Why it passed (from one_line_thesis or investment_case)
+    if (item.one_line_thesis && !summaryHtml) {
+      rationaleLines.push(`💡 ${item.one_line_thesis}`);
+    }
+
+    // 3. Thesis bullets if available
+    if (th?.investment_case) {
+      const bullets = th.investment_case.split("\n").filter(l => l.trim()).slice(0, 3);
+      bullets.forEach(b => rationaleLines.push(b.startsWith("•") ? b : `• ${b.replace(/^[-\*]\s*/,"")}`));
+    }
+
+    // 4. Key quant signals from axis scores
+    if (item.axis_scores) {
+      try {
+        const axes = typeof item.axis_scores === "string" ? JSON.parse(item.axis_scores) : item.axis_scores;
+        const strong = Object.entries(axes).filter(([,v]) => v >= 7).map(([k]) => k);
+        const weak   = Object.entries(axes).filter(([,v]) => v < 4).map(([k]) => k);
+        if (strong.length) rationaleLines.push(`✅ High scores: ${strong.join(", ")}`);
+        if (weak.length)   rationaleLines.push(`⚠ Watch: ${weak.join(", ")}`);
+      } catch(e) {}
+    }
+
+    // 5. Valuation context from thesis
+    if (th?.intrinsic_value && th?.stop_loss) {
+      const iv = th.intrinsic_value, stop = th.stop_loss;
+      rationaleLines.push(`📈 IV $${iv.toFixed(0)} · Stop $${stop.toFixed(0)}`);
+    }
+
+    if (rationaleLines.length) {
+      rationaleHtml = `
+        <div class="mt-2 border border-slate-700 rounded overflow-hidden">
+          <button onclick="this.nextElementSibling.classList.toggle('hidden');this.querySelector('span').textContent=this.nextElementSibling.classList.contains('hidden')?'▶':'▼'"
+            class="w-full text-left px-3 py-1.5 bg-slate-800 text-xs text-slate-400 hover:text-slate-200 flex items-center gap-1.5">
+            <span>▶</span> Rationale — why it's here
+          </button>
+          <div class="hidden px-3 py-2 bg-slate-900 space-y-1">
+            ${rationaleLines.map(l => `<div class="text-xs text-slate-300">${l}</div>`).join("")}
+          </div>
+        </div>`;
+    }
+  }
+
   // Verdict buttons — only show for SHORTLISTED
   const verdictButtons = item.stage === "SHORTLISTED" ? `
     <div class="flex gap-2 mt-3 flex-wrap">
@@ -3165,6 +3232,7 @@ function renderFirstCutCard(item) {
         ${item.one_line_thesis ? `<div class="text-slate-300 text-sm">${item.one_line_thesis}</div>` : ""}
         ${axisHtml}
         ${summaryHtml}
+        ${rationaleHtml}
         ${verdictButtons}
       </div>
       <div class="text-right shrink-0 ml-2">
@@ -3462,7 +3530,11 @@ async function loadAnalyse() {
       const setVal = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.value = v; };
       setVal("anConviction", existingThesis.conviction_tier);
       setVal("anMoat",       existingThesis.moat_rating);
-      setVal("anCase",       existingThesis.investment_case);
+      // Display investment case — ensure it's in bullet format
+      const rawCase = existingThesis.investment_case || "";
+      const formattedCase = formatToBullets(rawCase) || rawCase;
+      setVal("anCase", formattedCase);
+      if (formattedCase) setTimeout(() => previewBullets(), 50);
       setVal("anTarget",     existingThesis.target_price_36m || existingThesis.target_price || existingThesis.intrinsic_value);
       setVal("anStop",       existingThesis.stop_loss);
       setVal("an90d",        existingThesis.key_90d_metric);
@@ -3538,9 +3610,85 @@ function calcAnalyseExitMultiple() {
   }
 }
 
+// ── Bullet formatting helpers ──────────────────────────────────────────────
+function formatToBullets(text) {
+  if (!text || !text.trim()) return "";
+  // If it already looks bulleted (most lines start with • - *), leave as-is
+  const lines = text.split(/\n/).map(l => l.trim()).filter(Boolean);
+  const alreadyBulleted = lines.filter(l => /^[•\-\*]/.test(l)).length > lines.length * 0.6;
+  if (alreadyBulleted) return lines.map(l => l.startsWith("•") ? l : `• ${l.replace(/^[-\*]\s*/,"")}`).join("\n");
+  // Otherwise split by | then newline then sentence
+  const parts = text.split(/[|\n]/).flatMap(seg =>
+    seg.split(/(?<=[.!?])\s+(?=[A-Z])/)
+  ).map(s => s.trim()).filter(s => s.length > 4);
+  return [...new Set(parts)].map(p => `• ${p.replace(/^[•\-\*]\s*/,"")}`).join("\n");
+}
+
+function renderBulletsHtml(text) {
+  if (!text) return "";
+  return text.split("\n").filter(l => l.trim()).map(l =>
+    `<div class="flex gap-1.5"><span class="text-emerald-400 mt-0.5 shrink-0">${l.startsWith("•") ? "•" : "•"}</span><span>${l.replace(/^•\s*/,"")}</span></div>`
+  ).join("");
+}
+
+function previewBullets() {
+  const raw = document.getElementById("anCase")?.value || "";
+  const preview = document.getElementById("anCaseBulletPreview");
+  if (!preview) return;
+  const formatted = formatToBullets(raw);
+  if (!formatted) { preview.classList.add("hidden"); return; }
+  preview.innerHTML = `<div class="text-slate-500 text-xs mb-1 font-semibold uppercase tracking-wide">Preview (how it will be saved)</div>${renderBulletsHtml(formatted)}`;
+  preview.classList.remove("hidden");
+}
+
+async function uploadThesisDoc(input) {
+  const file = input?.files?.[0];
+  if (!file) return;
+  const ts = document.getElementById("anThesisStatus");
+  if (ts) ts.textContent = "Extracting from doc…";
+  try {
+    const formData = new FormData();
+    formData.append("file", file);
+    const res = await fetch("/api/thesis/upload-doc", { method: "POST", body: formData });
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    // Populate fields from extracted doc
+    if (data.investment_case) {
+      const ta = document.getElementById("anCase");
+      if (ta) ta.value = data.investment_case;
+    }
+    if (data.target_price) {
+      const el = document.getElementById("anTarget");
+      if (el && !el.value) el.value = data.target_price;
+    }
+    if (data.stop_loss) {
+      const el = document.getElementById("anStop");
+      if (el && !el.value) el.value = data.stop_loss;
+    }
+    if (data.key_90d_metric) {
+      const el = document.getElementById("an90d");
+      if (el && !el.value) el.value = data.key_90d_metric;
+    }
+    if (data.conviction_tier) setVal("anConviction", data.conviction_tier);
+    if (ts) ts.textContent = `✓ Extracted from ${file.name}`;
+    previewBullets();
+  } catch(e) {
+    if (ts) ts.textContent = "Upload error: " + e.message;
+  }
+  input.value = ""; // reset file input
+}
+
 async function saveAnalyseThesis() {
   const ticker = (document.getElementById("anTicker")?.value || "").trim().toUpperCase();
   if (!ticker) { alert("Load a ticker first."); return; }
+
+  // Auto-format investment case to bullet points before saving
+  const rawCase = document.getElementById("anCase").value || "";
+  const formattedCase = formatToBullets(rawCase);
+  if (formattedCase && formattedCase !== rawCase) {
+    document.getElementById("anCase").value = formattedCase;
+    previewBullets();
+  }
 
   const payload = {
     ticker,

@@ -557,6 +557,98 @@ def thesis_weekly_tracker():
 
 
 # ══════════════════════════════════════════════════════════════════
+# THESIS — UPLOAD-DOC (DOCX / PDF / TXT / MD)
+# ══════════════════════════════════════════════════════════════════
+
+@app.route("/api/thesis/upload-doc", methods=["POST"])
+def upload_thesis_doc():
+    """Accept a DOCX / PDF / TXT / MD file, extract text, return structured
+    investment case fields for the Analyse form to pre-fill."""
+    import re, tempfile
+
+    if "file" not in request.files:
+        return jsonify({"error": "No file uploaded"}), 400
+
+    f = request.files["file"]
+    filename = (f.filename or "").lower()
+    text = ""
+
+    # ── Extract text based on file type ─────────────────────────────────────
+    try:
+        if filename.endswith(".docx"):
+            try:
+                from docx import Document
+            except ImportError:
+                return jsonify({"error": "python-docx not installed"}), 500
+            with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as tmp:
+                f.save(tmp.name)
+                doc = Document(tmp.name)
+                text = "\n".join(p.text for p in doc.paragraphs if p.text.strip())
+
+        elif filename.endswith(".pdf"):
+            try:
+                import pypdf
+                with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+                    f.save(tmp.name)
+                    reader = pypdf.PdfReader(tmp.name)
+                    text = "\n".join(page.extract_text() or "" for page in reader.pages)
+            except ImportError:
+                try:
+                    import pdfplumber
+                    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+                        f.save(tmp.name)
+                        with pdfplumber.open(tmp.name) as pdf:
+                            text = "\n".join(pg.extract_text() or "" for pg in pdf.pages)
+                except ImportError:
+                    return jsonify({"error": "No PDF library available (pypdf or pdfplumber)"}), 500
+
+        elif filename.endswith((".txt", ".md")):
+            text = f.read().decode("utf-8", errors="replace")
+
+        else:
+            return jsonify({"error": f"Unsupported file type: {filename}"}), 400
+
+    except Exception as e:
+        return jsonify({"error": f"Failed to extract text: {str(e)}"}), 500
+
+    if not text.strip():
+        return jsonify({"error": "Could not extract any text from the file"}), 400
+
+    # ── Parse common structured fields ─────────────────────────────────────
+    result = {"raw_text": text[:5000], "investment_case": ""}
+
+    def find_price(pattern, txt):
+        m = re.search(pattern, txt, re.IGNORECASE)
+        return float(m.group(1).replace(",", "")) if m else None
+
+    result["target_price"] = find_price(r"(?:target|tp1|price target)[:\s]+\$?([\d,]+\.?\d*)", text)
+    result["stop_loss"]    = find_price(r"(?:stop.?loss|stop)[:\s]+\$?([\d,]+\.?\d*)", text)
+
+    m = re.search(r"(?:key metric|90.?day metric|watch)[:\s]+([^\n]{5,120})", text, re.IGNORECASE)
+    if m: result["key_90d_metric"] = m.group(1).strip()
+
+    m = re.search(r"(?:sell|exit|trigger)[:\s]+([^\n]{5,200})", text, re.IGNORECASE)
+    if m: result["sell_trigger"] = m.group(1).strip()
+
+    m = re.search(r"conviction[:\s]+(tier\s*\d|core|high|medium|low)", text, re.IGNORECASE)
+    if m: result["conviction_tier"] = m.group(1).strip().title()
+
+    # ── Build investment case as bullet lines ───────────────────────────────
+    # Look for bullet-like lines or extract key sentences
+    lines = [l.strip() for l in text.split("\n") if l.strip()]
+    bullet_lines = [l for l in lines if re.match(r"^[•\-\*\d]", l) and len(l) > 10]
+    if bullet_lines:
+        result["investment_case"] = "\n".join(f"• {l.lstrip('•-* 0123456789.')} " for l in bullet_lines[:12])
+    else:
+        # Fall back to first 8 meaningful sentences
+        sentences = re.split(r"(?<=[.!?])\s+", text)
+        good = [s.strip() for s in sentences if len(s.strip()) > 30][:8]
+        result["investment_case"] = "\n".join(f"• {s}" for s in good)
+
+    return jsonify(result)
+
+
+# ══════════════════════════════════════════════════════════════════
 # THESIS — DOCX AUTO-IMPORT
 # ══════════════════════════════════════════════════════════════════
 
