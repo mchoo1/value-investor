@@ -249,7 +249,7 @@ def init_db():
         """)
         # ── Task B: extend shortlist (Postgres — ALTER for existing tables) ──
         c.execute("SELECT column_name FROM information_schema.columns WHERE table_name='shortlist'")
-        existing_sl_pg = {r[0] for r in c.fetchall()}
+        existing_sl_pg = {r["column_name"] if isinstance(r, dict) else r[0] for r in c.fetchall()}
         for col, col_type in [
             ("initial_rationale",    "TEXT"),
             ("snapshot_metrics",     "TEXT"),
@@ -481,7 +481,7 @@ def init_db():
         # ── Task B: extend shortlist with first-cut fields ──
         c.execute("SELECT name FROM pragma_table_info('shortlist')" if not _USE_PG else
                   "SELECT column_name FROM information_schema.columns WHERE table_name='shortlist'")
-        existing_sl_cols = {r[0] for r in c.fetchall()}
+        existing_sl_cols = {r["column_name"] if isinstance(r, dict) else r[0] for r in c.fetchall()}
         for col, col_type in [
             ("initial_rationale",    "TEXT"),
             ("snapshot_metrics",     "TEXT"),
