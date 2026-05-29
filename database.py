@@ -238,6 +238,8 @@ def init_db():
                 first_cut_conviction INTEGER,
                 first_cut_date TEXT,
                 first_cut_memo_path TEXT,
+                theme_tag TEXT,
+                shortlisted_date TEXT,
                 source TEXT DEFAULT 'task_a',
                 weeks_in_pool INTEGER DEFAULT 0,
                 expires_date TEXT,
@@ -254,6 +256,8 @@ def init_db():
             ("first_cut_conviction", "INTEGER"),
             ("first_cut_date",       "TEXT"),
             ("first_cut_memo_path",  "TEXT"),
+            ("theme_tag",            "TEXT"),
+            ("shortlisted_date",     "TEXT"),
         ]:
             if col not in existing_sl_pg:
                 c.execute(f"ALTER TABLE shortlist ADD COLUMN {col} {col_type}")
@@ -289,6 +293,17 @@ def init_db():
                 created_date TEXT
             )
         """)
+        # ── Dedupe + UNIQUE(ticker) migration on research_history ──
+        try:
+            c.execute("""
+                DELETE FROM research_history
+                WHERE id NOT IN (
+                    SELECT MIN(id) FROM research_history GROUP BY ticker
+                )
+            """)
+            c.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_research_history_ticker ON research_history(ticker)")
+        except Exception as _e:
+            print(f"[warn] research_history dedupe/unique migration failed: {_e}")
 
         # ── Sprint 1: valuation_runs ──
         c.execute("""
@@ -474,6 +489,8 @@ def init_db():
             ("first_cut_conviction", "INTEGER"),
             ("first_cut_date",       "TEXT"),
             ("first_cut_memo_path",  "TEXT"),
+            ("theme_tag",            "TEXT"),
+            ("shortlisted_date",     "TEXT"),
         ]:
             if col not in existing_sl_cols:
                 c.execute(f"ALTER TABLE shortlist ADD COLUMN {col} {col_type}")
@@ -509,6 +526,17 @@ def init_db():
                 created_date TEXT
             )
         """)
+        # ── Dedupe + UNIQUE(ticker) migration on research_history ──
+        try:
+            c.execute("""
+                DELETE FROM research_history
+                WHERE id NOT IN (
+                    SELECT MIN(id) FROM research_history GROUP BY ticker
+                )
+            """)
+            c.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_research_history_ticker ON research_history(ticker)")
+        except Exception as _e:
+            print(f"[warn] research_history dedupe/unique migration failed: {_e}")
 
         # ── Sprint 1: valuation_runs ──
         c.execute("""
@@ -770,16 +798,41 @@ def get_shortlist(stage=None):
     return rows
 
 
+def _shortlist_columns(c):
+    """Return the set of real column names in the shortlist table (for defensive filtering)."""
+    try:
+        if _USE_PG:
+            c.execute("SELECT column_name FROM information_schema.columns WHERE table_name='shortlist'")
+            return {r[0] if isinstance(r, tuple) else r["column_name"] for r in c.fetchall()}
+        else:
+            c.execute("PRAGMA table_info(shortlist)")
+            return {r[1] for r in c.fetchall()}
+    except Exception:
+        return set()
+
+
 def save_shortlist_ticker(data: dict):
-    """Upsert a shortlist row by ticker."""
+    """Upsert a shortlist row by ticker.
+
+    Defensive: unknown columns in `data` are silently dropped (with a warning log)
+    so adding new fields client-side never 500s the server.
+    """
     conn = get_db()
     c = conn.cursor()
     ph = "%s" if _USE_PG else "?"
     now = datetime.now().strftime("%Y-%m-%d")
     ticker = data["ticker"].upper()
+    data = dict(data)  # don't mutate caller
     data["ticker"] = ticker
     data.setdefault("created_date", now)
     data["updated_date"] = now
+
+    valid_cols = _shortlist_columns(c)
+    if valid_cols:
+        dropped = [k for k in data if k not in valid_cols]
+        if dropped:
+            print(f"[warn] save_shortlist_ticker: dropping unknown columns {dropped} for {ticker}")
+        data = {k: v for k, v in data.items() if k in valid_cols}
 
     c.execute(_sql(f"SELECT id FROM shortlist WHERE ticker={ph}"), (ticker,))
     existing = c.fetchone()
@@ -818,14 +871,26 @@ def patch_thesis(ticker: str, fields: dict):
 
 
 def patch_shortlist(ticker: str, fields: dict):
-    """Partial update of shortlist row by ticker."""
+    """Partial update of shortlist row by ticker.
+
+    Defensive: unknown columns in `fields` are silently dropped (with a warning log).
+    """
     if not fields:
         return False
     conn = get_db()
     c = conn.cursor()
     ph = "%s" if _USE_PG else "?"
     now = datetime.now().strftime("%Y-%m-%d")
+    valid_cols = _shortlist_columns(c)
     safe_keys = [k for k in fields if k not in ("id", "ticker", "created_date")]
+    if valid_cols:
+        dropped = [k for k in safe_keys if k not in valid_cols]
+        if dropped:
+            print(f"[warn] patch_shortlist: dropping unknown columns {dropped} for {ticker}")
+        safe_keys = [k for k in safe_keys if k in valid_cols]
+    if not safe_keys:
+        conn.close()
+        return False
     sets = ", ".join(f"{k}={ph}" for k in safe_keys)
     vals = [fields[k] for k in safe_keys] + [now, ticker.upper()]
     c.execute(_sql(f"UPDATE shortlist SET {sets}, updated_date={ph} WHERE ticker={ph}"), vals)
@@ -957,7 +1022,10 @@ def get_research_history(ticker=None):
 
 
 def save_research_history(data: dict):
-    """Append a new record to research_history."""
+    """Upsert a record in research_history keyed on ticker (UNIQUE).
+
+    Re-running with the same ticker updates the row in place instead of duplicating.
+    """
     conn = get_db()
     c = conn.cursor()
     ph = "%s" if _USE_PG else "?"
@@ -967,16 +1035,31 @@ def save_research_history(data: dict):
     data.setdefault("first_researched_date", now)
     data.setdefault("created_date", now)
 
-    cols = ", ".join(data.keys())
-    placeholders = ", ".join([ph] * len(data))
+    ticker = data["ticker"]
+    cols = list(data.keys())
+    placeholders = ", ".join([ph] * len(cols))
+    col_list = ", ".join(cols)
+
     if _USE_PG:
-        c.execute(f"INSERT INTO research_history ({cols}) VALUES ({placeholders}) RETURNING id",
-                  list(data.values()))
+        # ON CONFLICT (ticker) requires a UNIQUE index — added in init_db migration.
+        update_set = ", ".join(f"{k}=EXCLUDED.{k}" for k in cols if k != "ticker")
+        sql_q = (f"INSERT INTO research_history ({col_list}) VALUES ({placeholders}) "
+                 f"ON CONFLICT (ticker) DO UPDATE SET {update_set} RETURNING id")
+        c.execute(sql_q, list(data.values()))
         rec_id = c.fetchone()["id"]
     else:
-        c.execute(f"INSERT INTO research_history ({cols}) VALUES ({placeholders})", list(data.values()))
-        c.execute("SELECT last_insert_rowid()")
-        rec_id = c.fetchone()[0]
+        # SQLite: try INSERT, fall back to UPDATE if dupe
+        try:
+            c.execute(f"INSERT INTO research_history ({col_list}) VALUES ({placeholders})",
+                      list(data.values()))
+            c.execute("SELECT last_insert_rowid()")
+            rec_id = c.fetchone()[0]
+        except sqlite3.IntegrityError:
+            sets = ", ".join(f"{k}={ph}" for k in cols if k != "ticker")
+            vals = [data[k] for k in cols if k != "ticker"] + [ticker]
+            c.execute(f"UPDATE research_history SET {sets} WHERE ticker={ph}", vals)
+            c.execute("SELECT id FROM research_history WHERE ticker=?", (ticker,))
+            rec_id = c.fetchone()[0]
 
     conn.commit()
     conn.close()
