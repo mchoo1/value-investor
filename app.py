@@ -672,13 +672,18 @@ def buffett_indicator():
             rows = []
             for line in text.strip().splitlines()[1:]:
                 parts = line.strip().split(",")
-                if len(parts) == 2 and parts[1] not in (".", ""):
+                if len(parts) != 2 or parts[1] in ("", "."):
+                    continue  # FRED leaves empty / "." cells for missing observations
+                try:
                     rows.append({"date": parts[0], "value": float(parts[1])})
+                except ValueError:
+                    continue
             return rows
 
-        # WILL5000INDFC was discontinued on FRED (404). Use the Fed Z.1 series
-        # NCBEILQ027S: nonfinancial corporate equities, market value (millions USD, quarterly).
-        mc_data  = [{"date": d["date"], "value": d["value"] / 1000.0}   # -> billions
+        # WILL5000INDFC was discontinued by FRED (404s in prod). Use the Fed Z.1
+        # series: nonfinancial corporate business; corporate equities; liability,
+        # level (quarterly, millions USD) -> convert to billions.
+        mc_data  = [{"date": d["date"], "value": d["value"] / 1000.0}
                     for d in fetch_fred_csv("NCBEILQ027S")]
         gdp_data = fetch_fred_csv("GDP")             # billions USD, quarterly, annualised
 
@@ -704,14 +709,28 @@ def buffett_indicator():
                 history.append({"date": gdp_pt["date"],
                                  "ratio": round(mc_pt["value"] / gdp_pt["value"] * 100, 1)})
 
-        # Zone classification
-        if ratio < 75:
+        # Zone classification — by percentile of the ratio's own history since 1970.
+        # The Z.1 basis differs from the old Wilshire 5000 basis, so fixed % cutoffs
+        # (75/100/130/175) no longer apply. PROPOSED cutoffs, pending Ming's approval:
+        # <20th pct Undervalued, <50th Fair, <80th Overvalued, <95th Significantly, else Strongly.
+        hist_all = []
+        for gdp_pt in gdp_data:
+            if gdp_pt["date"] < "1970-01-01":
+                continue
+            mc_pt = next((d for d in reversed(mc_data) if d["date"] <= gdp_pt["date"]), None)
+            if mc_pt:
+                hist_all.append(mc_pt["value"] / gdp_pt["value"] * 100)
+        pct = (round(sum(1 for r in hist_all if r <= ratio) / len(hist_all) * 100, 1)
+               if hist_all else None)
+        if pct is None:
+            zone, zone_color = "Fair Value", "yellow"
+        elif pct < 20:
             zone, zone_color = "Undervalued",              "emerald"
-        elif ratio < 100:
+        elif pct < 50:
             zone, zone_color = "Fair Value",               "yellow"
-        elif ratio < 130:
+        elif pct < 80:
             zone, zone_color = "Overvalued",               "orange"
-        elif ratio < 175:
+        elif pct < 95:
             zone, zone_color = "Significantly Overvalued", "red"
         else:
             zone, zone_color = "Strongly Overvalued",      "red"
@@ -722,7 +741,7 @@ def buffett_indicator():
             "Fair Value":               "Market is broadly in line with economic output. Stock-picking matters more than macro timing here.",
             "Overvalued":               "Market is running ahead of GDP. Expect lower future returns; a margin-of-safety approach is prudent.",
             "Significantly Overvalued": "Valuations are stretched. Buffett has historically held cash or been cautious at these levels.",
-            "Strongly Overvalued":      "Extreme overvaluation — above the dot-com bubble peak. Risk management is paramount.",
+            "Strongly Overvalued":      "Top 5% of readings since 1970. Risk management is paramount.",
         }
 
         data = {
@@ -736,6 +755,8 @@ def buffett_indicator():
             "market_cap_date": latest_mc["date"],
             "gdp_date":        latest_gdp["date"],
             "history":        history,
+            "percentile":     pct,
+            "basis":          "Fed Z.1 NCBEILQ027S (nonfinancial corporate equities) / GDP; zones by percentile since 1970",
             "blurb":          blurbs[zone],
             "source":         "FRED: NCBEILQ027S (Fed Z.1 corporate equities) / GDP",
         }

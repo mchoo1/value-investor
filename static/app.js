@@ -277,8 +277,9 @@ async function loadBuffettIndicator() {
     document.getElementById("buffettBlurb").textContent  = d.blurb;
 
     // ── Gauge ──────────────────────────────────────────────────────
-    // Half-circle: left (180°) = 0%, right (0°) = 200%+
-    const MAX_RATIO  = 210;
+    // Half-circle in historical-percentile space (0th → 100th pct since 1970).
+    // Ratio basis changed to Fed Z.1 (see /api/market/buffett-indicator).
+    const MAX_RATIO  = 100;
     const CX = 110, CY = 110, R = 88;
     const toRad  = deg => deg * Math.PI / 180;
     const ratioToAngle = ratio => 180 - Math.min(ratio / MAX_RATIO, 1) * 180; // 180°→0°
@@ -289,10 +290,10 @@ async function loadBuffettIndicator() {
 
     // Arc segments: [startRatio, endRatio, color]
     const segments = [
-      [0,   75,  "#10b981"], // Undervalued — green
-      [75,  100, "#facc15"], // Fair Value — yellow
-      [100, 130, "#f97316"], // Overvalued — orange
-      [130, MAX_RATIO, "#ef4444"], // Significantly OV — red
+      [0,  20,  "#10b981"], // Undervalued — green
+      [20, 50,  "#facc15"], // Fair Value — yellow
+      [50, 80,  "#f97316"], // Overvalued — orange
+      [80, MAX_RATIO, "#ef4444"], // Significantly / Strongly OV — red
     ];
 
     function describeArc(r1, r2, outerR, innerR=72) {
@@ -314,18 +315,18 @@ async function loadBuffettIndicator() {
       `<path d="${describeArc(r1, r2, R)}" fill="${c}" opacity="0.85"/>`
     ).join("") +
     // tick marks at zone boundaries
-    [75, 100, 130].map(r => {
+    [20, 50, 80].map(r => {
       const ang = ratioToAngle(r);
       const [ox, oy] = arcPoint(ang);
       const ia = a => [CX + 68 * Math.cos(toRad(a)), CY - 68 * Math.sin(toRad(a))];
       const [ix, iy] = ia(ang);
       return `<line x1="${ox.toFixed(1)}" y1="${oy.toFixed(1)}" x2="${ix.toFixed(1)}" y2="${iy.toFixed(1)}" stroke="#1e293b" stroke-width="2"/>
               <text x="${(CX + 58*Math.cos(toRad(ang))).toFixed(1)}" y="${(CY - 58*Math.sin(toRad(ang)) + 4).toFixed(1)}"
-                    text-anchor="middle" font-size="7" fill="#94a3b8">${r}%</text>`;
+                    text-anchor="middle" font-size="7" fill="#94a3b8">p${r}</text>`;
     }).join("");
 
     // Needle
-    const needleAngle = ratioToAngle(d.ratio);
+    const needleAngle = ratioToAngle(d.percentile != null ? d.percentile : 50);
     const NEEDLE_LEN = 72;
     const nx = CX + NEEDLE_LEN * Math.cos(toRad(needleAngle));
     const ny = CY - NEEDLE_LEN * Math.sin(toRad(needleAngle));
@@ -2878,21 +2879,10 @@ function calcExitMultiple() {
 // ═══════════════════════════════════════════════════════════════
 async function refreshNavBadges() {
   try {
-    const [fcItems, wlItems, trigCounts] = await Promise.all([
-      api("/api/shortlist").catch(() => []),
+    const [wlItems, trigCounts] = await Promise.all([
       api("/api/watchlist").catch(() => []),
       api("/api/triggers/counts").catch(() => ({})),
     ]);
-
-    // First-Cut badge: open (non-ARCHIVED, non-KILL) items
-    const fcOpen = (fcItems || []).filter(x =>
-      !["ARCHIVED"].includes(x.stage) && x.verdict !== "KILL"
-    ).length;
-    const fcBadge = document.getElementById("fcBadge");
-    if (fcBadge) {
-      if (fcOpen > 0) { fcBadge.textContent = fcOpen; fcBadge.classList.remove("hidden"); }
-      else fcBadge.classList.add("hidden");
-    }
 
     // Watchlist badge: count of watchlist items
     const wlCount = (wlItems || []).length;

@@ -19,7 +19,7 @@ Branches get preview deployments; production changes only after review.
 | `GOOGLE_SERVICE_ACCOUNT_JSON` | Service-account key for Drive access (Phase 2) |
 | `DRIVE_ROOT_FOLDER_ID` | ID of the `ValueInvestor` Drive folder (Phase 2) |
 
-Automated research tasks access the protected deployment with a Vercel protection-bypass secret stored in the task environment, never in prompts or code.
+Automated research tasks do not use a Vercel protection-bypass secret; protected URLs are reached through the Vercel connector and research data lives in Google Drive.
 
 ## Data sources (free)
 SEC EDGAR (XBRL company facts, filings, Form 4) → company IR → Yahoo Finance (price, consensus) → FRED (risk-free rate) → Damodaran datasets (ERP, industry betas). Every figure carries a source and as-of date.
