@@ -54,7 +54,6 @@ function showSection(name) {
   if (btn) btn.classList.add("active");
   if (name === "dashboard")  loadDashboard();
   if (name === "screener" && !screenerRan) { screenerRan = true; runScreener(); }
-  if (name === "firstcut")   loadFirstCut();
   if (name === "shortlist")  loadShortlist();
   if (name === "triggers")   loadTriggers();
   if (name === "analyse")    { /* loads on ticker entry */ }
@@ -440,8 +439,6 @@ function _updateBulkBar() {
     <span class="text-white text-sm font-semibold">${_screenerSelected.size} selected</span>
     <button onclick="addSelectedToWatchlist()" class="btn-primary text-xs py-1.5 px-4">
       + Add ${newOnes} to Watchlist</button>
-    <button onclick="queueSelectedForResearch()" class="btn-secondary text-xs py-1.5 px-4">
-      ⏱ Queue for AI Research</button>
     <button onclick="_screenerSelected.clear();_updateBulkBar();renderScreenerTable(_screenerData)"
       class="text-slate-400 text-xs hover:text-white ml-auto">✕ Clear</button>`;
 }
@@ -489,23 +486,6 @@ async function addSelectedToWatchlist() {
   renderScreenerTable(_screenerData);
   const st = document.getElementById('screenStatus');
   if (st) { const prev = st.innerHTML; st.innerHTML = `✓ Added ${added} to watchlist`; setTimeout(()=>st.innerHTML=prev, 2500); }
-}
-
-// ── Bulk research queue ───────────────────────────────────────────
-async function queueSelectedForResearch() {
-  const tickers = [..._screenerSelected].filter(t => !_queuedTickers.has(t));
-  const rowMap  = Object.fromEntries(_screenerData.map(r => [r.ticker, r]));
-  for (const ticker of tickers) {
-    const r = rowMap[ticker] || {};
-    try {
-      await api('/api/research-queue', 'POST', { ticker, notes: `Screener score:${r.score||0}` });
-      _queuedTickers.add(ticker);
-    } catch (_) {}
-  }
-  _screenerSelected.clear(); _updateBulkBar();
-  renderScreenerTable(_screenerData);
-  const st = document.getElementById('screenStatus');
-  if (st) { const prev = st.innerHTML; st.innerHTML = `⏱ ${tickers.length} tickers queued for Monday's AI run`; setTimeout(()=>st.innerHTML=prev, 2500); }
 }
 
 function sortScreener(col) {
@@ -567,7 +547,7 @@ async function runScreener() {
     Promise.all([
       api("/api/watchlist").catch(()=>[]),
       api("/api/thesis/tickers").catch(()=>[]),
-      api("/api/research-queue").catch(()=>[]),
+      Promise.resolve([]),
     ]).then(([wl, priorTickers, queue]) => {
       _watchlistTickers = new Set(wl.map(w => w.ticker));
       _priorPickTickers = new Set(priorTickers);
@@ -2410,10 +2390,9 @@ async function loadThesisList() {
 }
 
 async function viewThesisDetail(id) {
-  const [theses, reviews] = await Promise.all([api("/api/thesis"), api("/api/reviews")]);
+  const theses = await api("/api/thesis");
   const t = theses.find(x => x.id === id);
   if (!t) return;
-  const myReviews = reviews.filter(r => r.ticker === t.ticker);
   const mos = t.intrinsic_value && t.current_price
     ? (((t.intrinsic_value - t.current_price) / t.intrinsic_value) * 100).toFixed(1) : null;
 
@@ -2423,7 +2402,6 @@ async function viewThesisDetail(id) {
         <div class="flex justify-between items-start mb-3">
           <div><h2 class="text-xl font-bold text-white">${t.ticker}</h2><div class="text-slate-400 text-sm mt-1">${t.title || ""}</div></div>
           <div class="flex gap-2">
-            <button onclick="openWeeklyReview(${t.id},'${t.ticker}')" class="btn-primary text-sm">+ Weekly Review</button>
             <button onclick="editThesis(${t.id})" class="btn-secondary text-sm">Edit</button>
             <button onclick="deleteThesis(${t.id})" class="btn-danger">Delete</button>
           </div>
@@ -2445,27 +2423,7 @@ async function viewThesisDetail(id) {
         <div class="card"><h3 class="font-semibold text-red-400 mb-2">Sell / Thesis Break</h3><p class="text-slate-300 text-sm whitespace-pre-line">${t.sell_trigger||"Not specified."}</p></div>
       </div>
       <div class="card"><h3 class="font-semibold text-amber-400 mb-2">Risk Factors</h3><p class="text-slate-300 text-sm whitespace-pre-line">${t.risk_factors||"No risks documented."}</p></div>
-      <div class="card">
-        <div class="flex items-center justify-between mb-3"><h3 class="font-semibold text-white">Weekly Reviews (${myReviews.length})</h3></div>
-        ${myReviews.length === 0 ? `<div class="text-slate-500 text-sm text-center py-4">No reviews yet. Click "+ Weekly Review" to start tracking.</div>` :
-          myReviews.map(r => `
-            <div class="review-card ${r.thesis_intact ? 'intact' : 'broken'} bg-slate-900 rounded-lg p-3 mb-2 text-sm">
-              <div class="flex justify-between items-center mb-1">
-                <span class="font-semibold text-white">${r.review_date}</span>
-                <div class="flex gap-2">
-                  <span class="${r.action==='buy'?'pill-green':r.action==='sell'?'pill-red':'pill-blue'}">${r.action}</span>
-                  <span class="text-amber-400">${"★".repeat(r.confidence||0)}</span>
-                </div>
-              </div>
-              <div class="grid grid-cols-3 gap-2 text-xs text-slate-400 mb-1">
-                <span>Price: <span class="text-white">${r.current_price?fmt(r.current_price):"—"}</span></span>
-                <span>Target: <span class="text-white">${r.target_price?fmt(r.target_price):"—"}</span></span>
-                <span>Thesis: <span class="${r.thesis_intact?'text-emerald-400':'text-red-400'}">${r.thesis_intact?"Intact ✓":"Broken ✗"}</span></span>
-              </div>
-              ${r.new_developments?`<div class="text-slate-300 text-xs"><strong>Dev:</strong> ${r.new_developments}</div>`:""}
-              ${r.assumption_changes?`<div class="text-amber-400 text-xs mt-1"><strong>Assumption changes:</strong> ${r.assumption_changes}</div>`:""}
-            </div>`).join("")}
-      </div>
+
     </div>`;
 }
 
@@ -2537,57 +2495,6 @@ async function deleteThesis(id) {
   await api("/api/thesis/" + id, "DELETE");
   loadThesisList();
   document.getElementById("thesisDetail").innerHTML = `<div class="card text-center py-16 text-slate-500"><div class="text-4xl mb-3">📝</div><div>Select a thesis to view</div></div>`;
-}
-
-// ── Weekly Review ────────────────────────────────────────────────
-function openWeeklyReview(thesisId, ticker) {
-  document.getElementById("reviewTicker").textContent = ticker;
-  document.getElementById("rvThesisId").value = thesisId;
-  document.getElementById("rvTickerHidden").value = ticker;
-  document.getElementById("rvDate").value = new Date().toISOString().slice(0,10);
-  ["rvPrice","rvTarget","rvDevelopments","rvAssumptions","rvNotes"].forEach(id => document.getElementById(id).value = "");
-  document.getElementById("rvThesisIntact").checked = true;
-  document.getElementById("rvRevOnTrack").checked = true;
-  document.getElementById("rvMarginOnTrack").checked = true;
-  setConf(3);
-  document.querySelectorAll("[data-action]").forEach(b => b.classList.toggle("selected", b.dataset.action === "hold"));
-  document.getElementById("rvAction").value = "hold";
-  document.getElementById("reviewModal").classList.remove("hidden");
-}
-
-function closeReview() { document.getElementById("reviewModal").classList.add("hidden"); }
-
-function setAction(btn, action) {
-  document.querySelectorAll("[data-action]").forEach(b => b.classList.remove("selected"));
-  btn.classList.add("selected");
-  document.getElementById("rvAction").value = action;
-}
-
-function setConf(level) {
-  document.getElementById("rvConf").value = level;
-  document.querySelectorAll(".confidence-star").forEach((s, i) => s.classList.toggle("lit", i < level));
-}
-
-async function saveReview() {
-  const data = {
-    thesis_id: parseInt(document.getElementById("rvThesisId").value) || null,
-    ticker: document.getElementById("rvTickerHidden").value,
-    review_date: document.getElementById("rvDate").value,
-    current_price: parseFloat(document.getElementById("rvPrice").value) || null,
-    target_price: parseFloat(document.getElementById("rvTarget").value) || null,
-    thesis_intact: document.getElementById("rvThesisIntact").checked ? 1 : 0,
-    revenue_on_track: document.getElementById("rvRevOnTrack").checked ? 1 : 0,
-    margin_on_track: document.getElementById("rvMarginOnTrack").checked ? 1 : 0,
-    new_developments: document.getElementById("rvDevelopments").value,
-    assumption_changes: document.getElementById("rvAssumptions").value,
-    action: document.getElementById("rvAction").value,
-    confidence: parseInt(document.getElementById("rvConf").value),
-    notes: document.getElementById("rvNotes").value,
-  };
-  await api("/api/reviews", "POST", data);
-  closeReview();
-  const tid = parseInt(document.getElementById("rvThesisId").value);
-  if (tid) viewThesisDetail(tid);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -2815,31 +2722,6 @@ async function deletePosition(id) {
   loadPortfolio();
 }
 
-// ── Import thesis from DOCX research docs ───────────────────────
-async function importThesisFromDocs() {
-  const btn = document.getElementById("importDocxBtn");
-  if (btn) { btn.textContent = "⏳ Importing…"; btn.disabled = true; }
-  try {
-    const res = await api("/api/thesis/import-docx", "POST", {}, 60000);
-    const imported = (res.imported||[]).length;
-    const updated  = (res.updated||[]).length;
-    const skipped  = (res.skipped||[]).length;
-    const total    = imported + updated;
-    if (res.status === "no_files") {
-      alert("No .docx research files found in the workspace folder. Place HedgeFund*.docx files in your ValueInvestor folder and try again.");
-    } else if (total === 0 && skipped > 0) {
-      alert(`Import failed for all ${skipped} file(s). Check that the DOCX files are formatted correctly.`);
-    } else {
-      alert(`✅ Import complete!\n• ${imported} new theses created\n• ${updated} existing theses updated\n• Files scanned: ${(res.files_scanned||[]).join(", ")}`);
-      loadThesisList(); // refresh thesis list
-    }
-  } catch(e) {
-    alert("Import error: " + e.message);
-  } finally {
-    if (btn) { btn.textContent = "📥 Import from Research Docs"; btn.disabled = false; }
-  }
-}
-
 // ═══════════════════════════════════════════════════════════════
 // EXIT MULTIPLE VALUATION MODEL
 // ═══════════════════════════════════════════════════════════════
@@ -3032,374 +2914,6 @@ async function refreshNavBadges() {
       } else tBadge.classList.add("hidden");
     }
   } catch(e) { /* badges are non-critical */ }
-}
-
-// ═══════════════════════════════════════════════════════════════
-// FIRST-CUT — Task B interface (SHORTLISTED → ADVANCE/BENCH/KILL)
-// ═══════════════════════════════════════════════════════════════
-let _firstcutData  = [];
-let _fcFilter      = "all";
-
-const FC_STAGE_CONFIG = {
-  CANDIDATE_POOL:    { label: "Pool",     color: "bg-slate-700 text-slate-300",   icon: "🌊" },
-  SCORED_BENCH:      { label: "Bench",    color: "bg-slate-700 text-slate-300",   icon: "📊" },
-  SHORTLISTED:       { label: "Shortlisted", color: "bg-blue-900 text-blue-300",  icon: "📋" },
-  FIRST_CUT_ADVANCE: { label: "Advance",  color: "bg-emerald-900 text-emerald-300", icon: "✅" },
-  FIRST_CUT_BENCH:   { label: "Benched",  color: "bg-yellow-900 text-yellow-300", icon: "⏸" },
-  ARCHIVED:          { label: "Archived", color: "bg-slate-800 text-slate-500",   icon: "📁" },
-};
-
-async function loadFirstCut() {
-  const el = document.getElementById("firstcutContent");
-  if (!el) return;
-  el.innerHTML = `<div class="flex justify-center py-16"><div class="loader"></div><span class="text-slate-500 text-sm ml-3">Loading…</span></div>`;
-  try {
-    // Fetch shortlist + thesis in parallel so we can show rationale
-    const [shortlist, theses] = await Promise.all([
-      api("/api/shortlist").catch(() => []),
-      api("/api/thesis").catch(() => []),
-    ]);
-    // Build thesis lookup by ticker
-    const thesisMap = {};
-    for (const t of (theses || [])) thesisMap[t.ticker] = t;
-    // Annotate shortlist items with thesis data
-    _firstcutData = (shortlist || []).map(item => ({
-      ...item,
-      _thesis: thesisMap[item.ticker] || null,
-    }));
-    renderFirstCut(_firstcutData, _fcFilter);
-  } catch(e) {
-    el.innerHTML = `<div class="card text-red-400 text-sm p-4">Error: ${e.message}</div>`;
-  }
-}
-
-function renderFirstCut(items, filter) {
-  const el = document.getElementById("firstcutContent");
-  const showing = filter === "all"
-    ? items.filter(x => x.stage !== "ARCHIVED")
-    : items.filter(x => x.stage === filter);
-
-  if (!showing.length) {
-    const emptyMessages = {
-      all:              { icon: "🔍", msg: "No candidates yet", sub: "Task A will populate this on Monday, or add tickers manually below." },
-      SHORTLISTED:      { icon: "📋", msg: "No shortlisted names", sub: "Task A shortlists the top 10 each Monday." },
-      FIRST_CUT_ADVANCE:{ icon: "✅", msg: "No names advanced yet", sub: "Assign ADVANCE to shortlisted names to see them here." },
-      FIRST_CUT_BENCH:  { icon: "⏸", msg: "No benched names", sub: "" },
-      SCORED_BENCH:     { icon: "📊", msg: "No pool candidates", sub: "Task A writes scored candidates here each week." },
-    };
-    const e = emptyMessages[filter] || emptyMessages.all;
-    el.innerHTML = `<div class="card text-center py-16 text-slate-500">
-      <div class="text-3xl mb-3">${e.icon}</div>
-      <div class="font-medium">${e.msg}</div>
-      ${e.sub ? `<div class="text-sm mt-2">${e.sub}</div>` : ""}
-    </div>`;
-    return;
-  }
-
-  // Group by stage for display order
-  const order = ["SHORTLISTED","FIRST_CUT_ADVANCE","FIRST_CUT_BENCH","SCORED_BENCH","CANDIDATE_POOL"];
-  showing.sort((a, b) => {
-    const ai = order.indexOf(a.stage), bi = order.indexOf(b.stage);
-    const stageSort = (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
-    if (stageSort !== 0) return stageSort;
-    return (b.composite_score || 0) - (a.composite_score || 0);
-  });
-
-  el.innerHTML = `<div class="space-y-3">${showing.map(item => renderFirstCutCard(item)).join("")}</div>`;
-}
-
-function renderFirstCutCard(item) {
-  const cfg      = FC_STAGE_CONFIG[item.stage] || FC_STAGE_CONFIG.CANDIDATE_POOL;
-  const score    = item.composite_score != null ? item.composite_score.toFixed(1) : "—";
-  const strategy = item.strategy ? `<span class="text-xs px-2 py-0.5 rounded bg-slate-700 text-slate-300">${item.strategy}</span>` : "";
-  const tier     = item.tier     ? `<span class="text-xs px-2 py-0.5 rounded bg-slate-700 text-slate-300">${item.tier}</span>` : "";
-  const archetype= item.archetype ? `<span class="text-xs px-2 py-0.5 rounded bg-indigo-900 text-indigo-300">${item.archetype}</span>` : "";
-
-  // Expiry countdown
-  let expiryHtml = "";
-  if (item.expires_date) {
-    const daysLeft = Math.ceil((new Date(item.expires_date) - Date.now()) / 86400000);
-    const expired  = daysLeft <= 0;
-    expiryHtml = `<span class="text-xs ${expired ? "text-red-400" : daysLeft <= 3 ? "text-amber-400" : "text-slate-500"}">
-      ${expired ? "⚠ Expired" : `Expires in ${daysLeft}d`}
-    </span>`;
-  }
-
-  // Axis scores (if available)
-  let axisHtml = "";
-  if (item.axis_scores) {
-    try {
-      const axes = typeof item.axis_scores === "string" ? JSON.parse(item.axis_scores) : item.axis_scores;
-      axisHtml = `<div class="flex gap-3 flex-wrap mt-2">` +
-        Object.entries(axes).map(([k, v]) =>
-          `<div class="text-center">
-            <div class="text-slate-500 text-xs">${k}</div>
-            <div class="font-bold text-sm ${v >= 7 ? "text-emerald-400" : v >= 4 ? "text-yellow-400" : "text-red-400"}">${v}</div>
-          </div>`
-        ).join("") + `</div>`;
-    } catch(e) {}
-  }
-
-  // ── First-cut summary (test results) ────────────────────────────────────
-  let summaryHtml = "";
-  if (item.first_cut_summary) {
-    try {
-      const fc = typeof item.first_cut_summary === "string" ? JSON.parse(item.first_cut_summary) : item.first_cut_summary;
-      const tests = ["business","thesis","competition","valuation","bear"];
-      const testRows = tests.map(t => {
-        const val = fc[`${t}_test`] || "N/A";
-        const pass = val === "PASS";
-        const fail = val.startsWith("FAIL");
-        const color = pass ? "text-emerald-400" : fail ? "text-red-400" : "text-slate-500";
-        const icon  = pass ? "✓" : fail ? "✕" : "—";
-        return `<span class="text-xs ${color}" title="${t}">${icon} ${t.slice(0,3).toUpperCase()}</span>`;
-      }).join(" ");
-      const mos  = fc.rough_mos_pct != null ? `<span class="text-xs text-yellow-400 ml-2">MoS ${fc.rough_mos_pct}%</span>` : "";
-      const iv   = fc.rough_iv      != null ? `<span class="text-xs text-slate-400 ml-1">IV $${fc.rough_iv}</span>` : "";
-      const vi   = fc.variant_insight ? `<div class="text-xs text-blue-300 mt-1 italic">💡 ${fc.variant_insight.slice(0,120)}${fc.variant_insight.length>120?"…":""}</div>` : "";
-      summaryHtml = `<div class="mt-2 bg-slate-800 rounded px-3 py-2">
-        <div class="flex items-center gap-1 flex-wrap">${testRows}${mos}${iv}</div>${vi}
-      </div>`;
-    } catch(e) {
-      summaryHtml = `<div class="mt-2 text-xs text-slate-400 bg-slate-800 rounded p-2 line-clamp-3">${item.first_cut_summary}</div>`;
-    }
-  }
-
-  // ── Initial rationale (from Task B memo) ─────────────────────────────────
-  const rationaleFromMemo = item.initial_rationale
-    ? `<div class="mt-2 border-l-2 border-blue-700 pl-3 text-xs text-slate-300 leading-relaxed">${item.initial_rationale.slice(0,400)}${item.initial_rationale.length>400?"…":""}</div>`
-    : "";
-
-  // ── Snapshot metrics table (Task B data) ─────────────────────────────────
-  let snapshotHtml = "";
-  if (item.snapshot_metrics) {
-    try {
-      const snap = typeof item.snapshot_metrics === "string" ? JSON.parse(item.snapshot_metrics) : item.snapshot_metrics;
-      const fmt = (v, prefix="$", suffix="") => v != null ? `${prefix}${typeof v==="number"?v.toFixed(v<10?2:1):v}${suffix}` : "—";
-      const rows = [
-        snap.price        != null ? `<tr><td class="pr-3 text-slate-500">Price</td><td class="text-white font-semibold">${fmt(snap.price)}</td><td class="text-slate-400 text-xs">${snap.drawdown_from_high_pct!=null?`${snap.drawdown_from_high_pct}% from 52w high`:""}</td></tr>` : "",
-        snap.market_cap_b != null ? `<tr><td class="pr-3 text-slate-500">Mkt Cap / EV</td><td>${fmt(snap.market_cap_b,"$","B")} / ${fmt(snap.ev_b,"$","B")}</td><td></td></tr>` : "",
-        snap.revenue_ttm_b != null ? `<tr><td class="pr-3 text-slate-500">Rev TTM / Growth</td><td>${fmt(snap.revenue_ttm_b,"$","B")}</td><td class="text-xs ${(snap.revenue_growth_yoy_pct||0)>0?"text-emerald-400":"text-red-400"}">${snap.revenue_growth_yoy_pct!=null?`+${snap.revenue_growth_yoy_pct}% YoY`:""}</td></tr>` : "",
-        snap.pe_ntm       != null ? `<tr><td class="pr-3 text-slate-500">P/E NTM / EV/EBITDA</td><td>${fmt(snap.pe_ntm,"","x")} / ${fmt(snap.ev_ebitda_ntm,"","x")}</td><td></td></tr>` : "",
-        snap.consensus_pt_mean != null ? `<tr><td class="pr-3 text-slate-500">Consensus PT</td><td>${fmt(snap.consensus_pt_mean)}</td><td class="text-xs text-slate-400">${snap.pt_low&&snap.pt_high?`$${snap.pt_low}–$${snap.pt_high}`:""}</td></tr>` : "",
-        snap.short_interest_pct_float != null ? `<tr><td class="pr-3 text-slate-500">Short Interest</td><td>${snap.short_interest_pct_float}%</td><td class="text-xs text-slate-400">${snap.short_interest_trend||""}</td></tr>` : "",
-        snap.next_earnings_date ? `<tr><td class="pr-3 text-slate-500">Next Earnings</td><td>${snap.next_earnings_date}</td><td></td></tr>` : "",
-      ].filter(Boolean);
-
-      if (rows.length) {
-        snapshotHtml = `
-          <div class="mt-2 border border-slate-700 rounded overflow-hidden">
-            <button onclick="this.nextElementSibling.classList.toggle('hidden');this.querySelector('span').textContent=this.nextElementSibling.classList.contains('hidden')?'▶':'▼'"
-              class="w-full text-left px-3 py-1.5 bg-slate-800 text-xs text-slate-400 hover:text-slate-200 flex items-center gap-1.5">
-              <span>▶</span> Snapshot Metrics
-            </button>
-            <div class="hidden px-3 py-2 bg-slate-900">
-              <table class="text-xs w-full">${rows.join("")}</table>
-              ${snap.insider_net_6mo ? `<div class="text-xs text-slate-400 mt-1.5">👤 Insider (6mo): ${snap.insider_net_6mo}</div>` : ""}
-            </div>
-          </div>`;
-      }
-    } catch(e) {}
-  }
-
-  // ── Rationale block — why this name is in First Cut ──────────────────────
-  let rationaleHtml = "";
-  {
-    const th = item._thesis;
-    const rationaleLines = [];
-
-    // 1. Screening score context
-    if (item.composite_score != null) {
-      const scoreCtx = item.composite_score >= 75 ? "Strong screening score" :
-                       item.composite_score >= 55 ? "Above-average screening score" : "Borderline screening score";
-      rationaleLines.push(`📊 ${scoreCtx} (${item.composite_score.toFixed(1)}/100)`);
-    }
-
-    // 2. Why it passed (from one_line_thesis or investment_case)
-    if (item.one_line_thesis && !summaryHtml) {
-      rationaleLines.push(`💡 ${item.one_line_thesis}`);
-    }
-
-    // 3. Thesis bullets if available
-    if (th?.investment_case) {
-      const bullets = th.investment_case.split("\n").filter(l => l.trim()).slice(0, 3);
-      bullets.forEach(b => rationaleLines.push(b.startsWith("•") ? b : `• ${b.replace(/^[-\*]\s*/,"")}`));
-    }
-
-    // 4. Key quant signals from axis scores
-    if (item.axis_scores) {
-      try {
-        const axes = typeof item.axis_scores === "string" ? JSON.parse(item.axis_scores) : item.axis_scores;
-        const strong = Object.entries(axes).filter(([,v]) => v >= 7).map(([k]) => k);
-        const weak   = Object.entries(axes).filter(([,v]) => v < 4).map(([k]) => k);
-        if (strong.length) rationaleLines.push(`✅ High scores: ${strong.join(", ")}`);
-        if (weak.length)   rationaleLines.push(`⚠ Watch: ${weak.join(", ")}`);
-      } catch(e) {}
-    }
-
-    // 5. Valuation context from thesis
-    if (th?.intrinsic_value && th?.stop_loss) {
-      const iv = th.intrinsic_value, stop = th.stop_loss;
-      rationaleLines.push(`📈 IV $${iv.toFixed(0)} · Stop $${stop.toFixed(0)}`);
-    }
-
-    if (rationaleLines.length) {
-      rationaleHtml = `
-        <div class="mt-2 border border-slate-700 rounded overflow-hidden">
-          <button onclick="this.nextElementSibling.classList.toggle('hidden');this.querySelector('span').textContent=this.nextElementSibling.classList.contains('hidden')?'▶':'▼'"
-            class="w-full text-left px-3 py-1.5 bg-slate-800 text-xs text-slate-400 hover:text-slate-200 flex items-center gap-1.5">
-            <span>▶</span> Rationale — why it's here
-          </button>
-          <div class="hidden px-3 py-2 bg-slate-900 space-y-1">
-            ${rationaleLines.map(l => `<div class="text-xs text-slate-300">${l}</div>`).join("")}
-          </div>
-        </div>`;
-    }
-  }
-
-  // Verdict buttons — only show for SHORTLISTED
-  const verdictButtons = item.stage === "SHORTLISTED" ? `
-    <div class="flex gap-2 mt-3 flex-wrap">
-      <button onclick="assignVerdict('${item.ticker}', 'FIRST_CUT_ADVANCE')"
-        class="text-xs px-3 py-1.5 rounded border border-emerald-700 text-emerald-300 hover:bg-emerald-900 font-semibold">✅ Advance</button>
-      <button onclick="assignVerdict('${item.ticker}', 'FIRST_CUT_BENCH')"
-        class="text-xs px-3 py-1.5 rounded border border-yellow-700 text-yellow-300 hover:bg-yellow-900">⏸ Bench</button>
-      <button onclick="assignVerdict('${item.ticker}', 'ARCHIVED')"
-        class="text-xs px-3 py-1.5 rounded border border-red-800 text-red-400 hover:bg-red-950">✕ Kill</button>
-    </div>` : item.stage === "FIRST_CUT_ADVANCE" ? `
-    <div class="flex gap-2 mt-3 flex-wrap">
-      <button onclick="openAnalyse('${item.ticker}')" class="btn-primary text-xs px-3 py-1.5">📊 Deep Dive →</button>
-      <button onclick="assignVerdict('${item.ticker}', 'FIRST_CUT_BENCH')" class="btn-secondary text-xs px-3 py-1.5 text-yellow-400">⏸ Bench</button>
-    </div>` : `
-    <div class="flex gap-2 mt-3">
-      <button onclick="openAnalyse('${item.ticker}')" class="btn-secondary text-xs px-3 py-1.5">Analyse →</button>
-      ${item.stage === "FIRST_CUT_BENCH"
-        ? `<button onclick="assignVerdict('${item.ticker}', 'SHORTLISTED')" class="btn-secondary text-xs px-3 py-1.5 text-blue-400">↑ Re-shortlist</button>` : ""}
-    </div>`;
-
-  return `<div class="card p-4" id="fc-card-${item.ticker}">
-    <div class="flex items-start justify-between gap-3">
-      <div class="flex-1 min-w-0">
-        <div class="flex items-center gap-2 flex-wrap mb-1">
-          <span class="font-bold text-white text-base cursor-pointer hover:text-emerald-400"
-                onclick="openAnalyse('${item.ticker}')">${item.ticker}</span>
-          <span class="text-xs px-2 py-0.5 rounded ${cfg.color}">${cfg.icon} ${cfg.label}</span>
-          ${strategy}${tier}${archetype}
-          ${expiryHtml}
-        </div>
-        ${item.one_line_thesis ? `<div class="text-slate-300 text-sm mb-1">${item.one_line_thesis}</div>` : ""}
-        ${rationaleFromMemo}
-        ${axisHtml}
-        ${summaryHtml}
-        ${snapshotHtml}
-        ${rationaleHtml}
-        ${verdictButtons}
-      </div>
-      <div class="text-right shrink-0 ml-2">
-        <div class="text-2xl font-bold text-white">${score}</div>
-        <div class="text-slate-500 text-xs">Score</div>
-        ${item.updated_date ? `<div class="text-slate-600 text-xs mt-1">${item.updated_date}</div>` : ""}
-      </div>
-    </div>
-  </div>`;
-}
-
-function filterFirstCut(filter) {
-  _fcFilter = filter;
-  document.querySelectorAll(".fc-filter").forEach(b => b.classList.remove("active"));
-  const btn = document.getElementById("fc-filter-" + filter);
-  if (btn) btn.classList.add("active");
-  renderFirstCut(_firstcutData, filter);
-}
-
-async function assignVerdict(ticker, newStage) {
-  const card = document.getElementById("fc-card-" + ticker);
-  try {
-    await api("/api/shortlist/" + ticker, "PATCH", { stage: newStage, verdict: newStage });
-    // Update in-memory + re-render without full reload
-    const item = _firstcutData.find(x => x.ticker === ticker);
-    if (item) { item.stage = newStage; item.verdict = newStage; }
-    renderFirstCut(_firstcutData, _fcFilter);
-    refreshNavBadges();
-    // If advancing, nudge user toward Analyse
-    if (newStage === "FIRST_CUT_ADVANCE") {
-      setTimeout(() => {
-        if (confirm(`${ticker} advanced. Open in Analyse for deep-dive?`)) openAnalyse(ticker);
-      }, 200);
-    }
-    // If killing, offer to add to research_history novelty gate
-    if (newStage === "ARCHIVED") {
-      api("/api/research-history", "POST", {
-        ticker, final_stage: "FIRST_CUT_KILL", archive_reason: "Killed at first-cut",
-      }).catch(() => {});
-    }
-  } catch(e) {
-    alert("Failed to update " + ticker + ": " + e.message);
-  }
-}
-
-// ── First-Cut memo upload ────────────────────────────────────────────────────
-async function uploadFirstCutMemo(input) {
-  const file = input?.files?.[0];
-  if (!file) return;
-  const status = document.getElementById("fcUploadStatus");
-  if (status) status.textContent = `Parsing ${file.name}…`;
-
-  try {
-    const formData = new FormData();
-    formData.append("file", file);
-    const res = await fetch("/api/shortlist/upload-memo", { method: "POST", body: formData });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || res.statusText);
-
-    const updated = data.updated || [];
-    const warns   = data.warnings || [];
-    const advance = updated.filter(u => u.verdict === "ADVANCE").length;
-    const bench   = updated.filter(u => u.verdict === "BENCH").length;
-    const kill    = updated.filter(u => u.verdict === "KILL").length;
-
-    if (status) {
-      status.textContent = `✓ ${updated.length} tickers updated — ${advance} ADVANCE / ${bench} BENCH / ${kill} KILL`;
-      if (warns.length) status.textContent += ` | ⚠ ${warns.length} warning(s)`;
-    }
-
-    // Show summary toast
-    const summary = updated.map(u => `${u.ticker}: ${u.verdict}${u.created ? " (new)" : ""}`).join(" · ");
-    if (summary) {
-      const toast = document.createElement("div");
-      toast.className = "fixed bottom-4 right-4 bg-slate-800 border border-slate-600 rounded-lg p-4 text-sm text-slate-200 z-50 max-w-sm shadow-xl";
-      toast.innerHTML = `<div class="font-semibold text-emerald-400 mb-1">📋 Memo imported</div>
-        <div class="text-xs text-slate-400 mb-2">${summary}</div>
-        ${warns.length ? `<div class="text-xs text-amber-400">${warns.join("<br>")}</div>` : ""}
-        <button onclick="this.parentElement.remove()" class="mt-2 text-xs text-slate-500 hover:text-white">✕ dismiss</button>`;
-      document.body.appendChild(toast);
-      setTimeout(() => toast.remove(), 8000);
-    }
-
-    await loadFirstCut();
-    refreshNavBadges();
-  } catch(e) {
-    if (status) status.textContent = "Upload error: " + e.message;
-  }
-  input.value = "";
-}
-
-async function addToFirstCutPool() {
-  const ticker   = (document.getElementById("fcAddTicker")?.value || "").trim().toUpperCase();
-  const strategy = document.getElementById("fcAddStrategy")?.value || "value";
-  const thesis   = document.getElementById("fcAddThesis")?.value?.trim() || "";
-  if (!ticker) { alert("Enter a ticker."); return; }
-  try {
-    await api("/api/shortlist", "POST", {
-      ticker, stage: "SHORTLISTED", strategy, one_line_thesis: thesis, source: "manual",
-    });
-    document.getElementById("fcAddTicker").value  = "";
-    document.getElementById("fcAddThesis").value  = "";
-    loadFirstCut();
-    refreshNavBadges();
-  } catch(e) {
-    alert("Failed: " + e.message);
-  }
 }
 
 // ═══════════════════════════════════════════════════════════════

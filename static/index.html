@@ -104,9 +104,6 @@
   <div class="flex gap-1">
     <button onclick="showSection('dashboard')"  class="nav-btn tab-btn active" id="nav-dashboard">Dashboard</button>
     <button onclick="showSection('screener')"   class="nav-btn tab-btn" id="nav-screener">Screen</button>
-    <button onclick="showSection('firstcut')"   class="nav-btn tab-btn" id="nav-firstcut">
-      First-Cut <span id="fcBadge" class="hidden ml-1 text-xs font-bold px-1.5 py-0.5 rounded-full bg-blue-600 text-white"></span>
-    </button>
     <button onclick="showSection('shortlist')"  class="nav-btn tab-btn" id="nav-shortlist">
       Watchlist <span id="wlBadge" class="hidden ml-1 text-xs font-bold px-1.5 py-0.5 rounded-full bg-slate-600 text-white"></span>
     </button>
@@ -245,11 +242,6 @@
         <div class="text-slate-300 font-semibold mb-1 text-xs uppercase tracking-wide">① Screen</div>
         <div class="text-slate-400 text-xs mb-2">Task A scores ~110 candidates weekly</div>
         <button onclick="showSection('screener')" class="text-slate-400 text-xs hover:underline">Run Screen →</button>
-      </div>
-      <div class="metric-box border-l-2 border-blue-500 pl-3">
-        <div class="text-blue-400 font-semibold mb-1 text-xs uppercase tracking-wide">② First-Cut</div>
-        <div class="text-slate-400 text-xs mb-2">Assign ADVANCE / BENCH / KILL to shortlisted names</div>
-        <button onclick="showSection('firstcut')" class="text-blue-400 text-xs hover:underline">Review →</button>
       </div>
       <div class="metric-box border-l-2 border-indigo-500 pl-3">
         <div class="text-indigo-400 font-semibold mb-1 text-xs uppercase tracking-wide">③ Deep Dive</div>
@@ -438,55 +430,6 @@
           <div>Set your filters and run the screener to find undervalued stocks.</div>
         </div>
       </div>
-    </div>
-  </div>
-</div>
-
-<!-- ═══════════════════════════════════════════
-     FIRST-CUT — Task B interface (SHORTLISTED → verdict)
-═══════════════════════════════════════════ -->
-<div id="section-firstcut" class="section p-6 max-w-7xl mx-auto">
-  <div class="flex items-center justify-between mb-5 flex-wrap gap-3">
-    <div>
-      <h1 class="text-2xl font-bold text-white">First-Cut</h1>
-      <p class="text-slate-400 text-sm">Task B output — ADVANCE / BENCH / KILL verdicts with 5-test memos</p>
-    </div>
-    <div class="flex gap-2 items-center flex-wrap">
-      <!-- Upload Task B PDF/DOCX/TXT memo -->
-      <label class="btn-secondary text-sm cursor-pointer flex items-center gap-1.5 px-3 py-1.5" title="Upload Task B first-cut memo (PDF, DOCX, TXT, MD)">
-        📎 Upload Memo
-        <input type="file" id="fcMemoUpload" accept=".pdf,.docx,.txt,.md" class="hidden" onchange="uploadFirstCutMemo(this)">
-      </label>
-      <span id="fcUploadStatus" class="text-xs text-slate-500"></span>
-      <button onclick="loadFirstCut()" class="btn-secondary text-sm">↻ Refresh</button>
-    </div>
-  </div>
-
-  <!-- Stage filter pills -->
-  <div class="flex gap-2 mb-4 flex-wrap">
-    <button onclick="filterFirstCut('all')"            id="fc-filter-all"       class="fc-filter tab-btn active text-xs px-3 py-1">All</button>
-    <button onclick="filterFirstCut('SHORTLISTED')"    id="fc-filter-SHORTLISTED"    class="fc-filter tab-btn text-xs px-3 py-1">📋 Shortlisted</button>
-    <button onclick="filterFirstCut('FIRST_CUT_ADVANCE')" id="fc-filter-FIRST_CUT_ADVANCE" class="fc-filter tab-btn text-xs px-3 py-1 text-emerald-400">✅ Advance</button>
-    <button onclick="filterFirstCut('FIRST_CUT_BENCH')"   id="fc-filter-FIRST_CUT_BENCH"   class="fc-filter tab-btn text-xs px-3 py-1 text-yellow-400">⏸ Bench</button>
-    <button onclick="filterFirstCut('SCORED_BENCH')"   id="fc-filter-SCORED_BENCH"   class="fc-filter tab-btn text-xs px-3 py-1 text-slate-400">📊 Pool</button>
-  </div>
-
-  <div id="firstcutContent">
-    <div class="flex justify-center py-16"><div class="loader"></div><span class="text-slate-500 text-sm ml-3">Loading…</span></div>
-  </div>
-
-  <!-- Manual add to shortlist pool -->
-  <div class="card mt-6">
-    <div class="text-slate-400 text-xs font-semibold uppercase tracking-wide mb-3">+ Add Ticker to Pool</div>
-    <div class="flex gap-3 flex-wrap">
-      <input id="fcAddTicker" class="input-field" style="width:130px" placeholder="Ticker…" onkeydown="if(event.key==='Enter')addToFirstCutPool()">
-      <select id="fcAddStrategy" class="input-field" style="width:140px">
-        <option value="compounder">Compounder</option>
-        <option value="value">Value</option>
-        <option value="special_sit">Special Sit</option>
-      </select>
-      <input id="fcAddThesis" class="input-field flex-1" placeholder="One-line thesis…">
-      <button onclick="addToFirstCutPool()" class="btn-primary text-sm">Add to Pool</button>
     </div>
   </div>
 </div>
@@ -1045,7 +988,6 @@
       <p class="text-slate-400 text-sm">Record your thesis, track weekly, monitor assumptions</p>
     </div>
     <div class="flex gap-2">
-      <button onclick="importThesisFromDocs()" id="importDocxBtn" class="btn-secondary text-sm">📥 Import from Research Docs</button>
       <button onclick="openThesisForm()" class="btn-primary">+ New Thesis</button>
     </div>
   </div>
@@ -1220,89 +1162,6 @@
     </div>
     <input type="hidden" id="thEditId">
     <button onclick="saveThesis()" class="btn-primary w-full mt-4">Save Thesis</button>
-  </div>
-</div>
-
-<!-- ═══════════════════════════════════════════
-     WEEKLY REVIEW MODAL
-═══════════════════════════════════════════ -->
-<div id="reviewModal" class="hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4">
-  <div class="card w-full max-w-xl" style="max-height:90vh;overflow-y:auto">
-    <div class="flex justify-between items-center mb-4">
-      <h2 class="font-semibold text-white">Weekly Review — <span id="reviewTicker"></span></h2>
-      <button onclick="closeReview()" class="text-slate-400 hover:text-white text-xl">✕</button>
-    </div>
-
-    <div class="bg-slate-800 rounded-lg p-3 mb-4 text-xs text-slate-400 border border-slate-600">
-      <strong class="text-slate-300">Weekly Review Template</strong> — fill each section to keep your thesis current
-    </div>
-
-    <div class="space-y-3 text-sm">
-      <div class="grid grid-cols-2 gap-3">
-        <div><label class="text-slate-400 text-xs block mb-1">Review Date</label><input id="rvDate" type="date" class="input-field"></div>
-        <div><label class="text-slate-400 text-xs block mb-1">Current Price</label><input id="rvPrice" type="number" step="0.01" class="input-field"></div>
-      </div>
-      <div><label class="text-slate-400 text-xs block mb-1">Target Price</label><input id="rvTarget" type="number" step="0.01" class="input-field"></div>
-
-      <div class="metric-box">
-        <div class="text-slate-300 font-semibold mb-2">Thesis Health Check</div>
-        <div class="flex items-center gap-4">
-          <label class="flex items-center gap-2 cursor-pointer">
-            <input id="rvThesisIntact" type="checkbox" checked>
-            <span class="text-slate-300 text-xs">Thesis still intact?</span>
-          </label>
-          <label class="flex items-center gap-2 cursor-pointer">
-            <input id="rvRevOnTrack" type="checkbox" checked>
-            <span class="text-slate-300 text-xs">Revenue on track?</span>
-          </label>
-          <label class="flex items-center gap-2 cursor-pointer">
-            <input id="rvMarginOnTrack" type="checkbox" checked>
-            <span class="text-slate-300 text-xs">Margins on track?</span>
-          </label>
-        </div>
-      </div>
-
-      <div>
-        <label class="text-slate-400 text-xs block mb-1">New Developments This Week</label>
-        <textarea id="rvDevelopments" class="input-field" style="height:70px" placeholder="Earnings, news, management changes, sector moves..."></textarea>
-      </div>
-
-      <div>
-        <label class="text-slate-400 text-xs block mb-1">Assumption Changes (if any)</label>
-        <textarea id="rvAssumptions" class="input-field" style="height:60px" placeholder="e.g. Updated revenue growth from 8% → 6% due to Q2 miss..."></textarea>
-      </div>
-
-      <div>
-        <label class="text-slate-400 text-xs block mb-2">Action This Week</label>
-        <div class="flex gap-2">
-          <button onclick="setAction(this,'buy')" class="moat-btn" data-action="buy">Buy More</button>
-          <button onclick="setAction(this,'hold')" class="moat-btn selected" data-action="hold">Hold</button>
-          <button onclick="setAction(this,'sell')" class="moat-btn" data-action="sell">Sell / Trim</button>
-          <button onclick="setAction(this,'watch')" class="moat-btn" data-action="watch">Watch</button>
-        </div>
-        <input type="hidden" id="rvAction" value="hold">
-      </div>
-
-      <div>
-        <label class="text-slate-400 text-xs block mb-1">Conviction Level</label>
-        <div class="flex gap-1" id="confStars">
-          <span class="confidence-star lit" onclick="setConf(1)">★</span>
-          <span class="confidence-star lit" onclick="setConf(2)">★</span>
-          <span class="confidence-star lit" onclick="setConf(3)">★</span>
-          <span class="confidence-star" onclick="setConf(4)">★</span>
-          <span class="confidence-star" onclick="setConf(5)">★</span>
-        </div>
-        <input type="hidden" id="rvConf" value="3">
-      </div>
-
-      <div>
-        <label class="text-slate-400 text-xs block mb-1">Additional Notes</label>
-        <textarea id="rvNotes" class="input-field" style="height:60px" placeholder="Anything else worth noting..."></textarea>
-      </div>
-    </div>
-    <input type="hidden" id="rvThesisId">
-    <input type="hidden" id="rvTickerHidden">
-    <button onclick="saveReview()" class="btn-primary w-full mt-4">Save Weekly Review</button>
   </div>
 </div>
 
