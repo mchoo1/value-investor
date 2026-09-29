@@ -1,0 +1,517 @@
+{
+  "_meta": {
+    "name": "ValueInvestor framework config",
+    "version": "1.0",
+    "source": "value_investing_framework.pdf (27 pp, synthesized from Graham, Damodaran, McKinsey, Mizrahi, Brealey-Myers-Allen, Bogle)",
+    "rule": "Every value below is tagged source=framework (with page) or source=PROPOSED (needs Ming's approval). Tasks must not use PROPOSED values as final until status=approved.",
+    "as_of": "2026-09-29"
+  },
+  "universe": {
+    "listing": {
+      "value": "US-listed common stock",
+      "source": "framework p.3 + Ming 2026-09-29"
+    },
+    "strategy": {
+      "value": "value only (compounder track removed)",
+      "source": "Ming 2026-09-29"
+    },
+    "min_market_cap_usd": {
+      "value": 2000000000,
+      "source": "framework p.9 (conservative) / Appendix A.1",
+      "alt_moderate": 500000000
+    },
+    "min_revenue_usd": {
+      "value": 100000000,
+      "source": "framework p.8 (Graham adequate size)"
+    },
+    "min_avg_daily_dollar_volume_usd": {
+      "value": 10000000,
+      "source": "PROPOSED",
+      "status": "approved",
+      "why": "framework silent on liquidity; $10M ADV lets a mid-cap position be built/exited in days",
+      "approved": "Ming 2026-09-29"
+    },
+    "exclude": {
+      "value": [
+        "SPACs",
+        "pre-revenue",
+        "OTC",
+        "ADRs of non-US issuers"
+      ],
+      "source": "PROPOSED",
+      "status": "approved",
+      "approved": "Ming 2026-09-29"
+    }
+  },
+  "screen": {
+    "profile_in_use": {
+      "value": "moderate",
+      "source": "PROPOSED",
+      "status": "approved",
+      "why": "conservative (Graham) column passes very few names in 2026 markets; moderate (Buffett) column is framework-sanctioned",
+      "approved": "Ming 2026-09-29"
+    },
+    "thresholds": {
+      "pe_3yr_avg": {
+        "conservative": 15,
+        "moderate": 20,
+        "op": "<",
+        "page": 8
+      },
+      "pb": {
+        "conservative": 1.5,
+        "moderate": 3.0,
+        "op": "<",
+        "page": 8,
+        "note": "moderate only if ROE > 15%"
+      },
+      "pe_x_pb": {
+        "conservative": 22.5,
+        "moderate": 45,
+        "op": "<",
+        "page": 8
+      },
+      "ev_ebitda": {
+        "conservative": 8,
+        "moderate": 12,
+        "op": "<",
+        "page": 8
+      },
+      "roe_5yr_avg": {
+        "conservative": 0.12,
+        "moderate": 0.15,
+        "op": ">",
+        "page": 9
+      },
+      "roic": {
+        "conservative": "WACC",
+        "moderate": 0.15,
+        "op": ">",
+        "page": 9
+      },
+      "net_margin": {
+        "conservative": "industry_avg",
+        "moderate": 0.1,
+        "op": ">",
+        "page": 9
+      },
+      "debt_to_equity": {
+        "conservative": 0.5,
+        "moderate": 1.0,
+        "op": "<",
+        "page": 9
+      },
+      "net_debt_ebitda": {
+        "conservative": 2,
+        "moderate": 3,
+        "op": "<",
+        "page": 9
+      },
+      "current_ratio": {
+        "conservative": 2.0,
+        "moderate": 1.5,
+        "op": ">",
+        "page": 9,
+        "note": "relax for utilities/financials"
+      },
+      "fcf_yield": {
+        "conservative": 0.08,
+        "moderate": 0.05,
+        "op": ">",
+        "page": 9
+      },
+      "dividend_years": {
+        "conservative": 20,
+        "moderate": 10,
+        "op": ">=",
+        "page": 9,
+        "use_in_screen": false,
+        "why_PROPOSED": "would exclude most buyback-only value names; use as a checklist item, not a hard screen",
+        "status": "approved",
+        "approved": "Ming 2026-09-29"
+      },
+      "eps_growth_10yr_total": {
+        "conservative": 0.33,
+        "moderate": 0.5,
+        "op": ">",
+        "page": 9
+      }
+    },
+    "pass_rule": {
+      "value": "must pass all balance-sheet tests (D/E, NetDebt/EBITDA, current ratio) + at least 5 of the remaining valuation/profitability tests",
+      "source": "PROPOSED",
+      "status": "approved",
+      "why": "framework says thresholds are 'starting points, not absolute rules' (p.8); an all-must-pass rule on 13 tests returns ~0 names",
+      "approved": "Ming 2026-09-29"
+    },
+    "sector_exceptions": {
+      "financials": "skip EV/EBITDA, current ratio, net debt/EBITDA; use P/B vs ROE (p.4) and FCFE/DDM",
+      "utilities_reits": "relax D/E and current ratio (p.6, p.8)",
+      "cyclicals": "use normalized mid-cycle earnings (p.11)",
+      "source": "framework"
+    },
+    "value_trap_check": {
+      "value": "flag if FCF negative while net income positive for 2+ yrs, or ROE+net margin trending down vs industry 3-5 yrs",
+      "source": "framework p.7, p.10"
+    },
+    "shortlist_max": {
+      "value": 10,
+      "source": "Ming 2026-09-28"
+    },
+    "deep_dive_per_week": {
+      "value": "top 2-3",
+      "source": "Ming 2026-09-28"
+    }
+  },
+  "data_quality_gates": {
+    "max_data_age_days": {
+      "value": 7,
+      "source": "Ming 2026-09-28"
+    },
+    "stale_thesis_days": {
+      "value": 90,
+      "source": "Ming 2026-09-28"
+    },
+    "price_cross_check_max_diff": {
+      "value": 0.02,
+      "source": "existing Task A rule"
+    },
+    "mcap_cross_check_max_diff": {
+      "value": 0.05,
+      "source": "existing Task A rule"
+    },
+    "every_figure_needs": [
+      "source",
+      "as_of"
+    ],
+    "on_conflict": "mark field CONFLICT, show both values, block 'investable' until resolved"
+  },
+  "valuation": {
+    "min_methods": {
+      "value": 3,
+      "source": "Ming 2026-09-28 + framework p.15 'triangulate'"
+    },
+    "methods": {
+      "dcf_fcff": {
+        "page": 15,
+        "use_when": "predictable cash flows, non-financials"
+      },
+      "dcf_fcfe": {
+        "page": 17,
+        "use_when": "banks, insurers"
+      },
+      "ddm": {
+        "page": 17,
+        "use_when": "utilities, REITs, stable payers"
+      },
+      "multiples": {
+        "page": 17,
+        "rule": "5-15 peers, use MEDIAN, adjust for growth/leverage"
+      },
+      "asset_ncav": {
+        "page": 19,
+        "rule": "floor value; NCAV / tangible book / replacement cost"
+      },
+      "epv": {
+        "page": 19,
+        "rule": "normalized NOPAT / WACC; zero growth"
+      }
+    },
+    "weights": {
+      "dcf": [
+        0.4,
+        0.5
+      ],
+      "relative": [
+        0.2,
+        0.3
+      ],
+      "epv": [
+        0.1,
+        0.2
+      ],
+      "asset": [
+        0.1,
+        0.2
+      ],
+      "source": "framework p.19"
+    },
+    "dcf_rules": {
+      "terminal_growth_max": 0.03,
+      "forecast_years": [
+        5,
+        10
+      ],
+      "sensitivity": "WACC \u00b11-2%, g \u00b10.5-1%",
+      "source": "framework p.15-16"
+    },
+    "growth_skepticism": {
+      "value": "EPS growth >15% sustained beyond 5-10 yrs must be justified explicitly",
+      "source": "framework p.12"
+    },
+    "range_output": {
+      "low": "min of method bases after sensitivity (bear)",
+      "base": "weighted average",
+      "high": "max plausible (bull)",
+      "source": "PROPOSED",
+      "status": "approved",
+      "approved": "Ming 2026-09-29"
+    }
+  },
+  "margin_of_safety": {
+    "formula": "(IV_base - price) / IV_base",
+    "by_company_type": {
+      "wide_moat_compounder": {
+        "range": [
+          0.2,
+          0.25
+        ],
+        "use": 0.25
+      },
+      "average_quality": {
+        "range": [
+          0.3,
+          0.4
+        ],
+        "use": 0.35
+      },
+      "cyclical_turnaround": {
+        "range": [
+          0.4,
+          0.5
+        ],
+        "use": 0.45
+      },
+      "high_growth_early": {
+        "range": [
+          0.4,
+          0.6
+        ],
+        "use": 0.5
+      },
+      "source": "framework p.20 (ranges); 'use' point = PROPOSED mid/upper",
+      "status": "approved",
+      "approved": "Ming 2026-09-29"
+    },
+    "entry_price_target": "IV_base x (1 - required MoS)",
+    "extra_mos_rule": {
+      "value": "+10pts if any single risk could permanently impair a large part of value",
+      "source": "framework p.22 (qualitative) -> +10pts PROPOSED",
+      "status": "approved",
+      "approved": "Ming 2026-09-29"
+    }
+  },
+  "decision": {
+    "verdicts": [
+      "BUY",
+      "WATCH",
+      "PASS"
+    ],
+    "matrix_source": "framework p.23 (4.5 Decision Matrix)",
+    "rules": {
+      "BUY": "MoS >= required AND moat strong AND catalyst within 1-2 yrs AND risks manageable AND conviction >= 70",
+      "WATCH": "MoS within 10pts of required, OR a BUY-quality business with no dated catalyst (p.21), OR conviction 50-69",
+      "PASS": "MoS insufficient/negative with weak business, OR any red-flag risk that could permanently impair value, OR conviction < 50",
+      "conviction_cutoffs_source": "PROPOSED",
+      "status": "approved",
+      "approved": "Ming 2026-09-29"
+    },
+    "conviction_score": {
+      "source": "PROPOSED (framework defines High/Medium/Low only, p.24)",
+      "status": "approved",
+      "scale": "0-100",
+      "components": {
+        "moat_durability": {
+          "weight": 25,
+          "evidence": "ROE & net margin vs industry 5yr trend (p.10), moat type (p.10)"
+        },
+        "financial_strength": {
+          "weight": 20,
+          "evidence": "D/E, NetDebt/EBITDA, interest cover, FCF vs NI (p.6-7, p.22)"
+        },
+        "management_capital_alloc": {
+          "weight": 15,
+          "evidence": "insider %, buyback timing, M&A record, comp design (p.10, p.13)"
+        },
+        "valuation_mos": {
+          "weight": 25,
+          "evidence": "MoS vs required; agreement between methods (p.19-20)"
+        },
+        "catalyst_clarity": {
+          "weight": 15,
+          "evidence": "dated catalyst within 1-2 yrs (p.21)"
+        }
+      },
+      "each_component": "scored 0-5 with a one-line reason + source; score = sum(weight x s/5)",
+      "approved": "Ming 2026-09-29"
+    },
+    "checklist": {
+      "items": [
+        {
+          "id": "size",
+          "test": "Market cap >= min AND revenue >= $100M",
+          "page": "8, 24"
+        },
+        {
+          "id": "valuation",
+          "test": "P/E 3yr, P/B, P/E x P/B, EV/EBITDA within profile",
+          "page": 8
+        },
+        {
+          "id": "profitability",
+          "test": "ROE 5yr, ROIC > WACC, net margin",
+          "page": 9
+        },
+        {
+          "id": "balance_sheet",
+          "test": "D/E, NetDebt/EBITDA, current ratio, interest cover >= 3x",
+          "page": "9, 22"
+        },
+        {
+          "id": "cash_quality",
+          "test": "FCF positive & growing; FCF >= ~NI over 5 yrs",
+          "page": "7, 12"
+        },
+        {
+          "id": "moat",
+          "test": "Identified moat type with durability evidence",
+          "page": 10
+        },
+        {
+          "id": "management",
+          "test": "Aligned incentives, sensible buybacks, no restatements",
+          "page": "10, 22"
+        },
+        {
+          "id": "dilution",
+          "test": "Share count flat/declining 5 yrs",
+          "page": 13
+        },
+        {
+          "id": "concentration",
+          "test": "Top customer < 20% rev; single product < 50%",
+          "page": 22
+        },
+        {
+          "id": "mos",
+          "test": "MoS >= required for company type",
+          "page": 20
+        },
+        {
+          "id": "catalyst",
+          "test": "Identifiable catalyst within 1-2 yrs",
+          "page": 21
+        },
+        {
+          "id": "sensitivity",
+          "test": "Value not dependent on terminal growth / peak margins",
+          "page": "16, 22"
+        }
+      ],
+      "states": [
+        "PASS",
+        "FAIL",
+        "N/A",
+        "NO DATA"
+      ]
+    },
+    "risk_red_flags": {
+      "net_debt_ebitda": ">3x",
+      "interest_cover": "<3x",
+      "top_customer": ">20% revenue",
+      "single_product": ">50% revenue",
+      "source": "framework p.22"
+    },
+    "position_sizing_note": {
+      "value": "framework: conviction x MoS weighted, max 5-10% at cost, 10-30 names (p.22). Shown as a reference line only, not a recommendation.",
+      "source": "framework p.22"
+    }
+  },
+  "monitoring": {
+    "health": {
+      "GREEN": "no open issues or only info",
+      "AMBER": ">=1 medium issue",
+      "RED": ">=1 high issue or any kill criterion hit",
+      "source": "PROPOSED",
+      "status": "approved",
+      "approved": "Ming 2026-09-29"
+    },
+    "issue_rules_source": "Ming 2026-09-28 (pillar KPI breach, kill criterion, earnings miss/guide cut/revisions, mgmt/cap alloc/dilution/leverage, price vs value band, missed catalyst, stale)",
+    "estimate_revision_material": {
+      "value": "NTM EPS consensus moves >= 5% in 30 days",
+      "source": "PROPOSED",
+      "status": "approved",
+      "approved": "Ming 2026-09-29"
+    },
+    "leverage_jump": {
+      "value": "NetDebt/EBITDA +1.0x QoQ or crosses 3x",
+      "source": "framework p.22 (3x) + PROPOSED (+1.0x)",
+      "status": "approved",
+      "approved": "Ming 2026-09-29"
+    },
+    "dilution": {
+      "value": "diluted shares +3% YoY",
+      "source": "PROPOSED",
+      "status": "approved",
+      "approved": "Ming 2026-09-29"
+    },
+    "actions": [
+      "hold",
+      "re-underwrite",
+      "trim",
+      "exit review"
+    ],
+    "never_auto_close": true
+  },
+  "data_sources": {
+    "_rule": "Free sources only (Ming 2026-09-29). Every figure: {value, source, as_of}. Cross-check price and market cap against >=2 sources; on mismatch beyond gates mark CONFLICT.",
+    "priority": [
+      {
+        "rank": 1,
+        "source": "SEC EDGAR XBRL API (data.sec.gov companyfacts / submissions / frames)",
+        "use": "reported financials, shares outstanding, 10-K/10-Q/8-K text, Form 4 insider trades, 13F",
+        "notes": "requires User-Agent header with contact email; 10 req/s limit"
+      },
+      {
+        "rank": 2,
+        "source": "Company IR (earnings releases, guidance, presentations)",
+        "use": "guidance, segment KPIs, catalysts"
+      },
+      {
+        "rank": 3,
+        "source": "Yahoo Finance (yfinance)",
+        "use": "price, market cap, volume/ADV, consensus estimates & revisions, analyst targets, beta",
+        "notes": "unofficial; cross-check price vs a 2nd source"
+      },
+      {
+        "rank": 4,
+        "source": "Stooq / Nasdaq.com / Google Finance (web)",
+        "use": "second price source for cross-check"
+      },
+      {
+        "rank": 5,
+        "source": "FRED (St. Louis Fed)",
+        "use": "10Y UST risk-free rate, macro"
+      },
+      {
+        "rank": 6,
+        "source": "Damodaran Online datasets (pages.stern.nyu.edu/~adamodar)",
+        "use": "equity risk premium, industry betas, industry average margins/multiples for peer context"
+      },
+      {
+        "rank": 7,
+        "source": "Macrotrends / Finviz / stockanalysis.com (web)",
+        "use": "long history sanity checks, screener pre-filter only"
+      },
+      {
+        "rank": 8,
+        "source": "Web news search (Reuters, CNBC, company PRs)",
+        "use": "management changes, guidance cuts, catalysts"
+      }
+    ],
+    "gaps_to_flag": [
+      "consensus estimates only from Yahoo (single source) -> tag confidence=Medium",
+      "no point-in-time estimate history -> revisions computed from our own weekly snapshots"
+    ]
+  }
+}
