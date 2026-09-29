@@ -69,6 +69,77 @@ def health():
     return jsonify({"status": "ok"})
 
 
+# ── Telegram notifications ──────────────────────────────────────────
+# Secrets live only in Vercel env vars: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID.
+# Messages can only go to TELEGRAM_CHAT_ID (Ming's own chat). The endpoint sits
+# behind Vercel Deployment Protection; scheduled tasks reach it via the Vercel
+# connector (GET only), so it accepts GET ?text=... as well as POST {"text": ...}.
+_notify_log = []  # timestamps for a simple per-instance rate limit
+
+
+def _tg_call(method, payload=None):
+    import urllib.request, urllib.parse
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    if not token:
+        raise RuntimeError("TELEGRAM_BOT_TOKEN not set")
+    url = f"https://api.telegram.org/bot{token}/{method}"
+    data = urllib.parse.urlencode(payload).encode() if payload else None
+    with urllib.request.urlopen(url, data=data, timeout=15) as r:
+        return json.loads(r.read().decode())
+
+
+@app.route("/api/notify", methods=["GET", "POST"])
+def notify():
+    import time as _t
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
+    if not chat_id or not os.environ.get("TELEGRAM_BOT_TOKEN"):
+        return jsonify({"ok": False, "error": "TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID not configured"}), 503
+    body = request.get_json(silent=True) or {}
+    text = (body.get("text") or request.args.get("text") or "").strip()
+    if not text:
+        return jsonify({"ok": False, "error": "text required"}), 400
+    now = _t.time()
+    _notify_log[:] = [x for x in _notify_log if now - x < 3600]
+    if len(_notify_log) >= 20:
+        return jsonify({"ok": False, "error": "rate limit (20/hour)"}), 429
+    chunks = [text[i:i + 3900] for i in range(0, min(len(text), 3900 * 4), 3900)]
+    sent = 0
+    try:
+        for c in chunks:
+            res = _tg_call("sendMessage", {"chat_id": chat_id, "text": c,
+                                           "disable_web_page_preview": "true"})
+            if not res.get("ok"):
+                return jsonify({"ok": False, "error": res.get("description"), "sent": sent}), 502
+            sent += 1
+            _notify_log.append(now)
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)[:200], "sent": sent}), 502
+    resp = jsonify({"ok": True, "messages_sent": sent, "chars": len(text)})
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+@app.route("/api/notify/setup", methods=["GET"])
+def notify_setup():
+    """After messaging the bot once (/start), shows the chat id(s) to put in TELEGRAM_CHAT_ID.
+    Never returns the token."""
+    try:
+        res = _tg_call("getUpdates")
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)[:200]}), 503
+    chats = {}
+    for u in res.get("result", []):
+        m = u.get("message") or {}
+        c = m.get("chat") or {}
+        if c.get("id"):
+            chats[c["id"]] = {"chat_id": c["id"], "name": c.get("first_name") or c.get("title"),
+                              "type": c.get("type")}
+    resp = jsonify({"ok": True, "chats": list(chats.values()),
+                    "configured_chat_id": os.environ.get("TELEGRAM_CHAT_ID") or None})
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
 @app.route("/static/<path:path>")
 def static_files(path):
     return send_from_directory("static", path)

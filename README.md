@@ -18,6 +18,8 @@ Branches get preview deployments; production changes only after review.
 | `DATABASE_URL` | Neon Postgres connection string (legacy store; being replaced by Google Drive) |
 | `GOOGLE_SERVICE_ACCOUNT_JSON` | Service-account key for Drive access (Phase 2) |
 | `DRIVE_ROOT_FOLDER_ID` | ID of the `ValueInvestor` Drive folder (Phase 2) |
+| `TELEGRAM_BOT_TOKEN` | Bot token from @BotFather — used only by `/api/notify` |
+| `TELEGRAM_CHAT_ID` | Ming's chat id (find it via `/api/notify/setup` after sending the bot /start) |
 
 Automated research tasks do not use a Vercel protection-bypass secret; protected URLs are reached through the Vercel connector and research data lives in Google Drive.
 

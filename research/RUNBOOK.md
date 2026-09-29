@@ -114,10 +114,32 @@ The source of truth for thresholds is `framework.json` (Drive: ValueInvestor/con
    - `alerts/YYYY-MM-DD_alerts.json` as [{ticker, health, health_prev, issues_new[], recommended_action}];
    - `theses/index.json` updated with health, price and last_review.
 
-## 4. Weekly digest (Sunday 18:00 SGT)
+## 4. Weekly digest (Sunday 18:00 SGT): Telegram summary + email
 
 Read this week's screen JSON, deep dives created in the last 7 days, the latest alerts JSON and `theses/index.json`.
 
+**A. Telegram (phone summary, sent first).**
+Build a plain-text message of at most 3,500 characters. Use no Markdown and one short line per item:
+
+```
+ValueInvestor weekly — YYYY-MM-DD
+🔴 RED: TICKER — issue — action
+🟠 AMBER: TICKER — issue — action
+Health: G x / A y / R z · awaiting approval: n
+New candidates: T1, T2, T3 …
+Deep dives: TICKER VERDICT conv NN, price $P vs entry $E
+Approve: reply "approve TICKER" in the Stock project
+Full digest: email + Drive ValueInvestor/
+```
+
+Send it with the Vercel connector tool `web_fetch_vercel_url` (team team_YHb0xAwRSbM0EAm8QG1szML1) as a GET to
+`https://value-investor-git-cleanup-v1-mchoo1s-projects.vercel.app/api/notify?text=<URL-encoded message>`.
+After cleanup/v1 is merged, use `https://value-investor-weld.vercel.app/api/notify` instead.
+- Success is a response of `{"ok": true}`.
+- On 503 (not configured) or any error, note it and continue with the email. Do not retry more than once.
+- Never put secrets or tokens in the URL. The app holds the bot token.
+
+**B. Email (full digest).**
 Send ONE email with the Gmail connector:
 - To: mchoo1990@gmail.com only.
 - Subject: `ValueInvestor weekly — YYYY-MM-DD`.
@@ -129,7 +151,7 @@ Sections:
 3. Health changes this week.
 4. New screen candidates (up to 10) with one line each.
 5. Deep dives completed: verdict, conviction, price vs entry target.
-6. Drafts awaiting Ming's approval. Reply in the Stock project with "approve TICKER" / "reject TICKER".
+6. Drafts awaiting Ming's approval.
 7. Links to the Drive files.
 
 If there was no screen or there were no alerts, say so. Never add other recipients, and never send a second email.
