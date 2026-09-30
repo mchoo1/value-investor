@@ -923,7 +923,7 @@ def get_triggers(ticker=None, addressed=None, severity=None):
         params.append(ticker.upper())
     if addressed is not None:
         conditions.append(f"addressed={ph}")
-        params.append(1 if addressed else 0)
+        params.append(bool(addressed))  # Postgres column is BOOLEAN; sqlite stores 1/0
     if severity:
         conditions.append(f"severity={ph}")
         params.append(severity)
@@ -946,7 +946,9 @@ def save_trigger(data: dict):
     data["ticker"] = data["ticker"].upper()
     data.setdefault("fired_date", now)
     data.setdefault("created_date", now)
-    data.setdefault("addressed", 0)
+    data.setdefault("addressed", False)
+    if "addressed" in data:
+        data["addressed"] = bool(data["addressed"])
 
     cols = ", ".join(data.keys())
     placeholders = ", ".join([ph] * len(data))
@@ -972,6 +974,9 @@ def patch_trigger(trigger_id: int, fields: dict):
     c = conn.cursor()
     ph = "%s" if _USE_PG else "?"
     now = datetime.now().strftime("%Y-%m-%d")
+    fields = dict(fields)
+    if "addressed" in fields:
+        fields["addressed"] = bool(fields["addressed"])
     safe_keys = [k for k in fields if k != "id"]
     sets = ", ".join(f"{k}={ph}" for k in safe_keys)
     vals = [fields[k] for k in safe_keys] + [trigger_id]
@@ -992,7 +997,7 @@ def get_trigger_counts():
     c = conn.cursor()
     c.execute(_sql(
         "SELECT severity, COUNT(*) as cnt FROM triggers WHERE addressed=? GROUP BY severity"
-    ), (0,))
+    ), (False,))  # bool, not 0: Postgres rejects boolean = integer
     rows = _rows(c)
     conn.close()
     counts = {"critical": 0, "warning": 0, "info": 0, "total": 0}

@@ -132,12 +132,20 @@ Approve: reply "approve TICKER" in the Stock project
 Full digest: email + Drive ValueInvestor/
 ```
 
-Send it with the Vercel connector tool `web_fetch_vercel_url` (team team_YHb0xAwRSbM0EAm8QG1szML1) as a GET to
-`https://value-investor-git-cleanup-v1-mchoo1s-projects.vercel.app/api/notify?text=<URL-encoded message>`.
-After cleanup/v1 is merged, use `https://value-investor-weld.vercel.app/api/notify` instead.
-- Success is a response of `{"ok": true}`.
-- On 503 (not configured) or any error, note it and continue with the email. Do not retry more than once.
-- Never put secrets or tokens in the URL. The app holds the bot token.
+How to send it. The app is behind Vercel Authentication:
+1. Call the Vercel connector tool `get_access_to_vercel_url` (teamId team_YHb0xAwRSbM0EAm8QG1szML1, url = the app base below). It returns a `?_vercel_share=...` link.
+2. In bash, open that link once with a cookie jar, then POST the message:
+   ```
+   curl -s -c jar -b jar -L -o /dev/null "<shareableUrl>"
+   curl -s -b jar -X POST -H "Content-Type: application/json" --data @msg.json "<base>/api/notify"
+   ```
+   Write `msg.json` with python `json.dump({"text": message})` so quoting is safe.
+3. Fallback: `web_fetch_vercel_url` GET `<base>/api/notify?text=<URL-encoded>`. It is unreliable on protected routes and sometimes returns a 302 to the SSO page.
+
+The app base is `https://value-investor-git-cleanup-v1-mchoo1s-projects.vercel.app` until cleanup/v1 is merged, then `https://value-investor-weld.vercel.app`.
+- Success is `{"ok": true}`.
+- On 503 (not configured) or any error, retry once, note it and continue with the email.
+- Never put the bot token anywhere. The app holds it.
 
 **B. Email (full digest).**
 Send ONE email with the Gmail connector:
