@@ -91,6 +91,7 @@ def annual_series(cf, tags, unit="USD", instant=False):
     if not cf:
         return {}, None
     facts = cf.get("facts", {})
+    cand = []
     for tag in tags:
         tax = "dei" if tag.startswith("dei:") else "us-gaap"
         t = tag.split(":")[-1]
@@ -111,8 +112,18 @@ def annual_series(cf, tags, unit="USD", instant=False):
             if end not in rows or x.get("filed", "") > rows[end][1]:
                 rows[end] = (x["val"], x.get("filed", ""))
         if rows:
-            return {k: v[0] for k, v in sorted(rows.items())}, tag
-    return {}, None
+            cand.append(({k: v[0] for k, v in sorted(rows.items())}, tag))
+    return _freshest(cand)
+
+
+def _freshest(cand):
+    """Pick the tag whose latest period is most recent (ties -> earlier in list).
+    Companies switch XBRL tags over time (e.g. LDOS stopped LongTermDebtNoncurrent in 2015);
+    taking the first tag with any data silently returned decade-old values."""
+    if not cand:
+        return {}, None
+    best = max(range(len(cand)), key=lambda i: (max(cand[i][0]), -i))
+    return cand[best]
 
 
 def quarterly_series(cf, tags, unit="USD", instant=False):
@@ -120,6 +131,7 @@ def quarterly_series(cf, tags, unit="USD", instant=False):
     if not cf:
         return {}, None
     facts = cf.get("facts", {})
+    cand = []
     for tag in tags:
         tax = "dei" if tag.startswith("dei:") else "us-gaap"
         node = facts.get(tax, {}).get(tag.split(":")[-1])
@@ -139,8 +151,8 @@ def quarterly_series(cf, tags, unit="USD", instant=False):
             if end not in rows or x.get("filed", "") > rows[end][1]:
                 rows[end] = (x["val"], x.get("filed", ""))
         if rows:
-            return {k: v[0] for k, v in sorted(rows.items())}, tag
-    return {}, None
+            cand.append(({k: v[0] for k, v in sorted(rows.items())}, tag))
+    return _freshest(cand)
 
 
 # ── Nasdaq universe ─────────────────────────────────────────────────

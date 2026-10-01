@@ -35,8 +35,8 @@ T = {
   "tax":   ["IncomeTaxExpenseBenefit"],
   "int":   ["InterestExpense", "InterestExpenseNonoperating", "InterestExpenseDebt"],
   "eq":    ["StockholdersEquity", "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest"],
-  "ltd":   ["LongTermDebtNoncurrent", "LongTermDebt"],
-  "std":   ["LongTermDebtCurrent", "DebtCurrent"],
+  "ltd":   ["LongTermDebtNoncurrent", "LongTermDebtAndCapitalLeaseObligations", "LongTermDebt"],
+  "std":   ["LongTermDebtCurrent", "DebtCurrent", "LongTermDebtAndCapitalLeaseObligationsCurrent"],
   "stb":   ["ShortTermBorrowings", "CommercialPaper"],
   "cash":  ["CashAndCashEquivalentsAtCarryingValue",
             "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents"],
@@ -71,7 +71,7 @@ def main():
     ap.add_argument("--framework", default="framework.json")
     ap.add_argument("--out", default=f"screen_{D.TODAY}.json")
     ap.add_argument("--top", type=int, default=25)
-    ap.add_argument("--exclude", default="", help="comma tickers already tracked/archived (novelty gate)")
+    ap.add_argument("--exclude", nargs="?", const="", default="", help="comma tickers already tracked/archived (novelty gate)")
     a = ap.parse_args()
     fw = json.load(open(a.framework))
     th = fw["screen"]["thresholds"]; prof = "moderate"

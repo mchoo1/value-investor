@@ -9,9 +9,10 @@ The source of truth for thresholds is `framework.json` (Drive: ValueInvestor/con
    If the clone fails or `research/` is missing, STOP and report "research engine not found in repo". Do not rewrite the engine from memory.
 2. Framework: open Drive `config/framework.json` (file id 1G_YN7PXss6ILlpIoR-KWw4tUQvdODael) and save it as `framework.json` in the working directory. Also compare its `_meta.version` with `research/framework.json`, and use the Drive copy if they differ.
 3. Drive folder ids (parent = ValueInvestor 1OCSqkETyKYV4liq5k16ceyzC6SZr_YYl):
-   screens 1CH34yRup3bt7vgkvuLpknkbhqnIqNBYN · deep-dives 1Pl6gvqxq8hEGAHfHJYDNpyimPJgcEG1w · theses 1WciMU3MbcEGRQg825Pl4XaTjWb5jJwd2 · theses/index.json 1S7z1c1ai3v_YTbmTC3zJdgB4OCRS3ogQ · alerts 1mk6cFSvsojjGjNUsqFnQUaGIdjb9b1h1 · requests 17m_fkdwZhSB1YYy9gVH-A2Nt61h-HGlM · config 1WwEKT94FEbtrkAZBbiS-fMoezITM9B1H
+   screens 1CH34yRup3bt7vgkvuLpknkbhqnIqNBYN · deep-dives 1Pl6gvqxq8hEGAHfHJYDNpyimPJgcEG1w · theses 1WciMU3MbcEGRQg825Pl4XaTjWb5jJwd2 · theses/index.json: search title = 'index.json' and parentId = '1WciMU3MbcEGRQg825Pl4XaTjWb5jJwd2', take the newest modifiedTime · alerts 1mk6cFSvsojjGjNUsqFnQUaGIdjb9b1h1 · requests 17m_fkdwZhSB1YYy9gVH-A2Nt61h-HGlM · config 1WwEKT94FEbtrkAZBbiS-fMoezITM9B1H
    Per-ticker subfolders (deep-dives/TICKER, theses/TICKER): search for them first and create them only if missing.
-   The Drive connector cannot overwrite a file. To "update" a file, create the new version with the same title in the same folder, then move the older one to trash. Readers always take the newest by modifiedTime.
+   The Drive connector cannot overwrite a file. To "update" a file, create the new version with the same title in the same folder and try to trash the older one (trash may be denied; that is fine). Readers ALWAYS take the newest by modifiedTime.
+   Drive search syntax: `title = 'x'`, `title contains 'x'`, `fullText contains 'x'`, `parentId = '<id>'` (not name/q=).
 4. Data (free only, in priority order): SEC EDGAR (XBRL, filings, Form 4) → company IR → Yahoo Finance → Nasdaq.com → FRED → Damodaran → web news. Every figure is {value, source, as_of}.
    Gates:
    - Price data must be less than 7 days old.

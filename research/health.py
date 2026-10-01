@@ -138,7 +138,7 @@ def check(th, fw, last_check=None):
 
     for f in recent_8k(sec["cik"], last_check or (today - dt.timedelta(days=8)).isoformat()):
         sev = "medium" if "5.02" in (f["items"] or "") else "info"
-        add("filing", sev, f"8-K {f['date']} items {f['items']}", f["url"],
+        add("filing", sev, f"8-K {f['date']} items {f['items']}" + (" (5.02: read it - director election is benign, officer departure is not)" if sev == "medium" else ""), f["url"],
             "re-underwrite" if sev == "medium" else "hold")
 
     sev = {i["severity"] for i in issues}
