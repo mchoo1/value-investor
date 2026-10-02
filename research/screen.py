@@ -22,7 +22,7 @@ LATEST_FY = f"CY{YEAR-1}"                                       # last full cale
 BS_PERIODS = [f"CY{YEAR}Q2I", f"CY{YEAR}Q1I", f"CY{YEAR-1}Q4I"]  # latest balance sheet first
 
 T = {
-  "rev":   ["Revenues", "RevenueFromContractWithCustomerExcludingAssessedTax",
+  "rev":   ["RevenuesNetOfInterestExpense", "Revenues", "RevenueFromContractWithCustomerExcludingAssessedTax",
             "RevenueFromContractWithCustomerIncludingAssessedTax", "SalesRevenueNet"],
   "ni":    ["NetIncomeLoss"],
   "opinc": ["OperatingIncomeLoss"],
@@ -46,6 +46,8 @@ T = {
   "liab":  ["Liabilities"],
   "gw":    ["Goodwill"],
   "intang":["IntangibleAssetsNetExcludingGoodwill", "FiniteLivedIntangibleAssetsNet"],
+  "gp":    ["GrossProfit"],
+  "cogs":  ["CostOfRevenue", "CostOfGoodsAndServicesSold", "CostOfGoodsAndServiceExcludingDepreciationDepletionAndAmortization"],
 }
 EPS_TAGS = ["EarningsPerShareDiluted", "EarningsPerShareBasicAndDiluted", "EarningsPerShareBasic"]
 FIN_SECTORS = {"Finance", "Real Estate"}
@@ -108,6 +110,7 @@ def main():
     ap.add_argument("--out", default=f"screen_{D.TODAY}.json")
     ap.add_argument("--top", type=int, default=25)
     ap.add_argument("--top-drawdown", type=int, default=15)
+    ap.add_argument("--top-growth", type=int, default=15)
     ap.add_argument("--exclude", nargs="?", const="", default="", help="comma tickers already tracked/archived (novelty gate)")
     a = ap.parse_args()
     fw = json.load(open(a.framework))
@@ -118,6 +121,11 @@ def main():
     min_other = 5
     dd_cfg = fw["screen"].get("drawdown_list", {})
     dd_min = gv(dd_cfg.get("min_drawdown_from_52w_high", 0.30))   # Ming 2026-10-02
+    # List C (Ming 2026-10-02: growth at a sane price, losses allowed with a path). Thresholds PROPOSED.
+    GC = {"rev_cagr_3y_min": 0.20, "rev_growth_latest_min": 0.15, "gross_margin_min": 0.40,
+          "dilution_max": 0.05, "ev_sales_per_growth_pt_max": 0.5, "nd_ebitda_max": 3.0,
+          "current_ratio_min": 1.2, "runway_years_min": 2.0}
+    GC.update({k: gv(v) for k, v in fw["screen"].get("growth_list", {}).get("thresholds", {}).items()})
     exclude = {t.strip().upper() for t in a.exclude.split(",") if t.strip()}
 
     # 1. universe
@@ -147,6 +155,24 @@ def main():
     F["ocf_prev"] = D.sec_frames_first(T["ocf"], f"CY{YEAR-2}")
     F["capex_prev"] = D.sec_frames_first(T["capex"], f"CY{YEAR-2}")
     F["ni_prev"] = D.sec_frames_first(T["ni"], f"CY{YEAR-2}")
+    F["rev_prev"] = D.sec_frames_first(T["rev"], f"CY{YEAR-2}")
+    F["rev_3y"] = D.sec_frames_first(T["rev"], f"CY{YEAR-4}")
+    # Banks/lenders often tag only fee revenue as "revenue"; use net interest income + noninterest income instead.
+    for rk, per in (("rev", LATEST_FY), ("rev_prev", f"CY{YEAR-2}"), ("rev_3y", f"CY{YEAR-4}")):
+        nii = D.sec_frames_first(["InterestIncomeExpenseNet", "InterestIncomeExpenseAfterProvisionForLoanLoss"], per)
+        nonii = D.sec_frames_first(["NoninterestIncome"], per)
+        for cik, v in nii.items():
+            cur = F[rk].get(cik)
+            if cur and cur[3] == "RevenuesNetOfInterestExpense":
+                continue
+            tot = v[0] + (nonii.get(cik, (0,))[0] or 0)
+            if tot > 0 and (not cur or tot > cur[0]):
+                F[rk][cik] = (tot, v[1], v[2], "InterestIncomeExpenseNet+NoninterestIncome")
+    F["opinc_prev"] = D.sec_frames_first(T["opinc"], f"CY{YEAR-2}")
+    F["gp"] = D.sec_frames_first(T["gp"], LATEST_FY)
+    F["cogs"] = D.sec_frames_first(T["cogs"], LATEST_FY)
+    F["dsh"] = D.sec_frames_first(["WeightedAverageNumberOfDilutedSharesOutstanding"], LATEST_FY, unit="shares")
+    F["dsh_prev"] = D.sec_frames_first(["WeightedAverageNumberOfDilutedSharesOutstanding"], f"CY{YEAR-2}", unit="shares")
     for k in ("eq", "ltd", "std", "stb", "cash", "sti", "ca", "cl", "liab", "gw", "intang"):
         F[k] = pick_bs(T[k])
     ni_hist = {y: D.sec_frames_first(T["ni"], f"CY{y}") for y in range(YEAR-5, YEAR)}
@@ -202,6 +228,8 @@ def main():
         ic = (eq or 0) + debt - cash
         m["roic"] = opinc * (1 - t_rate) / ic if (opinc is not None and ic > 0) else None
         m["net_margin"] = ni / rev if rev else None
+        if m["net_margin"] is not None and m["net_margin"] > 1:   # revenue tag incomplete (e.g. mortgage REITs): treat as NO DATA
+            m["net_margin"] = None
         m["debt_to_equity"] = debt / eq if (eq and eq > 0) else None
         m["net_debt_ebitda"] = (debt - cash) / ebitda if (ebitda and ebitda > 0) else None
         ca, cl = g("ca", c), g("cl", c)
@@ -209,6 +237,45 @@ def main():
         m["fcf_yield"] = fcf / mcap if fcf is not None else None
         m["eps_growth_10yr_total"] = (eps3 / eps_old - 1) if (eps3 and eps_old and eps_old > 0) else None
         m["interest_cover"] = opinc / g("int", c) if (opinc and g("int", c)) else None
+        # growth metrics (List C)
+        r_prev, r_3y = g("rev_prev", c), g("rev_3y", c)
+        m["rev_growth_latest"] = rev / r_prev - 1 if (r_prev and r_prev > 0) else None
+        m["rev_cagr_3y"] = (rev / r_3y) ** (1 / 3) - 1 if (r_3y and r_3y > 0 and rev > 0) else None
+        gp = g("gp", c)
+        if gp is None and g("cogs", c) is not None:
+            gp = rev - g("cogs", c)
+        m["gross_margin"] = gp / rev if (gp is not None and rev) else None
+        d1, d0 = g("dsh", c), g("dsh_prev", c)
+        m["dilution_yoy"] = d1 / d0 - 1 if (d1 and d0) else None
+        m["ev_sales"] = (mcap if fin else ev) / rev if rev else None
+        m["fcf_margin"] = fcf / rev if (fcf is not None and rev) else None
+        op_prev = g("opinc_prev", c)
+        m["op_margin"] = opinc / rev if (opinc is not None and rev) else None
+        m["op_margin_prev"] = op_prev / r_prev if (op_prev is not None and r_prev) else None
+        burn = -fcf if (fcf is not None and fcf < 0) else 0
+        m["cash_runway_years"] = (cash / burn) if burn else None
+        gt = {}
+        def gtest(name, val, ok, na=False):
+            gt[name] = "N/A" if na else ("NO DATA" if val is None else ("PASS" if ok(val) else "FAIL"))
+        gtest("rev_cagr_3y", m["rev_cagr_3y"], lambda v: v >= GC["rev_cagr_3y_min"])
+        gtest("rev_growth_latest", m["rev_growth_latest"], lambda v: v >= GC["rev_growth_latest_min"])
+        gtest("gross_margin", m["gross_margin"], lambda v: v >= GC["gross_margin_min"], na=fin)
+        if fin:   # banks/fintech: moat proxy = ROE improving, not gross margin
+            gtest("roe_trend", (roes[-1] - roes[0]) if len(roes) >= 2 else None, lambda v: v > 0)
+        gtest("dilution", m["dilution_yoy"], lambda v: v < GC["dilution_max"])
+        g_pts = (m["rev_cagr_3y"] or 0) * 100
+        gtest("valuation_vs_growth", (m["ev_sales"] / g_pts) if (m["ev_sales"] and g_pts > 0) else None,
+              lambda v: v <= GC["ev_sales_per_growth_pt_max"])
+        nd = debt - cash
+        gtest("balance_sheet", nd if not fin else 0,
+              lambda v: v <= 0 or (ebitda and ebitda > 0 and v / ebitda < GC["nd_ebitda_max"]), na=fin)
+        gtest("liquidity", m["current_ratio"], lambda v: v > GC["current_ratio_min"], na=fin)
+        profitable_now = ni > 0 or (fcf is not None and fcf > 0)
+        path = (m["op_margin"] is not None and m["op_margin_prev"] is not None and m["op_margin"] > m["op_margin_prev"]
+                and (m["cash_runway_years"] or 0) >= GC["runway_years_min"])
+        gt["profit_or_path"] = "PASS" if (profitable_now or path) else "FAIL"
+        growth_pass = all(v in ("PASS", "N/A") for v in gt.values())
+        rule40 = ((m["rev_growth_latest"] or 0) + (m["fcf_margin"] or 0)) if not fin else (m["rev_growth_latest"] or 0)
 
         tests = {}
         def test(name, val, cond_ok, na=False):
@@ -248,6 +315,8 @@ def main():
                         "sector": r["sector"], "industry": r["industry"],
                         "focus_sector": focus_sector(r), "is_financial": fin,
                         "profitable": (ni > 0) and (fin or (fcf is not None and fcf > 0)),
+                        "growth_tests": gt, "passed_growth": growth_pass, "rule_of_40": round(rule40, 4),
+                        "profitable_now": profitable_now,
                         "price": D.fact(price, "Nasdaq.com screener"),
                         "market_cap": D.fact(mcap, "Nasdaq.com screener"),
                         "metrics": {k: (round(v, 4) if isinstance(v, float) else v) for k, v in m.items()},
@@ -290,8 +359,20 @@ def main():
         x["also_in_list_a"] = x["ticker"] in in_a
     dd = [x for x in dd if not x["also_in_list_a"]]      # List B = names not already on List A
     top_dd = dd[: a.top_drawdown]
-    for x in top + [y for y in top_dd if y not in top]:
-        crosscheck(x, fw, min_adv)
+    # List C: high growth + moat proxy at a sane price, not on A or B
+    in_ab = in_a | {x["ticker"] for x in top_dd}
+    gr = [x for x in results if x["passed_growth"]]
+    funnel["passed_growth_screen"] = len(gr)
+    gr = [x for x in gr if x["ticker"] not in in_ab]
+    funnel["growth_in_focus_sectors"] = sum(1 for x in gr if x["focus_sector"])
+    gr.sort(key=lambda x: (focus_rank(x), x["rule_of_40"]), reverse=True)
+    top_gr = gr[: a.top_growth]
+    seen = set()
+    for x in top + top_dd + top_gr:
+        if x["ticker"] not in seen:
+            seen.add(x["ticker"]); crosscheck(x, fw, min_adv)
+    funnel["growth_top_crosschecked"] = len(top_gr)
+    funnel["growth_top_quality_pass"] = sum(1 for x in top_gr if x["quality_gate"] == "PASS")
     funnel["top_crosschecked"] = len(top)
     funnel["top_quality_pass"] = sum(1 for x in top if x["quality_gate"] == "PASS")
     funnel["drawdown_top_crosschecked"] = len(top_dd)
@@ -304,6 +385,12 @@ def main():
            "shortlist_candidates": top,
            "drawdown_rule": f">= {dd_min:.0%} below 52-week high + balance-sheet tests pass + profitable (NI>0, FCF>0 ex-financials); focus sectors first (AI/data centre > robotics > tech > finance), then value tests passed, then drawdown; excludes names already on List A",
            "drawdown_candidates": top_dd,
+           "growth_rule": ("PROPOSED: 3-yr revenue CAGR >= {rev_cagr_3y_min:.0%} and latest year >= {rev_growth_latest_min:.0%}; "
+                           "gross margin >= {gross_margin_min:.0%} (financials: ROE improving); diluted shares < +{dilution_max:.0%}/yr; "
+                           "EV/sales <= {ev_sales_per_growth_pt_max} x growth points; net cash or net debt/EBITDA < {nd_ebitda_max}x; "
+                           "current ratio > {current_ratio_min}; profitable OR (operating margin improving and cash runway >= {runway_years_min} yrs). "
+                           "Focus sectors first, then rule of 40; excludes names on A or B.").format(**GC),
+           "growth_candidates": top_gr,
            "also_passed": [{"ticker": x["ticker"], "focus_sector": x["focus_sector"], "other_tests_passed": x["other_tests_passed"],
                             "fcf_yield": x["metrics"].get("fcf_yield")} for x in passed[a.top:]],
            "also_drawdown": [{"ticker": x["ticker"], "focus_sector": x["focus_sector"],
@@ -312,10 +399,11 @@ def main():
                        "Yahoo Finance (52-week high, cross-check, ADV, consensus)"]}
     json.dump(out, open(a.out, "w"), indent=1, default=str)
     print(json.dumps(funnel, indent=1))
-    for lbl, lst in (("A value (focus first)", top), ("B drawdown >=%d%%" % round(dd_min * 100), top_dd)):
+    for lbl, lst in (("A value (focus first)", top), ("B drawdown >=%d%%" % round(dd_min * 100), top_dd),
+                     ("C growth + moat (PROPOSED)", top_gr)):
         print("--", lbl)
         for x in lst:
-            print(f'{x["ticker"]:6} {str(x["focus_sector"] or "-"):13} {x["sector"][:16]:16} pass={x["other_tests_passed"]} '
+            print(f'{x["ticker"]:6} {str(x["focus_sector"] or "-"):13} {x["sector"][:16]:16} pass={x["other_tests_passed"]} g3y={x["metrics"].get("rev_cagr_3y")} r40={x.get("rule_of_40")} '
                   f'dd={x.get("drawdown_from_52w_high")} fcfy={x["metrics"].get("fcf_yield")} gate={x["quality_gate"]} {x["flags"][:1]}')
 
 

@@ -27,33 +27,34 @@ The source of truth for thresholds is `framework.json` (Drive: ValueInvestor/con
    - Email goes ONLY to mchoo1990@gmail.com, and only from the digest task.
    - Never modify the app, Vercel or GitHub.
 
-## 1. Weekly screen (Saturday 09:00 SGT): two lists
+## 1. Weekly screen (Saturday 09:00 SGT): three lists
 
 Ming's focus sectors (2026-10-02): AI / data centres, robotics, technology, finance. High-growth sectors rank first, finance after them, everything else last.
 The sector label comes from Nasdaq sector/industry plus seed tickers in `screen.py` (PROPOSED mapping). Verify every label against the 10-K SIC code and business description in Round 1, and correct it if wrong.
 
 1. Novelty gate: read the newest `theses/index.json`. Pass every tracked or draft ticker to `--exclude` (omit the flag if there are none).
-2. Run `python screen.py --framework framework.json --out screen.json --top 25 --top-drawdown 15 --exclude <tickers>`.
-   It produces two lists:
+2. Run `python screen.py --framework framework.json --out screen.json --top 25 --top-drawdown 15 --top-growth 15 --exclude <tickers>`.
+   It produces three lists:
    - **List A — value screen, focus sectors first** (`shortlist_candidates`): same 13 framework tests and pass rule; ranked AI/data centre > robotics > technology > finance > other, then tests passed, then FCF yield.
    - **List B — fallen ≥30% from the 52-week high** (`drawdown_candidates`): balance-sheet tests pass, profitable (net income > 0 and FCF > 0; FCF not required for financials), not already on List A. Ranked by focus sector, then value tests passed, then drawdown size. Value-trap flags are shown, never hidden.
+   - **List C — high growth + moat at a sane price** (`growth_candidates`, thresholds PROPOSED, Ming 2026-10-02): 3-yr revenue CAGR ≥ 20% and latest year ≥ 15%; gross margin ≥ 40% (financials: ROE improving instead); diluted shares up < 5%/yr; EV/sales ≤ 0.5 × growth points (e.g. ≤ 15x at 30% growth; financials use market cap/revenue); net cash or net debt/EBITDA < 3x and current ratio > 1.2 (skipped for financials); profitable now OR operating margin improving with ≥ 2 years of cash runway. Not already on A or B. Ranked by focus sector, then rule of 40 (revenue growth + FCF margin). These names fail most value tests by design; the deep dive values them as `high_growth_early` (50% required margin of safety) unless the business is mature enough for `wide_moat_compounder`.
 3. Round 1 snapshot for the quality_gate=PASS names on each list (for a quality_gate=FAIL price conflict, re-check the price with one more source first; mid-week conflicts are usually timing):
    - What it does, in 1 line, and the verified sector / focus label.
-   - Why it looks cheap or misunderstood (market concern vs reality), in 2 lines. For List B: why it fell (news, earnings, guidance, sector rotation) and whether the cause is temporary or permanent.
+   - Why it looks cheap or misunderstood (market concern vs reality), in 2 lines. For List B: why it fell (news, earnings, guidance, sector rotation) and whether the cause is temporary or permanent. For List C: what the moat is (switching costs, network effect, scale, IP, regulation) and the evidence for it, and how long the growth runway looks.
    - Obvious red flags: litigation, accounting, customer concentration, secular decline, or a pending deal.
    - The value-trap flags from the screen, reviewed.
    - Go / no-go for Round 2.
-4. Output two ranked shortlists, at most 10 names each, each name with "why it passes" (tests passed, key metrics, drawdown for List B, snapshot thesis).
+4. Output three ranked shortlists, at most 10 names each, each name with "why it passes" (tests passed, key metrics, drawdown for List B, snapshot thesis).
    Mark a name `investable: true` only if all the gates in section 0.4 pass and no data conflict is unresolved.
-   Set `deep_dive_queue`: the top 1–2 investable names from List A and the top 1–2 from List B, 2–3 names in total, at least 1 from each list when both have an investable name.
+   Set `deep_dive_queue` (Ming 2026-10-02): top 1–2 investable names from List A, top 1 from List B, top 2 from List C — 4–5 names in total. If a list has no investable name, leave its slots empty.
 5. Save to Drive `screens/`:
-   - `YYYY-MM-DD_weekly-screen.json`: the funnel, both lists with metrics and tests, snapshots, `deep_dive_queue`, sources.
-   - `YYYY-MM-DD_weekly-screen.html`: a dark, self-contained page with the funnel bar, a tab per list (tests passed as a pass/fail strip; drawdown bar for List B) and the snapshot cards.
-6. The final answer is a short summary: the funnel counts, both shortlists with one line per name, and the deep-dive queue.
+   - `YYYY-MM-DD_weekly-screen.json`: the funnel, all three lists with metrics and tests, snapshots, `deep_dive_queue`, sources.
+   - `YYYY-MM-DD_weekly-screen.html`: a dark, self-contained page with the funnel bar, a tab per list (tests passed as a pass/fail strip; drawdown bar for List B; growth, gross margin and rule of 40 for List C) and the snapshot cards.
+6. The final answer is a short summary: the funnel counts, the three shortlists with one line per name, and the deep-dive queue.
 
 ## 2. Round 2 deep dive (Saturday 14:00 SGT, or ad hoc)
 
-**Input.** For the scheduled run, take `deep_dive_queue` from this week's screen JSON (2–3 names: top 1–2 from List A and top 1–2 from List B). If it is missing, take the top 1–2 investable names from each list. Record in the deep dive which list the name came from. For an ad-hoc run, take the ticker given.
+**Input.** For the scheduled run, take `deep_dive_queue` from this week's screen JSON (4–5 names: top 1–2 from List A, 1 from List B, 2 from List C). If it is missing, build it the same way from the investable names. Record in the deep dive which list the name came from. For an ad-hoc run, take the ticker given.
 
 **Research.**
 - Read the latest 10-K (business, risk factors, MD&A, footnotes on debt, leases, goodwill, revenue recognition), the latest 10-Q, the last 2 earnings releases and call summaries, the proxy (compensation, insider ownership) and Form 4 activity.
@@ -141,6 +142,7 @@ Deep dives: TICKER (List A/B) VERDICT conv NN, price $P vs entry $E
 Message 2
 ValueInvestor weekly — YYYY-MM-DD (2/2)
 List B (≥30% off 52w high): TICKER sector −NN% — why it fell — one line each (max 10)
+List C (growth + moat): TICKER sector growth NN% — moat — one line each (max 10)
 Awaiting approval: TICKER … — reply "approve TICKER" in the Stock project
 Drive: screen / deep-dive links
 ```
@@ -171,7 +173,7 @@ Sections:
 1. Headline: 2 lines.
 2. Red/Amber issues, Red first. Each has a one-line recommended action.
 3. Health changes this week.
-4. New screen candidates: List A (value, focus sectors first) and List B (≥30% off the 52-week high), up to 10 each, one line each.
+4. New screen candidates: List A (value, focus sectors first), List B (≥30% off the 52-week high) and List C (high growth + moat), up to 10 each, one line each.
 5. Deep dives completed: which list, verdict, conviction, price vs entry target.
 6. Drafts awaiting Ming's approval.
 7. Links to the Drive files.

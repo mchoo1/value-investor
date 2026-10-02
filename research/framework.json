@@ -159,7 +159,7 @@
    "source": "Ming 2026-09-28"
   },
   "deep_dive_per_week": {
-   "value": "top 1-2 from each list, 2-3 total",
+   "value": "List A 1-2, List B 1, List C 2 (4-5 total)",
    "source": "Ming 2026-10-02"
   },
   "focus_sectors": {
@@ -181,6 +181,19 @@
    "filters": {
     "value": "balance-sheet tests pass + profitable (NI>0, FCF>0 ex-financials)",
     "source": "Ming 2026-10-02"
+   }
+  },
+  "growth_list": {
+   "source": "PROPOSED (Ming chose 'growth at a sane price, losses allowed with a path' 2026-10-02; numbers need approval)",
+   "thresholds": {
+    "rev_cagr_3y_min": 0.2,
+    "rev_growth_latest_min": 0.15,
+    "gross_margin_min": 0.4,
+    "dilution_max": 0.05,
+    "ev_sales_per_growth_pt_max": 0.5,
+    "nd_ebitda_max": 3.0,
+    "current_ratio_min": 1.2,
+    "runway_years_min": 2.0
    }
   }
  },
