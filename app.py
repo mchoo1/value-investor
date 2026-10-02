@@ -70,6 +70,15 @@ def _drive_error(e):
     return err(e, 503)
 
 
+@app.errorhandler(Exception)
+def _any_error(e):
+    from werkzeug.exceptions import HTTPException
+    if isinstance(e, HTTPException):
+        return e
+    app.logger.exception("unhandled")
+    return err(f"{type(e).__name__}: {e}", 500)
+
+
 # ── pages ────────────────────────────────────────────────────────────
 @app.route("/")
 def index():

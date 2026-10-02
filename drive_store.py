@@ -32,6 +32,35 @@ class DriveError(RuntimeError):
     pass
 
 
+def _parse_key(raw):
+    """Accept the service-account key as raw JSON, base64-encoded JSON, quoted JSON or a file path.
+    Never logs or returns the key itself."""
+    import base64
+    raw = raw.strip()
+    tries = [raw]
+    if raw[:1] in ("'", '"') and raw[-1:] == raw[:1]:
+        tries.append(raw[1:-1])
+    try:
+        tries.append(base64.b64decode(raw + "=" * (-len(raw) % 4)).decode("utf-8"))
+    except Exception:
+        pass
+    if os.path.exists(raw[:500]):
+        tries.append(open(raw).read())
+    for t in tries:
+        for cand in (t, t.replace('\\"', '"')):
+            try:
+                d = json.loads(cand)
+                if isinstance(d, str):
+                    d = json.loads(d)
+                if isinstance(d, dict) and "private_key" in d:
+                    d["private_key"] = d["private_key"].replace("\\n", "\n")
+                    return d
+            except Exception:
+                continue
+    raise DriveError(f"GOOGLE_SERVICE_ACCOUNT_JSON is set ({len(raw)} chars, starts with {raw[:1]!r}) "
+                     "but is not valid service-account JSON or base64 of it")
+
+
 # ── Google Drive backend ─────────────────────────────────────────────
 class GDrive:
     API = "https://www.googleapis.com/drive/v3"
@@ -44,7 +73,7 @@ class GDrive:
             raise DriveError("GOOGLE_SERVICE_ACCOUNT_JSON / DRIVE_ROOT_FOLDER_ID not configured")
         from google.oauth2 import service_account
         self.creds = service_account.Credentials.from_service_account_info(
-            json.loads(raw), scopes=["https://www.googleapis.com/auth/drive"])
+            _parse_key(raw), scopes=["https://www.googleapis.com/auth/drive"])
         import requests
         self.http = requests.Session()
 
