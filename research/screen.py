@@ -52,6 +52,42 @@ FIN_SECTORS = {"Finance", "Real Estate"}
 UTIL_SECTORS = {"Utilities"}
 BAD_NAME = re.compile(r"acquisition corp|warrant|\bunits?\b|preferred|depositary|\bnotes? due\b|\btrust\b|\bfund\b|\betf\b", re.I)
 
+# Ming's focus sectors (2026-10-02): robotics, finance, AI data centres, technology.
+# Mapping from Nasdaq sector/industry + seed tickers is PROPOSED; Round 1 verifies each label vs the 10-K.
+FOCUS_SEED = {
+  "ai_datacentre": {"EQIX", "DLR", "IRM", "VRT", "ETN", "PWR", "GEV", "NVT", "APH", "ANET", "CIEN", "COHR",
+                    "CRDO", "SMCI", "DELL", "HPE", "CLS", "FIX", "EME", "MOD", "VST", "CEG", "TLN", "NRG",
+                    "CORZ", "IREN", "ALAB", "MRVL", "AVGO", "NVDA", "AMD", "MU", "WDC", "STX", "LITE"},
+  "robotics":      {"ISRG", "ROK", "TER", "ZBRA", "CGNX", "SYM", "EMR", "PRCT", "NOVT", "IPGP", "AVAV",
+                    "KTOS", "SERV", "PATH", "JBT", "MKSI", "AZTA", "RR", "OUST", "LUNR"},
+}
+AI_DC_IND = {"Semiconductors", "Computer Manufacturing", "Computer peripheral equipment",
+             "Computer Communications Equipment", "Electronic Components"}
+ROBOT_NAME = re.compile(r"robot|automation|autonomous|machine vision", re.I)
+FIN_EXCL_IND = {"Blank Checks", "Trusts Except Educational Religious and Charitable", "Real Estate"}
+FOCUS_ORDER = ["ai_datacentre", "robotics", "technology", "finance"]   # high-growth first, finance last
+NOT_FOCUS = {"FSLR", "ENPH", "SEDG", "ARRY", "NXT", "SHLS", "RUN", "CSIQ", "MAXN"}   # solar: Nasdaq files under Semiconductors
+
+
+def focus_sector(r):
+    tk, sec, ind, name = r["ticker"], r.get("sector") or "", r.get("industry") or "", r.get("name") or ""
+    if tk in NOT_FOCUS or re.search(r"solar", name, re.I):
+        return None
+    if tk in FOCUS_SEED["ai_datacentre"] or ind in AI_DC_IND:
+        return "ai_datacentre"
+    if tk in FOCUS_SEED["robotics"] or ROBOT_NAME.search(name):
+        return "robotics"
+    if sec == "Technology" or ind in ("Telecommunications Equipment",):
+        return "technology"
+    if sec == "Finance" and ind not in FIN_EXCL_IND:
+        return "finance"
+    return None
+
+
+def focus_rank(x):
+    f = x.get("focus_sector")
+    return len(FOCUS_ORDER) - FOCUS_ORDER.index(f) if f in FOCUS_ORDER else 0
+
 
 def gv(x):
     return x["value"] if isinstance(x, dict) else x
@@ -71,6 +107,7 @@ def main():
     ap.add_argument("--framework", default="framework.json")
     ap.add_argument("--out", default=f"screen_{D.TODAY}.json")
     ap.add_argument("--top", type=int, default=25)
+    ap.add_argument("--top-drawdown", type=int, default=15)
     ap.add_argument("--exclude", nargs="?", const="", default="", help="comma tickers already tracked/archived (novelty gate)")
     a = ap.parse_args()
     fw = json.load(open(a.framework))
@@ -79,6 +116,8 @@ def main():
     min_adv = gv(fw["universe"]["min_avg_daily_dollar_volume_usd"])
     min_rev = gv(fw["universe"]["min_revenue_usd"])
     min_other = 5
+    dd_cfg = fw["screen"].get("drawdown_list", {})
+    dd_min = gv(dd_cfg.get("min_drawdown_from_52w_high", 0.30))   # Ming 2026-10-02
     exclude = {t.strip().upper() for t in a.exclude.split(",") if t.strip()}
 
     # 1. universe
@@ -207,6 +246,8 @@ def main():
         as_of = {k: (F[k].get(c) or (None, None))[1] for k in ("rev", "ni", "eq", "ca")}
         results.append({"ticker": r["ticker"], "name": r["name"], "cik": c, "exchange": r["exchange"],
                         "sector": r["sector"], "industry": r["industry"],
+                        "focus_sector": focus_sector(r), "is_financial": fin,
+                        "profitable": (ni > 0) and (fin or (fcf is not None and fcf > 0)),
                         "price": D.fact(price, "Nasdaq.com screener"),
                         "market_cap": D.fact(mcap, "Nasdaq.com screener"),
                         "metrics": {k: (round(v, 4) if isinstance(v, float) else v) for k, v in m.items()},
@@ -218,54 +259,95 @@ def main():
     funnel["with_sec_fundamentals"] = len(results)
     passed = [x for x in results if x["passed_screen"]]
     funnel["passed_framework_screen"] = len(passed)
-    passed.sort(key=lambda x: (x["other_tests_passed"], x["metrics"].get("fcf_yield") or 0), reverse=True)
+    funnel["passed_in_focus_sectors"] = sum(1 for x in passed if x["focus_sector"])
+    # List A: value screen, Ming's focus sectors first (Ming 2026-10-02)
+    passed.sort(key=lambda x: (focus_rank(x), x["other_tests_passed"], x["metrics"].get("fcf_yield") or 0),
+                reverse=True)
 
-    # 5. Yahoo cross-check on top N
+    # List B: >= dd_min below 52-week high, balance sheet passes, profitable (NI > 0 and FCF > 0; FCF n/a for financials)
+    pool = [x for x in results if x["balance_sheet_ok"] and x["profitable"]]
+    for x in passed + pool:
+        x.setdefault("drawdown_from_52w_high", None)
+    funnel["drawdown_pool_bs_ok_profitable"] = len(pool)
+    hl = D.yahoo_52w([x["ticker"] for x in pool])
+    dd = []
+    for x in pool:
+        h = hl.get(x["ticker"])
+        if not h or not h["high_52w"] or not h["close"]:
+            continue
+        d = 1 - h["close"] / h["high_52w"]
+        x["high_52w"] = D.fact(round(h["high_52w"], 2), "Yahoo Finance 1y daily highs", h["as_of"])
+        x["drawdown_from_52w_high"] = round(d, 4)
+        if d >= dd_min:
+            dd.append(x)
+    funnel["drawdown_ge_threshold"] = len(dd)
+    funnel["drawdown_in_focus_sectors"] = sum(1 for x in dd if x["focus_sector"])
+    dd.sort(key=lambda x: (focus_rank(x), x["other_tests_passed"], x["drawdown_from_52w_high"]), reverse=True)
+
     top = passed[: a.top]
-    for x in top:
-        y = D.yahoo_snapshot(x["ticker"])
-        gate = []
-        p1, p2 = x["price"]["value"], y.get("price")
-        if p2:
-            diff = abs(p1 - p2) / p2
-            x["price_crosscheck"] = D.fact(round(p2, 2), "Yahoo Finance", diff=round(diff, 4))
-            if diff > gv(fw["data_quality_gates"]["price_cross_check_max_diff"]):
-                gate.append(f"CONFLICT price Nasdaq {p1} vs Yahoo {p2:.2f}")
-        else:
-            gate.append("NO DATA Yahoo price")
-        m1, m2 = x["market_cap"]["value"], y.get("market_cap")
-        if m2 and abs(m1 - m2) / m2 > gv(fw["data_quality_gates"]["mcap_cross_check_max_diff"]):
-            gate.append(f"CONFLICT mcap Nasdaq {m1:,.0f} vs Yahoo {m2:,.0f}")
-        adv = (y.get("avg_volume_3m") or 0) * (p2 or p1)
-        x["adv_3m_usd"] = D.fact(round(adv), "Yahoo Finance 3-mo avg volume x price")
-        if adv < min_adv:
-            gate.append(f"FAIL liquidity ADV ${adv:,.0f} < ${min_adv:,.0f}")
-        x["consensus"] = {k: y.get(k) for k in ("forwardEps", "targetMeanPrice", "numberOfAnalystOpinions",
-                                                 "recommendationKey", "eps_trend_+1y")}
-        x["consensus_source"] = D.fact(None, "Yahoo Finance (single source, confidence=Medium)")
-        tr = y.get("eps_trend_+1y") or {}
-        if tr.get("current") and tr.get("30daysAgo"):
-            rev30 = tr["current"] / tr["30daysAgo"] - 1
-            x["eps_revision_30d"] = round(rev30, 4)
-            if abs(rev30) >= 0.05:
-                x["flags"].append(f"ESTIMATE_REVISION {rev30:+.1%} NTM EPS in 30d")
-        x["quality_gate"] = "PASS" if not gate else "FAIL"
-        x["quality_issues"] = gate
+    in_a = {x["ticker"] for x in top}
+    for x in dd:
+        x["also_in_list_a"] = x["ticker"] in in_a
+    dd = [x for x in dd if not x["also_in_list_a"]]      # List B = names not already on List A
+    top_dd = dd[: a.top_drawdown]
+    for x in top + [y for y in top_dd if y not in top]:
+        crosscheck(x, fw, min_adv)
     funnel["top_crosschecked"] = len(top)
     funnel["top_quality_pass"] = sum(1 for x in top if x["quality_gate"] == "PASS")
+    funnel["drawdown_top_crosschecked"] = len(top_dd)
+    funnel["drawdown_top_quality_pass"] = sum(1 for x in top_dd if x["quality_gate"] == "PASS")
 
     out = {"screen_date": D.TODAY, "framework_version": fw["_meta"]["version"], "profile": prof,
            "rule": f"all balance-sheet tests pass (sector exceptions) + >= {min_other} of 9 other tests",
-           "funnel": funnel, "shortlist_candidates": top,
-           "also_passed": [{"ticker": x["ticker"], "other_tests_passed": x["other_tests_passed"],
+           "focus_sectors": {"order": FOCUS_ORDER, "mapping": "Nasdaq sector/industry + seed tickers (PROPOSED); verify vs 10-K SIC in Round 1"},
+           "funnel": funnel,
+           "shortlist_candidates": top,
+           "drawdown_rule": f">= {dd_min:.0%} below 52-week high + balance-sheet tests pass + profitable (NI>0, FCF>0 ex-financials); focus sectors first (AI/data centre > robotics > tech > finance), then value tests passed, then drawdown; excludes names already on List A",
+           "drawdown_candidates": top_dd,
+           "also_passed": [{"ticker": x["ticker"], "focus_sector": x["focus_sector"], "other_tests_passed": x["other_tests_passed"],
                             "fcf_yield": x["metrics"].get("fcf_yield")} for x in passed[a.top:]],
-           "sources": ["Nasdaq.com screener (universe, price, mcap)", "SEC EDGAR XBRL frames (fundamentals)",
-                       "Yahoo Finance (cross-check, ADV, consensus)"]}
+           "also_drawdown": [{"ticker": x["ticker"], "focus_sector": x["focus_sector"],
+                              "drawdown_from_52w_high": x["drawdown_from_52w_high"]} for x in dd[a.top_drawdown:]],
+           "sources": ["Nasdaq.com screener (universe, price, mcap, sector/industry)", "SEC EDGAR XBRL frames (fundamentals)",
+                       "Yahoo Finance (52-week high, cross-check, ADV, consensus)"]}
     json.dump(out, open(a.out, "w"), indent=1, default=str)
     print(json.dumps(funnel, indent=1))
-    for x in top:
-        print(f'{x["ticker"]:6} {x["sector"][:18]:18} pass={x["other_tests_passed"]} '
-              f'fcfy={x["metrics"].get("fcf_yield")} gate={x["quality_gate"]} {x["flags"][:1]}')
+    for lbl, lst in (("A value (focus first)", top), ("B drawdown >=%d%%" % round(dd_min * 100), top_dd)):
+        print("--", lbl)
+        for x in lst:
+            print(f'{x["ticker"]:6} {str(x["focus_sector"] or "-"):13} {x["sector"][:16]:16} pass={x["other_tests_passed"]} '
+                  f'dd={x.get("drawdown_from_52w_high")} fcfy={x["metrics"].get("fcf_yield")} gate={x["quality_gate"]} {x["flags"][:1]}')
+
+
+def crosscheck(x, fw, min_adv):
+    y = D.yahoo_snapshot(x["ticker"])
+    gate = []
+    p1, p2 = x["price"]["value"], y.get("price")
+    if p2:
+        diff = abs(p1 - p2) / p2
+        x["price_crosscheck"] = D.fact(round(p2, 2), "Yahoo Finance", diff=round(diff, 4))
+        if diff > gv(fw["data_quality_gates"]["price_cross_check_max_diff"]):
+            gate.append(f"CONFLICT price Nasdaq {p1} vs Yahoo {p2:.2f}")
+    else:
+        gate.append("NO DATA Yahoo price")
+    m1, m2 = x["market_cap"]["value"], y.get("market_cap")
+    if m2 and abs(m1 - m2) / m2 > gv(fw["data_quality_gates"]["mcap_cross_check_max_diff"]):
+        gate.append(f"CONFLICT mcap Nasdaq {m1:,.0f} vs Yahoo {m2:,.0f}")
+    adv = (y.get("avg_volume_3m") or 0) * (p2 or p1)
+    x["adv_3m_usd"] = D.fact(round(adv), "Yahoo Finance 3-mo avg volume x price")
+    if adv < min_adv:
+        gate.append(f"FAIL liquidity ADV ${adv:,.0f} < ${min_adv:,.0f}")
+    x["consensus"] = {k: y.get(k) for k in ("forwardEps", "targetMeanPrice", "numberOfAnalystOpinions",
+                                             "recommendationKey", "eps_trend_+1y")}
+    x["consensus_source"] = D.fact(None, "Yahoo Finance (single source, confidence=Medium)")
+    tr = y.get("eps_trend_+1y") or {}
+    if tr.get("current") and tr.get("30daysAgo"):
+        rev30 = tr["current"] / tr["30daysAgo"] - 1
+        x["eps_revision_30d"] = round(rev30, 4)
+        if abs(rev30) >= 0.05:
+            x["flags"].append(f"ESTIMATE_REVISION {rev30:+.1%} NTM EPS in 30d")
+    x["quality_gate"] = "PASS" if not gate else "FAIL"
+    x["quality_issues"] = gate
 
 
 if __name__ == "__main__":

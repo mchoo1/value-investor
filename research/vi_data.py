@@ -225,3 +225,29 @@ def fred_latest(series="DGS10"):
         h = yf.Ticker("^TNX").history(period="5d")["Close"].dropna()
         return fact(float(h.iloc[-1]) / 100, "Yahoo ^TNX (FRED unreachable)", str(h.index[-1].date()),
                     warning=str(e)[:80])
+
+
+def yahoo_52w(tickers, chunk=200):
+    """Bulk 1-year daily history -> {ticker: {high_52w, close, as_of}} (Yahoo, unadjusted highs)."""
+    import yfinance as yf
+    out = {}
+    tickers = [t.replace(".", "-") for t in tickers]
+    for i in range(0, len(tickers), chunk):
+        part = tickers[i:i + chunk]
+        try:
+            d = yf.download(part, period="1y", interval="1d", auto_adjust=False, progress=False,
+                            threads=True, group_by="column")
+        except Exception:
+            continue
+        if d is None or d.empty:
+            continue
+        hi, cl = d["High"], d["Close"].ffill()
+        if not hasattr(hi, "columns"):                      # single ticker -> Series
+            hi, cl = hi.to_frame(part[0]), cl.to_frame(part[0])
+        last = str(d.index[-1].date())
+        for t in part:
+            if t in hi.columns:
+                h, c = hi[t].max(), cl[t].iloc[-1]
+                if h == h and c == c:
+                    out[t.replace("-", ".")] = {"high_52w": float(h), "close": float(c), "as_of": last}
+    return out
