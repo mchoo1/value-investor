@@ -46,7 +46,7 @@ The sector label comes from Nasdaq sector/industry plus seed tickers in `screen.
    - Go / no-go for Round 2.
 4. Output three ranked shortlists, at most 10 names each, each name with "why it passes" (tests passed, key metrics, drawdown for List B, snapshot thesis).
    Mark a name `investable: true` only if all the gates in section 0.4 pass and no data conflict is unresolved.
-   Set `deep_dive_queue` (Ming 2026-10-02): top 1–2 investable names from List A, top 1 from List B, top 2 from List C — 4–5 names in total. If a list has no investable name, leave its slots empty.
+   Set `deep_dive_queue` (Ming 2026-10-02): the top investable name from each list — 1 from List A, 1 from List B, 1 from List C, 3 in total. If a list has no investable name, leave its slot empty.
 5. Save to Drive `screens/`:
    - `YYYY-MM-DD_weekly-screen.json`: the funnel, all three lists with metrics and tests, snapshots, `deep_dive_queue`, sources.
    - `YYYY-MM-DD_weekly-screen.html`: a dark, self-contained page with the funnel bar, a tab per list (tests passed as a pass/fail strip; drawdown bar for List B; growth, gross margin and rule of 40 for List C) and the snapshot cards.
@@ -54,7 +54,7 @@ The sector label comes from Nasdaq sector/industry plus seed tickers in `screen.
 
 ## 2. Round 2 deep dive (Saturday 14:00 SGT, or ad hoc)
 
-**Input.** For the scheduled run, take `deep_dive_queue` from this week's screen JSON (4–5 names: top 1–2 from List A, 1 from List B, 2 from List C). If it is missing, build it the same way from the investable names. Record in the deep dive which list the name came from. For an ad-hoc run, take the ticker given.
+**Input.** For the scheduled run, take `deep_dive_queue` from this week's screen JSON (3 names: 1 each from Lists A, B and C). If it is missing, build it the same way from the investable names. Record in the deep dive which list the name came from. For an ad-hoc run, take the ticker given.
 
 **Research.**
 - Read the latest 10-K (business, risk factors, MD&A, footnotes on debt, leases, goodwill, revenue recognition), the latest 10-Q, the last 2 earnings releases and call summaries, the proxy (compensation, insider ownership) and Form 4 activity.
@@ -83,10 +83,14 @@ The sector label comes from Nasdaq sector/industry plus seed tickers in `screen.
 - 12-item checklist: size, valuation, profitability, balance_sheet, cash_quality, moat, management, dilution, concentration, mos, catalyst, sensitivity. Each item is PASS / FAIL / N/A / NO DATA, with a detail line.
 - Pre-mortem: 3 ways this loses money. Add "what would change my mind", 1 bullish and 1 bearish.
 
-**Thesis (schema: Drive config/thesis.schema.json).**
+**Thesis (schema: Drive config/thesis.schema.json). Every deep dive ends with a full, trackable investment thesis — not just research.**
+- One-paragraph thesis: why this is mispriced, what the market is missing, what has to happen for the price to reach value, and over what time frame.
 - 3–4 pillars: claim, evidence, KPI, target, breach_threshold.
-  - Machine-checkable KPIs must set `kpi_key` (roic / operating_margin / net_margin / revenue_growth / fcf / net_debt_ebitda) and `breach_direction`.
-- Kill criteria: set `metric_key`, `threshold` and `direction` where possible.
+  - Machine-checkable KPIs must set `kpi_key` (roic / operating_margin / net_margin / gross_margin / revenue_growth / fcf / net_debt_ebitda / shares_yoy) and `breach_direction`.
+- Kill criteria (Ming 2026-10-02: must be trackable): 3–5 criteria, each one a specific, dated, measurable condition that would prove the thesis wrong.
+  - At least 2 must be machine-checkable: set `metric_key` (same keys as above), `threshold`, `direction` (below/above), with the current value and its source next to it so the gap is visible.
+  - The rest are judgement criteria (e.g. "loses the DISA contract", "Apple share of revenue > 95%") with `check` = what to look for each week (filing type, news, earnings line).
+  - Price alone is never a kill criterion; a falling price is an entry question, not a thesis break.
 - Catalysts with expected dates, and key risks with probability and impact.
 - next_review_date = the next earnings date + 7 days (at most 90 days out).
 - status = "Watch", approval = "pending", health = "Green", and history[0] = the initial snapshot.
@@ -114,7 +118,7 @@ The sector label comes from Nasdaq sector/industry plus seed tickers in `screen.
 4. Merge the issues into thesis.json:
    - Don't duplicate an unresolved issue of the same type and detail.
    - Set health (Red if any high issue or kill criterion, Amber if any medium, else Green).
-   - Update the monitor_state.
+   - Update the monitor_state with health.py's `metrics`, `kill_status` and `pillar_status` (current value vs trigger for every kill criterion and KPI), plus last_price and last_checked. Judgement kill criteria get breached = true/false from this week's news and filings review, with the source.
    - If health, the valuation or the status changed, append a history[] snapshot saying what changed and why.
    Never change the status and never close a thesis.
 5. Save to Drive:
@@ -126,25 +130,26 @@ The sector label comes from Nasdaq sector/industry plus seed tickers in `screen.
 
 Read this week's screen JSON, deep dives created in the last 7 days, the latest alerts JSON and `theses/index.json`.
 
-**A. Telegram (sent first): the full digest as 2 messages.**
-Telegram gets the same content as the email, in plain text (no Markdown), split into exactly 2 messages of at most 3,500 characters each. Send message 1, then message 2.
+**A. Telegram (sent first): 2 messages, focused on decisions (Ming 2026-10-02).**
+Plain text, no Markdown, each at most 3,500 characters. Send message 1, then message 2. The email keeps the full digest.
 
 ```
-Message 1
-ValueInvestor weekly — YYYY-MM-DD (1/2)
-Headline (2 lines)
-🔴 RED: TICKER — issue — action
-🟠 AMBER: TICKER — issue — action
-Health: G x / A y / R z · changes this week
-List A (value, focus sectors first): TICKER sector — one line each (max 10)
-Deep dives: TICKER (List A/B) VERDICT conv NN, price $P vs entry $E
+Message 1 — COMPANIES TO WATCH
+ValueInvestor — companies to watch — YYYY-MM-DD (1/2)
+For each of this week's 3 deep dives (List A / B / C) and each tracked thesis priced at or below its entry target:
+TICKER · Company · List X · VERDICT conv NN
+Price $P vs entry $E (MoS NN%) · value $low–$base–$high
+P/E NN · FCF yield N% · revenue growth N% · net debt/EBITDA N.Nx
+https://finance.yahoo.com/quote/TICKER
+(blank line between companies)
+Awaiting approval: TICKER, TICKER — reply "approve TICKER" in the Stock project
 
-Message 2
-ValueInvestor weekly — YYYY-MM-DD (2/2)
-List B (≥30% off 52w high): TICKER sector −NN% — why it fell — one line each (max 10)
-List C (growth + moat): TICKER sector growth NN% — moat — one line each (max 10)
-Awaiting approval: TICKER … — reply "approve TICKER" in the Stock project
-Drive: screen / deep-dive links
+Message 2 — THESIS CHANGES
+ValueInvestor — thesis changes — YYYY-MM-DD (2/2)
+KILL CRITERION MET: TICKER — criterion — current vs trigger — suggested action
+🔴 RED / 🟠 AMBER: TICKER — what changed — suggested action
+Health moves: TICKER Green→Amber …
+If nothing changed: "No thesis changes this week. Tracked: N (G x / A y / R z)."
 ```
 
 How to send it. The app is behind Vercel Authentication:

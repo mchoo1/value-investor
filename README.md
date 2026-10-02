@@ -1,30 +1,35 @@
 # ValueInvestor
 
-Personal value-investing research app (Flask on Vercel).
+A small Flask app (Vercel) that shows the weekly research cycle stored in Google Drive.
 
-## Run locally
-```bash
-./start.sh            # installs requirements, serves http://localhost:5001
-```
-Without `DATABASE_URL` the app uses a local SQLite file in `data/` (git-ignored).
+## Weekly cycle (Singapore time, cloud scheduled tasks, see `research/RUNBOOK.md`)
+| When | Step | Output in Drive `ValueInvestor/` |
+|---|---|---|
+| Sat 08:52 | Screen: List A value · List B ≥30% off 52-week high · List C high growth + moat | `screens/` |
+| Sat 13:52 | 1 deep dive per list + draft thesis with trackable kill criteria | `deep-dives/TICKER/`, `theses/TICKER/thesis.json`, `theses/index.json` |
+| any time | You approve or reject each draft (app or "approve TICKER" in the Stock project) | `theses/` |
+| Sun 08:52 | Health check of approved theses: kill criteria, KPIs, filings, news | `alerts/`, `theses/` |
+| Sun 17:52 | Digest: Telegram (1 companies to watch · 2 thesis changes) + one email | — |
 
-## Deploy
-Vercel project `value-investor` builds from `main` automatically (`vercel.json`, `@vercel/python`).
-Branches get preview deployments; production changes only after review.
+## App pages
+- **This week** — cycle status, companies to watch, thesis changes, drafts awaiting you.
+- **Screen** — this week's Lists A, B and C.
+- **Theses** — each deep dive's thesis, pillars and kill criteria; Approve & track / Reject.
+- **Tracker** — approved theses: health and every kill criterion's current value vs its trigger.
 
 ## Configuration (environment variables only — never commit secrets)
 | Variable | Purpose |
 |---|---|
-| `DATABASE_URL` | Neon Postgres connection string (legacy store; being replaced by Google Drive) |
-| `GOOGLE_SERVICE_ACCOUNT_JSON` | Service-account key for Drive access (Phase 2) |
-| `DRIVE_ROOT_FOLDER_ID` | ID of the `ValueInvestor` Drive folder (Phase 2) |
-| `TELEGRAM_BOT_TOKEN` | Bot token from @BotFather — used only by `/api/notify` |
-| `TELEGRAM_CHAT_ID` | Ming's chat id (find it via `/api/notify/setup` after sending the bot /start) |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | Service-account key; the `ValueInvestor` folder is shared with it as Editor |
+| `DRIVE_ROOT_FOLDER_ID` | ID of the `ValueInvestor` Drive folder |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | Used only by `/api/notify` (sends to Ming's chat only) |
+| `DATABASE_URL` | Legacy Postgres; only used by the one-time `/api/admin/legacy-db/backup-and-wipe` route |
 
-Automated research tasks do not use a Vercel protection-bypass secret; protected URLs are reached through the Vercel connector and research data lives in Google Drive.
+## Run locally
+```bash
+pip install -r requirements.txt
+VI_LOCAL_DATA=/path/to/folder/mirroring/drive python app.py   # http://localhost:5001
+```
 
-## Data sources (free)
-SEC EDGAR (XBRL company facts, filings, Form 4) → company IR → Yahoo Finance (price, consensus) → FRED (risk-free rate) → Damodaran datasets (ERP, industry betas). Every figure carries a source and as-of date.
-
-## Removed in cleanup/v1 (2026-09-29)
-First-Cut tab + memo upload (Task B merged into the Round 1 snapshot), research queue, weekly reviews, import-from-local-DOCX (paths never existed on Vercel), Railway/Render/Procfile/.bat deploy scripts. Database tables were left untouched.
+## Rebuilt 2026-10-02
+The old multi-tab app (stock lookups, DCF tools, watchlist, portfolio, shortlist, triggers, research history) and its Postgres tables were retired. Research now lives in Drive; the legacy database is exported to `archive/legacy/` before it is wiped.

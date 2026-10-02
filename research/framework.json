@@ -159,7 +159,7 @@
    "source": "Ming 2026-09-28"
   },
   "deep_dive_per_week": {
-   "value": "List A 1-2, List B 1, List C 2 (4-5 total)",
+   "value": "1 per list (A, B, C) = 3",
    "source": "Ming 2026-10-02"
   },
   "focus_sectors": {
@@ -495,7 +495,8 @@
    "trim",
    "exit review"
   ],
-  "never_auto_close": true
+  "never_auto_close": true,
+  "kill_criteria_rule": "3-5 per thesis, at least 2 machine-checkable (metric_key/threshold/direction); price alone never a kill criterion (Ming 2026-10-02)"
  },
  "data_sources": {
   "_rule": "Free sources only (Ming 2026-09-29). Every figure: {value, source, as_of}. Cross-check price and market cap against >=2 sources; on mismatch beyond gates mark CONFLICT.",

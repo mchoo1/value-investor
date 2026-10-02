@@ -1,80 +1,328 @@
 """
-Value Investor - Flask Backend
-Run: python app.py
-Then open: http://localhost:5001
+ValueInvestor app — a thin, read-mostly view of the weekly research cycle stored in Google Drive.
+
+Weekly cycle (Singapore time, run by cloud scheduled tasks, see research/RUNBOOK.md):
+  Sat 08:52 screen (Lists A/B/C) -> Sat 13:52 deep dives + draft theses -> you approve/reject
+  -> Sun 08:52 health check of approved theses -> Sun 17:52 digest (Telegram x2 + email)
+
+Pages: This week · Screen · Theses (deep dive + thesis + approve/reject) · Tracker (kill criteria).
+Secrets only in env vars: GOOGLE_SERVICE_ACCOUNT_JSON, DRIVE_ROOT_FOLDER_ID, TELEGRAM_BOT_TOKEN,
+TELEGRAM_CHAT_ID, DATABASE_URL (legacy; only used by the one-time backup-and-wipe admin route).
 """
-import os
-import sys
-import json
-import math
-from datetime import datetime
+import os, sys, json, math, datetime as dt
 
-# Ensure the project directory is in path
 sys.path.insert(0, os.path.dirname(__file__))
-
-# Support Railway / cloud: data dir can be overridden via DATA_DIR env var
-# On Vercel the app directory is read-only — fall back to /tmp
-_DATA_DIR = os.environ.get("DATA_DIR", os.path.join(os.path.dirname(__file__), "data"))
-try:
-    os.makedirs(_DATA_DIR, exist_ok=True)
-except OSError:
-    _DATA_DIR = "/tmp/valueinvestor_data"
-    os.makedirs(_DATA_DIR, exist_ok=True)
-os.environ.setdefault("DATA_DIR", _DATA_DIR)
-
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, request, send_from_directory, Response
 from flask.json.provider import DefaultJSONProvider
-import database as db
-import stock_data as sd
-import valuation as val
+import drive_store as ds
+
+SGT = dt.timezone(dt.timedelta(hours=8))
+APPROVED_STATUSES = ("Watch", "Active", "Paused")
 
 
-def _nan_to_null(obj):
-    """Recursively convert float NaN / Inf to None so JSON output is always valid."""
-    if isinstance(obj, dict):
-        return {k: _nan_to_null(v) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [_nan_to_null(v) for v in obj]
-    if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
+def _clean(o):
+    if isinstance(o, dict):
+        return {k: _clean(v) for k, v in o.items()}
+    if isinstance(o, list):
+        return [_clean(v) for v in o]
+    if isinstance(o, float) and (math.isnan(o) or math.isinf(o)):
         return None
-    return obj
+    return o
 
 
-class _NaNSafeJSONProvider(DefaultJSONProvider):
-    """Flask 3.x JSON provider that converts NaN/Inf → null before serialisation."""
-    def dumps(self, obj, **kwargs):
-        return super().dumps(_nan_to_null(obj), **kwargs)
+class _JSON(DefaultJSONProvider):
+    def dumps(self, obj, **kw):
+        return super().dumps(_clean(obj), **kw)
 
 
 app = Flask(__name__, static_folder="static")
-app.json_provider_class = _NaNSafeJSONProvider
-app.json = _NaNSafeJSONProvider(app)
-app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0   # never cache static files
-
-try:
-    db.init_db()
-except Exception as _e:
-    print(f"[warn] db.init_db() failed: {_e}")
+app.json_provider_class = _JSON
+app.json = _JSON(app)
+app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 
 
-# ── Serve Frontend ───────────────────────────────────────────────
+def gv(x):
+    return x.get("value") if isinstance(x, dict) else x
+
+
+def num(x):
+    x = gv(x)
+    try:
+        return float(x) if x is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def yahoo(t):
+    return f"https://finance.yahoo.com/quote/{t}"
+
+
+def drive_link(fid):
+    return f"https://drive.google.com/file/d/{fid}/view" if fid and not str(fid).startswith("/") else None
+
+
+def err(e, code=502):
+    return jsonify({"ok": False, "error": str(e)[:300]}), code
+
+
+@app.errorhandler(ds.DriveError)
+def _drive_error(e):
+    return err(e, 503)
+
+
+# ── pages ────────────────────────────────────────────────────────────
 @app.route("/")
 def index():
     return send_from_directory("static", "index.html")
 
 
+@app.route("/static/<path:path>")
+def static_files(path):
+    return send_from_directory("static", path)
+
+
 @app.route("/api/health")
 def health():
-    """Quick ping so start.bat can wait until Flask is ready."""
-    return jsonify({"status": "ok"})
+    return jsonify({"status": "ok", "drive": "local" if os.environ.get("VI_LOCAL_DATA") else "google"})
 
 
-# ── Telegram notifications ──────────────────────────────────────────
-# Secrets live only in Vercel env vars: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID.
-# Messages can only go to TELEGRAM_CHAT_ID (Ming's own chat). The endpoint sits
-# behind Vercel Deployment Protection; scheduled tasks reach it via the Vercel
-# connector (GET only), so it accepts GET ?text=... as well as POST {"text": ...}.
-_notify_log = []  # timestamps for a simple per-instance rate limit
+# ── week anchor ──────────────────────────────────────────────────────
+def week_bounds(now=None):
+    now = now or dt.datetime.now(SGT)
+    sat = (now - dt.timedelta(days=(now.weekday() - 5) % 7)).date()     # most recent Saturday (today if Sat)
+    return now, sat, sat + dt.timedelta(days=1)
+
+
+def _sgt_date(iso):
+    return dt.datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone(SGT).date() if iso else None
+
+
+# ── shared builders ──────────────────────────────────────────────────
+def thesis_rows():
+    _, idx = ds.theses_index()
+    rows = []
+    for t in idx.get("theses", []):
+        r = dict(t)
+        p, base, entry = num(t.get("price")), num(t.get("iv_base")), num(t.get("entry_price_target"))
+        r["mos"] = round((base - p) / base, 4) if (p and base) else None
+        r["below_entry"] = bool(p and entry and p <= entry)
+        r["yahoo"] = yahoo(t["ticker"])
+        r["deep_dive_link"] = drive_link(t.get("deep_dive_file_id"))
+        r["tracked"] = t.get("approval") == "approved" and t.get("status") in APPROVED_STATUSES
+        rows.append(r)
+    return rows
+
+
+def screen_lists(sc):
+    """Normalise screen JSON (old and new schemas) into lists A/B/C."""
+    if not sc:
+        return {}
+    def pick(*keys):
+        for k in keys:
+            if isinstance(sc.get(k), list):
+                return sc[k]
+        return []
+    def row(x, lst):
+        m = x.get("metrics", {}) if isinstance(x.get("metrics"), dict) else {}
+        snap = x.get("snapshot") or x.get("round1") or {}
+        return {"list": lst, "ticker": x.get("ticker"), "name": x.get("name") or x.get("company"),
+                "sector": x.get("verified_sector") or x.get("sector"), "focus": x.get("focus_sector"),
+                "price": num(x.get("price")), "market_cap": num(x.get("market_cap")),
+                "tests_passed": x.get("other_tests_passed"), "tests": x.get("tests"),
+                "pe": m.get("pe_ttm"), "fcf_yield": m.get("fcf_yield"), "roic": m.get("roic"),
+                "net_margin": m.get("net_margin"), "rev_cagr_3y": m.get("rev_cagr_3y"),
+                "gross_margin": m.get("gross_margin"), "rule_of_40": x.get("rule_of_40"),
+                "drawdown": x.get("drawdown_from_52w_high"), "flags": x.get("flags", []),
+                "gate": x.get("quality_gate"), "investable": x.get("investable"),
+                "go": snap.get("go_no_go") if isinstance(snap, dict) else None,
+                "why": x.get("why_it_passes") or (snap.get("why_cheap") if isinstance(snap, dict) else None) or x.get("snapshot_thesis"),
+                "yahoo": yahoo(x.get("ticker", ""))}
+    out = {"A": [row(x, "A") for x in pick("list_a", "shortlist", "shortlist_candidates")][:10],
+           "B": [row(x, "B") for x in pick("list_b", "drawdown_shortlist", "drawdown_candidates")][:10],
+           "C": [row(x, "C") for x in pick("list_c", "growth_shortlist", "growth_candidates")][:10]}
+    return out
+
+
+def build_week():
+    now, sat, sun = week_bounds()
+    sf, sc = ds.latest_screen()
+    _, alerts = ds.latest_alerts()
+    af = ds.latest_alerts()[0]
+    dives = ds.all_deep_dives()
+    rows = thesis_rows()
+    by_t = {r["ticker"]: r for r in rows}
+
+    screen_date = _sgt_date(sf["modifiedTime"]) if sf else None
+    week_dives = [d for d in dives if d["date"] >= sat.isoformat()]
+    alerts_date = _sgt_date(af["modifiedTime"]) if af else None
+
+    def status(done, due):
+        if done:
+            return "done"
+        return "due" if now < due else "missed"
+    at = lambda d, h, m: dt.datetime.combine(d, dt.time(h, m), SGT)
+    steps = [
+        {"key": "screen", "name": "Screen", "when": "Sat 08:52", "status": status(screen_date and screen_date >= sat, at(sat, 10, 30)),
+         "detail": f"Lists A/B/C · {sf['name']}" if sf else "no screen yet"},
+        {"key": "deepdive", "name": "Deep dives", "when": "Sat 13:52",
+         "status": status(len(week_dives) > 0, at(sat, 16, 30)),
+         "detail": f"{len(week_dives)} this week: " + ", ".join(d["ticker"] for d in week_dives) if week_dives else "1 per list (3)"},
+        {"key": "health", "name": "Health check", "when": "Sun 08:52",
+         "status": status(alerts_date and alerts_date >= sun, at(sun, 10, 30)),
+         "detail": f"{sum(r['tracked'] for r in rows)} tracked theses"},
+        {"key": "digest", "name": "Digest", "when": "Sun 17:52",
+         "status": "due" if now < at(sun, 17, 52) else "sent",
+         "detail": "Telegram ×2 + 1 email"},
+    ]
+
+    # Companies to watch: this week's deep dives + tracked theses at/below entry
+    watch, seen = [], set()
+    for d in week_dives:
+        r = by_t.get(d["ticker"], {"ticker": d["ticker"], "yahoo": yahoo(d["ticker"])})
+        watch.append({**r, "why_watch": "new deep dive " + d["date"]}); seen.add(d["ticker"])
+    for r in rows:
+        if r["tracked"] and r["below_entry"] and r["ticker"] not in seen:
+            watch.append({**r, "why_watch": "price at or below entry"}); seen.add(r["ticker"])
+    if not watch:   # first weeks: show the latest drafts so the page is never empty
+        for r in rows[:3]:
+            watch.append({**r, "why_watch": "latest deep dive (" + str(r.get("last_review")) + ")"})
+
+    # Thesis changes: alerts + any breached kill criteria on tracked theses
+    changes = []
+    for a in (alerts if isinstance(alerts, list) else alerts.get("alerts", [])):
+        if a.get("health") != a.get("health_prev") or a.get("issues_new"):
+            changes.append({"ticker": a.get("ticker"), "health": a.get("health"), "health_prev": a.get("health_prev"),
+                            "issues": a.get("issues_new", []), "action": a.get("recommended_action"),
+                            "yahoo": yahoo(a.get("ticker", ""))})
+    for r in rows:
+        if not r["tracked"]:
+            continue
+        _, th = ds.thesis(r["ticker"])
+        for k in ((th or {}).get("monitor_state") or {}).get("kill_status", []) or []:
+            if k.get("breached"):
+                changes.append({"ticker": r["ticker"], "health": "Red", "kill": k, "action": "exit review",
+                                "yahoo": r["yahoo"]})
+    return {"now": now.isoformat(), "week_of": sat.isoformat(), "steps": steps, "watch": watch, "changes": changes,
+            "awaiting": [r for r in rows if r.get("approval") == "pending"],
+            "counts": {"tracked": sum(r["tracked"] for r in rows),
+                       "green": sum(r["tracked"] and r.get("health") == "Green" for r in rows),
+                       "amber": sum(r["tracked"] and r.get("health") == "Amber" for r in rows),
+                       "red": sum(r["tracked"] and r.get("health") == "Red" for r in rows),
+                       "drafts": sum(r.get("approval") == "pending" for r in rows)},
+            "alerts_file": af["name"] if af else None}
+
+
+# ── API ──────────────────────────────────────────────────────────────
+@app.route("/api/week")
+def api_week():
+    return jsonify(build_week())
+
+
+@app.route("/api/screen")
+def api_screen():
+    f, sc = ds.latest_screen()
+    if not sc:
+        return jsonify({"file": None, "lists": {}, "funnel": {}})
+    h = ds.latest_screen_html()
+    return jsonify({"file": f["name"], "date": sc.get("screen_date"), "funnel": sc.get("funnel", {}),
+                    "rules": {"A": sc.get("rule"), "B": sc.get("drawdown_rule"), "C": sc.get("growth_rule")},
+                    "queue": sc.get("deep_dive_queue"), "lists": screen_lists(sc),
+                    "html_link": drive_link(h["id"]) if h else None})
+
+
+@app.route("/api/theses")
+def api_theses():
+    return jsonify({"theses": thesis_rows()})
+
+
+@app.route("/api/thesis/<ticker>")
+def api_thesis(ticker):
+    ticker = ticker.upper()
+    f, th = ds.thesis(ticker)
+    dives = ds.deep_dives(ticker)
+    row = next((r for r in thesis_rows() if r["ticker"] == ticker), None)
+    return jsonify({"ticker": ticker, "index": row, "thesis": th, "thesis_link": drive_link(f["id"]) if f else None,
+                    "deep_dives": [{"date": d["date"], "has_html": "html" in d,
+                                    "html_link": drive_link((d.get("html") or {}).get("id"))} for d in dives],
+                    "yahoo": yahoo(ticker)})
+
+
+@app.route("/deepdive/<ticker>")
+@app.route("/deepdive/<ticker>/<date>")
+def deepdive_html(ticker, date=None):
+    dives = ds.deep_dives(ticker.upper())
+    d = next((x for x in dives if (date is None or x["date"] == date) and "html" in x), None)
+    if not d:
+        return Response("Deep dive not found", 404, mimetype="text/plain")
+    html = ds.backend().read(d["html"]["id"])
+    resp = Response(html, mimetype="text/html")
+    resp.headers["Content-Security-Policy"] = "sandbox allow-scripts allow-popups"   # our own file, still isolated
+    return resp
+
+
+@app.route("/api/thesis/<ticker>/decision", methods=["POST"])
+def api_decision(ticker):
+    ticker = ticker.upper()
+    body = request.get_json(silent=True) or {}
+    action = body.get("action")
+    if action not in ("approve", "reject"):
+        return err("action must be approve or reject", 400)
+    status = body.get("status") or ("Watch" if action == "approve" else "Closed")
+    if action == "approve" and status not in ("Watch", "Active"):
+        return err("status must be Watch or Active", 400)
+    reason = (body.get("reason") or "").strip()[:500]
+    today = dt.datetime.now(SGT).date().isoformat()
+
+    tf, th = ds.thesis(ticker)
+    if not th:
+        return err(f"thesis.json for {ticker} not found", 404)
+    idx_f, idx = ds.theses_index()
+    entry = next((t for t in idx.get("theses", []) if t.get("ticker") == ticker), None)
+    if not idx_f or entry is None:
+        return err(f"{ticker} not in theses/index.json", 404)
+
+    approval = "approved" if action == "approve" else "rejected"
+    hist = th.setdefault("history", [])
+    hist.append({"version": len(hist) + 1, "date": today, "changed_by": "Ming (app)",
+                 "what_changed": f"approval {th.get('approval')} -> {approval}; status {th.get('status')} -> {status}",
+                 "why": reason or ("approved for weekly tracking" if action == "approve" else "rejected")})
+    th["approval"], th["status"] = approval, status
+    if action == "reject":
+        th["closed_reason"] = reason or "rejected by Ming"
+    entry.update({"approval": approval, "status": status, "last_review": today})
+    idx["updated"] = today
+    ds.write_json(tf, th)
+    ds.write_json(idx_f, idx)
+    return jsonify({"ok": True, "ticker": ticker, "approval": approval, "status": status})
+
+
+@app.route("/api/tracker")
+def api_tracker():
+    out = []
+    for r in thesis_rows():
+        if not r["tracked"]:
+            continue
+        _, th = ds.thesis(r["ticker"])
+        th = th or {}
+        ms = th.get("monitor_state") or {}
+        kills = ms.get("kill_status") or [
+            {"criterion": k.get("criterion"), "metric_key": k.get("metric_key"), "threshold": k.get("threshold"),
+             "direction": k.get("direction"), "current": None, "breached": None,
+             "check": "machine" if k.get("metric_key") else "judgement"} for k in th.get("kill_criteria", [])]
+        out.append({**r, "kill_status": kills, "pillar_status": ms.get("pillar_status", []),
+                    "open_issues": [i for i in th.get("issues", []) if not i.get("resolved")],
+                    "last_checked": ms.get("last_checked"), "catalysts": th.get("catalysts", [])})
+    return jsonify({"tracked": out})
+
+
+@app.route("/api/refresh", methods=["POST"])
+def api_refresh():
+    ds.clear_cache()
+    return jsonify({"ok": True})
+
+
+# ── Telegram (unchanged contract) ────────────────────────────────────
+_notify_log = []
 
 
 def _tg_call(method, payload=None):
@@ -82,9 +330,8 @@ def _tg_call(method, payload=None):
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
     if not token:
         raise RuntimeError("TELEGRAM_BOT_TOKEN not set")
-    url = f"https://api.telegram.org/bot{token}/{method}"
     data = urllib.parse.urlencode(payload).encode() if payload else None
-    with urllib.request.urlopen(url, data=data, timeout=15) as r:
+    with urllib.request.urlopen(f"https://api.telegram.org/bot{token}/{method}", data=data, timeout=15) as r:
         return json.loads(r.read().decode())
 
 
@@ -106,8 +353,7 @@ def notify():
     sent = 0
     try:
         for c in chunks:
-            res = _tg_call("sendMessage", {"chat_id": chat_id, "text": c,
-                                           "disable_web_page_preview": "true"})
+            res = _tg_call("sendMessage", {"chat_id": chat_id, "text": c, "disable_web_page_preview": "true"})
             if not res.get("ok"):
                 return jsonify({"ok": False, "error": res.get("description"), "sent": sent}), 502
             sent += 1
@@ -121,903 +367,85 @@ def notify():
 
 @app.route("/api/notify/setup", methods=["GET"])
 def notify_setup():
-    """After messaging the bot once (/start), shows the chat id(s) to put in TELEGRAM_CHAT_ID.
-    Never returns the token."""
     try:
         res = _tg_call("getUpdates")
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)[:200]}), 503
     chats = {}
     for u in res.get("result", []):
-        m = u.get("message") or {}
-        c = m.get("chat") or {}
+        c = (u.get("message") or {}).get("chat") or {}
         if c.get("id"):
-            chats[c["id"]] = {"chat_id": c["id"], "name": c.get("first_name") or c.get("title"),
-                              "type": c.get("type")}
+            chats[c["id"]] = {"chat_id": c["id"], "name": c.get("first_name") or c.get("title"), "type": c.get("type")}
     resp = jsonify({"ok": True, "chats": list(chats.values()),
                     "configured_chat_id": os.environ.get("TELEGRAM_CHAT_ID") or None})
     resp.headers["Cache-Control"] = "no-store"
     return resp
 
 
-@app.route("/static/<path:path>")
-def static_files(path):
-    return send_from_directory("static", path)
+# ── One-time legacy database backup + wipe (Ming 2026-10-02) ─────────
+WIPE_PHRASE = "BACKUP-AND-WIPE-LEGACY-DB"
 
 
-# ══════════════════════════════════════════════════════════════════
-# STOCK DATA ENDPOINTS
-# ══════════════════════════════════════════════════════════════════
+def _db():
+    import psycopg2
+    url = os.environ.get("DATABASE_URL")
+    if not url:
+        raise RuntimeError("DATABASE_URL not set")
+    return psycopg2.connect(url)
 
-@app.route("/api/stock/<ticker>", methods=["GET"])
-def get_stock(ticker):
-    """Get stock fundamentals and info."""
-    info = sd.get_stock_info(ticker.upper())
-    return jsonify(info)
 
+def _tables(cur):
+    cur.execute("SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE' ORDER BY 1")
+    return [r[0] for r in cur.fetchall()]
 
-@app.route("/api/stock/<ticker>/history", methods=["GET"])
-def get_stock_history(ticker):
-    """Get historical price data (monthly, 5 years)."""
-    period = request.args.get("period", "5y")
-    data = sd.get_price_history(ticker.upper(), period)
-    return jsonify(data)
 
-
-@app.route("/api/stock/<ticker>/financials", methods=["GET"])
-def get_financials(ticker):
-    """Get 5-year financial history."""
-    data = sd.get_financial_history(ticker.upper())
-    return jsonify(data)
-
-
-# ══════════════════════════════════════════════════════════════════
-# SCREENER
-# ══════════════════════════════════════════════════════════════════
-
-@app.route("/api/screen", methods=["POST"])
-def screen():
-    """
-    Screen stocks based on value investing filters.
-    Body: { market, filters, custom_tickers, sector }
-    New strategy-aligned filters supported inside filters{}:
-      min_market_cap ($B), min_fcf_yield (%), min_rev_growth (%), max_net_debt_ebitda (x)
-    """
-    body = request.json or {}
-    market = body.get("market", "US")
-    filters = body.get("filters", {})
-    custom_tickers = body.get("custom_tickers", [])
-    sector = body.get("sector", "All")
-    if sector:
-        filters["sector"] = sector
-
-    # On Vercel (serverless) use a curated ~100-stock universe to stay within
-    # the 60-second function timeout.  Full ~800-stock scan works locally.
-    _on_vercel = bool(os.environ.get("VERCEL"))
-
-    # Choose universe
-    if custom_tickers:
-        tickers = [t.upper() for t in custom_tickers]
-    elif market == "SGX":
-        tickers = sd.STI_COMPONENTS
-    elif _on_vercel:
-        tickers = sd.CLOUD_UNIVERSE
-    else:
-        tickers = sd.US_UNIVERSE
-
-    results = sd.screen_stocks(tickers, filters)
-    return jsonify({
-        "results": results,
-        "total": len(results),
-        "screened": len(tickers),
-        "cloud_mode": _on_vercel,
-    })
-
-
-@app.route("/api/screen/formula", methods=["GET"])
-def score_formula():
-    """Return the score formula weights for UI display."""
-    return jsonify(sd.SCORE_FORMULA)
-
-
-@app.route("/api/thesis/tickers", methods=["GET"])
-def thesis_tickers():
-    """Return all unique tickers that have ever had a thesis entry (prior picks)."""
-    return jsonify(db.get_thesis_tickers())
-
-
-# ── Research Queue ────────────────────────────────────────────────
-# ══════════════════════════════════════════════════════════════════
-# INSIDER BUYING, CATALYSTS, RED FLAGS, COMPETITORS
-# ══════════════════════════════════════════════════════════════════
-
-@app.route("/api/stock/<ticker>/insiders", methods=["GET"])
-def get_insiders(ticker):
-    """Insider transactions (last 60 days) with net buy/sell signal."""
-    return jsonify(sd.get_insider_activity(ticker.upper()))
-
-
-@app.route("/api/stock/<ticker>/catalysts", methods=["GET"])
-def get_catalysts(ticker):
-    """Upcoming earnings, ex-div dates, and recent catalyst news."""
-    return jsonify(sd.get_upcoming_catalysts(ticker.upper()))
-
-
-@app.route("/api/stock/<ticker>/redflags", methods=["GET"])
-def get_redflags(ticker):
-    """Quantitative red flags + negative news from last 60 days."""
-    return jsonify(sd.get_red_flags(ticker.upper()))
-
-
-@app.route("/api/stock/<ticker>/competitors", methods=["GET"])
-def get_competitors(ticker):
-    """Top 5 competitors by industry + market cap, with growth metrics and recent news."""
-    return jsonify(sd.get_competitors(ticker.upper()))
-
-
-@app.route("/api/stock/<ticker>/moat", methods=["GET"])
-def get_moat(ticker):
-    """Auto-scored competitive moat rating (Wide / Narrow / None)."""
-    return jsonify(sd.get_moat_rating(ticker.upper()))
-
-
-@app.route("/api/stock/<ticker>/risk", methods=["GET"])
-def get_risk(ticker):
-    """Composite risk rating (Low / Medium / High)."""
-    return jsonify(sd.get_risk_rating(ticker.upper()))
-
-
-@app.route("/api/stock/<ticker>/targets", methods=["GET"])
-def get_targets(ticker):
-    """Bull / base / bear price targets."""
-    return jsonify(sd.get_price_targets(ticker.upper()))
-
-
-@app.route("/api/stock/<ticker>/metrics-history", methods=["GET"])
-def get_metrics_history(ticker):
-    """1Y and 5Y historical anchors: Rev Growth, Net Margin, FCF Margin, Op Margin, ROIC.
-    Also returns current price, EPS TTM/Forward, shares, revenue TTM, P/E, Forward P/E."""
-    return jsonify(sd.get_historical_metrics(ticker.upper()))
-
-
-# ══════════════════════════════════════════════════════════════════
-# VALUATION
-# ══════════════════════════════════════════════════════════════════
-
-@app.route("/api/valuation/dcf", methods=["POST"])
-def dcf():
-    """
-    Run DCF valuation.
-    Body: { current_fcf, growth_1_5, growth_6_10, wacc, terminal_growth, shares, net_debt }
-    """
-    b = request.json or {}
-    result = val.dcf_valuation(
-        current_fcf=float(b.get("current_fcf", 0)),
-        growth_rate_1_5=float(b.get("growth_1_5", 10)),
-        growth_rate_6_10=float(b.get("growth_6_10", 5)),
-        wacc=float(b.get("wacc", 10)),
-        terminal_growth=float(b.get("terminal_growth", 2.5)),
-        shares_outstanding=float(b.get("shares", 1)),
-        net_debt=float(b.get("net_debt", 0)),
-    )
-    return jsonify(result)
-
-
-@app.route("/api/valuation/quick", methods=["POST"])
-def quick_val():
-    """Quick valuation (Graham + P/E + Lynch)."""
-    b = request.json or {}
-    result = val.quick_valuation(
-        eps=float(b.get("eps", 0)),
-        reasonable_pe=float(b.get("reasonable_pe", 15)),
-        growth_rate=float(b.get("growth_rate", 0)),
-    )
-    return jsonify(result)
-
-
-@app.route("/api/valuation/mos", methods=["POST"])
-def mos():
-    """Margin of safety calculation."""
-    b = request.json or {}
-    result = val.margin_of_safety(
-        current_price=float(b.get("current_price", 0)),
-        intrinsic_value=float(b.get("intrinsic_value", 0)),
-    )
-    return jsonify(result)
-
-
-@app.route("/api/valuation/comparable", methods=["POST"])
-def comparable():
-    """Comparable/multiples valuation."""
-    b = request.json or {}
-    result = val.comparable_valuation(
-        eps=float(b.get("eps", 0)),
-        ebitda=float(b.get("ebitda", 0)),
-        sector_pe=float(b.get("sector_pe", 15)),
-        sector_ev_ebitda=float(b.get("sector_ev_ebitda", 10)),
-        net_debt=float(b.get("net_debt", 0)),
-        shares_outstanding=float(b.get("shares", 1)),
-    )
-    return jsonify(result)
-
-
-# ══════════════════════════════════════════════════════════════════
-# WATCHLIST
-# ══════════════════════════════════════════════════════════════════
-
-@app.route("/api/watchlist", methods=["GET"])
-def get_watchlist():
-    return jsonify(db.get_watchlist())
-
-
-@app.route("/api/watchlist", methods=["POST"])
-def add_watchlist():
-    b = request.json or {}
-    db.add_to_watchlist(
-        ticker=b.get("ticker", ""),
-        name=b.get("name", ""),
-        market=b.get("market", "US"),
-        notes=b.get("notes", ""),
-    )
-    return jsonify({"status": "ok"})
-
-
-@app.route("/api/watchlist/<ticker>", methods=["DELETE"])
-def remove_watchlist(ticker):
-    db.remove_from_watchlist(ticker)
-    return jsonify({"status": "ok"})
-
-
-# ══════════════════════════════════════════════════════════════════
-# PORTFOLIO
-# ══════════════════════════════════════════════════════════════════
-
-@app.route("/api/portfolio/snapshot", methods=["GET"])
-def portfolio_snapshot():
-    """Lightweight portfolio snapshot — raw DB data, no live price fetching."""
-    positions = db.get_portfolio()
-    return jsonify(positions)
-
-
-@app.route("/api/portfolio", methods=["GET"])
-def get_portfolio():
-    positions = db.get_portfolio()
-    # Index theses by ticker for O(1) join
-    thesis_map = {t["ticker"]: t for t in db.get_thesis()}
-
-    enriched = []
-    for pos in positions:
-        price, entry, shares = 0, pos.get("entry_price", 0) or 0, pos.get("shares", 0) or 0
-
-        if pos.get("status") == "open":
-            info = sd.get_stock_info(pos["ticker"])
-            if "error" not in info:
-                price = info.get("current_price", 0) or 0
-                pos["current_price"]   = price
-                pos["current_value"]   = round(price * shares, 2)
-                pos["cost_basis"]      = round(entry * shares, 2)
-                pos["gain_loss"]       = round((price - entry) * shares, 2)
-                pos["gain_loss_pct"]   = round((price - entry) / entry * 100, 1) if entry else 0
-
-        # ── Attach linked thesis ───────────────────────────────────
-        thesis = thesis_map.get(pos["ticker"])
-        if thesis:
-            # Prefer 36m target, then thesis.target_price, then intrinsic_value
-            t_price = (thesis.get("target_price_36m") or thesis.get("target_price")
-                       or thesis.get("intrinsic_value") or 0)
-            stop    = thesis.get("stop_loss") or 0
-            cur     = price or entry
-
-            pos["thesis"] = {
-                "id":                      thesis.get("id"),
-                "title":                   thesis.get("title"),
-                "investment_case":         thesis.get("investment_case"),
-                "risk_factors":            thesis.get("risk_factors"),
-                "sell_trigger":            thesis.get("sell_trigger"),
-                "key_90d_metric":          thesis.get("key_90d_metric"),
-                "strategy":               thesis.get("strategy"),
-                "verdict":                 thesis.get("verdict"),
-                "conviction_tier":         thesis.get("conviction_tier"),
-                "moat_rating":             thesis.get("moat_rating"),
-                "moat_type":               thesis.get("moat_type"),
-                "target_price":            t_price or None,
-                "bear_target":             thesis.get("bear_target"),
-                "bull_target":             thesis.get("bull_target"),
-                "intrinsic_value":         thesis.get("intrinsic_value"),
-                "stop_loss":               stop or None,
-                "revenue_growth_assumption": thesis.get("revenue_growth_assumption"),
-                "margin_assumption":       thesis.get("margin_assumption"),
-                "position_size_pct":       thesis.get("position_size_pct"),
-                "report_date":             thesis.get("report_date"),
-                # Derived
-                "upside_pct": round((t_price - cur) / cur * 100, 1) if t_price and cur else None,
-                "vs_stop_pct": round((cur - stop) / stop * 100, 1) if stop and cur else None,
-                "stop_breached": bool(stop and cur and cur < stop),
-                "near_target":   bool(t_price and cur and cur >= t_price * 0.95),
-            }
-        else:
-            pos["thesis"] = None
-
-        enriched.append(pos)
-    return jsonify(enriched)
-
-
-@app.route("/api/portfolio", methods=["POST"])
-def add_portfolio():
-    b = request.json or {}
-    db.add_position(
-        ticker=b.get("ticker", ""),
-        name=b.get("name", ""),
-        entry_price=float(b.get("entry_price", 0)),
-        shares=float(b.get("shares", 0)),
-        entry_date=b.get("entry_date", datetime.now().strftime("%Y-%m-%d")),
-        target_price=float(b.get("target_price", 0)),
-        stop_loss=float(b.get("stop_loss", 0)),
-        notes=b.get("notes", ""),
-    )
-    return jsonify({"status": "ok"})
-
-
-@app.route("/api/portfolio/<int:pos_id>", methods=["PUT"])
-def update_portfolio(pos_id):
-    b = request.json or {}
-    db.update_position(pos_id, **b)
-    return jsonify({"status": "ok"})
-
-
-@app.route("/api/portfolio/<int:pos_id>", methods=["DELETE"])
-def delete_portfolio(pos_id):
-    db.delete_position(pos_id)
-    return jsonify({"status": "ok"})
-
-
-# ══════════════════════════════════════════════════════════════════
-# THESIS
-# ══════════════════════════════════════════════════════════════════
-
-@app.route("/api/thesis", methods=["GET"])
-def get_thesis():
-    ticker = request.args.get("ticker")
-    return jsonify(db.get_thesis(ticker))
-
-
-@app.route("/api/thesis", methods=["POST"])
-def save_thesis():
-    b = request.json or {}
-    thesis_id = db.save_thesis(b)
-    return jsonify({"status": "ok", "id": thesis_id})
-
-
-@app.route("/api/thesis/<ticker>", methods=["PATCH"])
-def patch_thesis(ticker):
-    fields = request.json or {}
-    updated = db.patch_thesis(ticker.upper(), fields)
-    if updated:
-        return jsonify({"status": "ok"})
-    return jsonify({"status": "not_found"}), 404
-
-
-@app.route("/api/thesis/<int:thesis_id>", methods=["DELETE"])
-def delete_thesis(thesis_id):
-    db.delete_thesis(thesis_id)
-    return jsonify({"status": "ok"})
-
-
-@app.route("/api/thesis/weekly-tracker", methods=["GET"])
-def thesis_weekly_tracker():
-    """
-    Portfolio tracker — enriches active theses with live metrics, BUT only
-    for tickers held in the open portfolio.  Includes thesis-breaking alerts.
-    """
-    from concurrent.futures import ThreadPoolExecutor, as_completed as afc
-
-    # ── Filter to open portfolio tickers only ─────────────────────
-    portfolio = db.get_portfolio()
-    portfolio_tickers = {p["ticker"] for p in portfolio if p.get("status") == "open"}
-
-    theses = db.get_thesis()
-    active = [t for t in theses
-              if t.get("status", "active") == "active"
-              and t["ticker"] in portfolio_tickers]
-
-    def enrich(t):
-        ticker = t["ticker"]
-        try:
-            info      = sd.get_stock_info(ticker)
-            cur_price = info.get("current_price") or 0
-            entry_p   = t.get("current_price") or 0   # price at thesis creation
-
-            # Price change since thesis written
-            price_chg = round((cur_price - entry_p) / entry_p * 100, 1) if entry_p else None
-
-            # Margin of safety vs target
-            target  = t.get("target_price_36m") or t.get("target_price") or t.get("intrinsic_value") or 0
-            mos_now = round((target - cur_price) / target * 100, 1) if target and cur_price else None
-
-            # Live metrics
-            cur_rev_gr  = round((info.get("revenue_growth") or 0) * 100, 1)
-            cur_margin  = round((info.get("net_margin")     or 0) * 100, 1)
-            cur_roe     = round((info.get("roe")            or 0) * 100, 1)
-            cur_pe      = info.get("pe_ratio")
-
-            # ── Thesis-breaking alerts ────────────────────────────
-            alerts = []
-            stop = t.get("stop_loss") or 0
-            if stop and cur_price:
-                if cur_price < stop:
-                    alerts.append({"level": "danger",
-                                   "msg": f"🚨 Stop loss breached — ${cur_price:.2f} < ${stop:.2f}"})
-                elif cur_price < stop * 1.10:
-                    alerts.append({"level": "warning",
-                                   "msg": f"⚠️ Within 10% of stop loss (${stop:.2f})"})
-
-            if target and cur_price and cur_price >= target * 0.95:
-                alerts.append({"level": "success",
-                                "msg": f"🎯 Within 5% of target (${target:.2f}) — consider trimming"})
-
-            rev_assump = t.get("revenue_growth_assumption")
-            if rev_assump is not None and cur_rev_gr is not None:
-                if cur_rev_gr < float(rev_assump) - 5:
-                    alerts.append({"level": "warning",
-                                   "msg": f"📉 Rev growth {cur_rev_gr}% below thesis assumption ({rev_assump}%)"})
-
-            margin_assump = t.get("margin_assumption")
-            if margin_assump is not None and cur_margin is not None:
-                if cur_margin < float(margin_assump) - 3:
-                    alerts.append({"level": "warning",
-                                   "msg": f"📉 Net margin {cur_margin}% below thesis assumption ({margin_assump}%)"})
-
-            # Recent news (last 7 days)
-            recent_news = []
-            try:
-                import yfinance as _yf, time as _time, pandas as _pd
-                news_raw = _yf.Ticker(ticker).news or []
-                cutoff   = _time.time() - 7 * 86400
-                for n in news_raw[:10]:
-                    if n.get("providerPublishTime", 0) >= cutoff:
-                        recent_news.append({
-                            "title": n.get("title", ""),
-                            "url":   n.get("link", ""),
-                            "date":  _pd.Timestamp(n["providerPublishTime"], unit="s").strftime("%Y-%m-%d"),
-                        })
-            except Exception:
-                pass
-
-            return {
-                **t,
-                "current_price_live":       cur_price,
-                "price_change_since_entry": price_chg,
-                "mos_now":                  mos_now,
-                "target_price_effective":   target or None,
-                "current_pe":               cur_pe,
-                "current_roe":              cur_roe,
-                "current_rev_growth":       cur_rev_gr,
-                "current_net_margin":       cur_margin,
-                "alerts":                   alerts,
-                "recent_news":              recent_news[:5],
-            }
-        except Exception as e:
-            return {**t, "error": str(e), "alerts": []}
-
-    results = []
-    with ThreadPoolExecutor(max_workers=8) as ex:
-        futures = {ex.submit(enrich, t): t for t in active}
-        for f in afc(futures):
-            results.append(f.result())
-
-    results.sort(key=lambda x: x.get("updated_date", ""), reverse=True)
-    return jsonify(results)
-
-
-# ══════════════════════════════════════════════════════════════════
-# THESIS — UPLOAD-DOC (DOCX / PDF / TXT / MD)
-# ══════════════════════════════════════════════════════════════════
-
-@app.route("/api/thesis/upload-doc", methods=["POST"])
-def upload_thesis_doc():
-    """Accept a DOCX / PDF / TXT / MD file, extract text, return structured
-    investment case fields for the Analyse form to pre-fill."""
-    import re, tempfile
-
-    if "file" not in request.files:
-        return jsonify({"error": "No file uploaded"}), 400
-
-    f = request.files["file"]
-    filename = (f.filename or "").lower()
-    text = ""
-
-    # ── Extract text based on file type ─────────────────────────────────────
+@app.route("/api/admin/legacy-db", methods=["GET"])
+def legacy_db_status():
     try:
-        if filename.endswith(".docx"):
-            try:
-                from docx import Document
-            except ImportError:
-                return jsonify({"error": "python-docx not installed"}), 500
-            with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as tmp:
-                f.save(tmp.name)
-                doc = Document(tmp.name)
-                text = "\n".join(p.text for p in doc.paragraphs if p.text.strip())
-
-        elif filename.endswith(".pdf"):
-            try:
-                import pypdf
-                with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-                    f.save(tmp.name)
-                    reader = pypdf.PdfReader(tmp.name)
-                    text = "\n".join(page.extract_text() or "" for page in reader.pages)
-            except ImportError:
-                try:
-                    import pdfplumber
-                    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-                        f.save(tmp.name)
-                        with pdfplumber.open(tmp.name) as pdf:
-                            text = "\n".join(pg.extract_text() or "" for pg in pdf.pages)
-                except ImportError:
-                    return jsonify({"error": "No PDF library available (pypdf or pdfplumber)"}), 500
-
-        elif filename.endswith((".txt", ".md")):
-            text = f.read().decode("utf-8", errors="replace")
-
-        else:
-            return jsonify({"error": f"Unsupported file type: {filename}"}), 400
-
+        with _db() as conn, conn.cursor() as cur:
+            counts = {}
+            for t in _tables(cur):
+                cur.execute(f'SELECT COUNT(*) FROM "{t}"')
+                counts[t] = cur.fetchone()[0]
+        return jsonify({"ok": True, "tables": counts, "total_rows": sum(counts.values())})
     except Exception as e:
-        return jsonify({"error": f"Failed to extract text: {str(e)}"}), 500
-
-    if not text.strip():
-        return jsonify({"error": "Could not extract any text from the file"}), 400
-
-    # ── Parse common structured fields ─────────────────────────────────────
-    result = {"raw_text": text[:5000], "investment_case": ""}
-
-    def find_price(pattern, txt):
-        m = re.search(pattern, txt, re.IGNORECASE)
-        return float(m.group(1).replace(",", "")) if m else None
-
-    result["target_price"] = find_price(r"(?:target|tp1|price target)[:\s]+\$?([\d,]+\.?\d*)", text)
-    result["stop_loss"]    = find_price(r"(?:stop.?loss|stop)[:\s]+\$?([\d,]+\.?\d*)", text)
-
-    m = re.search(r"(?:key metric|90.?day metric|watch)[:\s]+([^\n]{5,120})", text, re.IGNORECASE)
-    if m: result["key_90d_metric"] = m.group(1).strip()
-
-    m = re.search(r"(?:sell|exit|trigger)[:\s]+([^\n]{5,200})", text, re.IGNORECASE)
-    if m: result["sell_trigger"] = m.group(1).strip()
-
-    m = re.search(r"conviction[:\s]+(tier\s*\d|core|high|medium|low)", text, re.IGNORECASE)
-    if m: result["conviction_tier"] = m.group(1).strip().title()
-
-    # ── Build investment case as bullet lines ───────────────────────────────
-    # Look for bullet-like lines or extract key sentences
-    lines = [l.strip() for l in text.split("\n") if l.strip()]
-    bullet_lines = [l for l in lines if re.match(r"^[•\-\*\d]", l) and len(l) > 10]
-    if bullet_lines:
-        result["investment_case"] = "\n".join(f"• {l.lstrip('•-* 0123456789.')} " for l in bullet_lines[:12])
-    else:
-        # Fall back to first 8 meaningful sentences
-        sentences = re.split(r"(?<=[.!?])\s+", text)
-        good = [s.strip() for s in sentences if len(s.strip()) > 30][:8]
-        result["investment_case"] = "\n".join(f"• {s}" for s in good)
-
-    return jsonify(result)
+        return err(e, 503)
 
 
-# ══════════════════════════════════════════════════════════════════
-# THESIS — DOCX AUTO-IMPORT
-# ══════════════════════════════════════════════════════════════════
-
-# ══════════════════════════════════════════════════════════════════
-# WEEKLY REVIEWS
-# ══════════════════════════════════════════════════════════════════
-
-# ══════════════════════════════════════════════════════════════════
-# MARKET OVERVIEW (for dashboard) — fast batch fetch
-# ══════════════════════════════════════════════════════════════════
-
-@app.route("/api/market/overview", methods=["GET"])
-def market_overview():
-    """Get major index prices via single batch yf.download call (fast)."""
-    result = sd.get_index_prices()
-    return jsonify(result)
-
-
-@app.route("/api/market/buffett-indicator", methods=["GET"])
-def buffett_indicator():
-    """Buffett Indicator: US market cap / GDP, sourced from FRED public CSV endpoints.
-    Cached for 6 hours — GDP is quarterly, market cap updates daily."""
-    import time as _time
-    from urllib.request import urlopen
-
-    CACHE_KEY = "__buffett_indicator__"
-    CACHE_TTL  = 6 * 3600  # 6 hours
-
-    with sd._cache_lock:
-        entry = sd._cache.get(CACHE_KEY)
-    if entry and (_time.time() - entry["ts"]) < CACHE_TTL:
-        return jsonify(entry["data"])
-
+@app.route("/api/admin/legacy-db/backup-and-wipe", methods=["POST"])
+def legacy_db_backup_and_wipe():
+    """Exports every public table to Drive archive/legacy as one JSON file, re-reads it to verify
+    the row counts, and only then truncates the tables. Requires the confirm phrase."""
+    body = request.get_json(silent=True) or {}
+    if body.get("confirm") != WIPE_PHRASE:
+        return err(f'send {{"confirm": "{WIPE_PHRASE}"}} to run', 400)
+    stamp = dt.datetime.now(SGT).strftime("%Y-%m-%d_%H%M")
     try:
-        def fetch_fred_csv(series_id):
-            url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"
-            with urlopen(url, timeout=12) as resp:
-                text = resp.read().decode("utf-8")
-            rows = []
-            for line in text.strip().splitlines()[1:]:
-                parts = line.strip().split(",")
-                if len(parts) != 2 or parts[1] in ("", "."):
-                    continue  # FRED leaves empty / "." cells for missing observations
-                try:
-                    rows.append({"date": parts[0], "value": float(parts[1])})
-                except ValueError:
-                    continue
-            return rows
-
-        # WILL5000INDFC was discontinued by FRED (404s in prod). Use the Fed Z.1
-        # series: nonfinancial corporate business; corporate equities; liability,
-        # level (quarterly, millions USD) -> convert to billions.
-        mc_data  = [{"date": d["date"], "value": d["value"] / 1000.0}
-                    for d in fetch_fred_csv("NCBEILQ027S")]
-        gdp_data = fetch_fred_csv("GDP")             # billions USD, quarterly, annualised
-
-        if not mc_data or not gdp_data:
-            return jsonify({"error": "FRED returned no data"}), 502
-
-        latest_mc  = mc_data[-1]
-        latest_gdp = gdp_data[-1]
-        ratio      = round(latest_mc["value"] / latest_gdp["value"] * 100, 1)
-
-        # 1-year-ago ratio
-        from datetime import datetime as _dt, timedelta as _td
-        one_yr_ago = (_dt.now() - _td(days=365)).strftime("%Y-%m-%d")
-        mc_1y  = next((d for d in reversed(mc_data)  if d["date"] <= one_yr_ago), mc_data[0])
-        gdp_1y = next((d for d in reversed(gdp_data) if d["date"] <= one_yr_ago), gdp_data[0])
-        ratio_1y = round(mc_1y["value"] / gdp_1y["value"] * 100, 1)
-
-        # Historical series (quarterly, last 32 quarters ≈ 8 years) for sparkline
-        history = []
-        for gdp_pt in gdp_data[-32:]:
-            mc_pt = next((d for d in reversed(mc_data) if d["date"] <= gdp_pt["date"]), None)
-            if mc_pt:
-                history.append({"date": gdp_pt["date"],
-                                 "ratio": round(mc_pt["value"] / gdp_pt["value"] * 100, 1)})
-
-        # Zone classification — by percentile of the ratio's own history since 1970.
-        # The Z.1 basis differs from the old Wilshire 5000 basis, so fixed % cutoffs
-        # (75/100/130/175) no longer apply. PROPOSED cutoffs, pending Ming's approval:
-        # <20th pct Undervalued, <50th Fair, <80th Overvalued, <95th Significantly, else Strongly.
-        hist_all = []
-        for gdp_pt in gdp_data:
-            if gdp_pt["date"] < "1970-01-01":
-                continue
-            mc_pt = next((d for d in reversed(mc_data) if d["date"] <= gdp_pt["date"]), None)
-            if mc_pt:
-                hist_all.append(mc_pt["value"] / gdp_pt["value"] * 100)
-        pct = (round(sum(1 for r in hist_all if r <= ratio) / len(hist_all) * 100, 1)
-               if hist_all else None)
-        if pct is None:
-            zone, zone_color = "Fair Value", "yellow"
-        elif pct < 20:
-            zone, zone_color = "Undervalued",              "emerald"
-        elif pct < 50:
-            zone, zone_color = "Fair Value",               "yellow"
-        elif pct < 80:
-            zone, zone_color = "Overvalued",               "orange"
-        elif pct < 95:
-            zone, zone_color = "Significantly Overvalued", "red"
-        else:
-            zone, zone_color = "Strongly Overvalued",      "red"
-
-        # Interpretation blurb
-        blurbs = {
-            "Undervalued":              "Market appears cheap relative to the economy — historically a good entry window for long-term investors.",
-            "Fair Value":               "Market is broadly in line with economic output. Stock-picking matters more than macro timing here.",
-            "Overvalued":               "Market is running ahead of GDP. Expect lower future returns; a margin-of-safety approach is prudent.",
-            "Significantly Overvalued": "Valuations are stretched. Buffett has historically held cash or been cautious at these levels.",
-            "Strongly Overvalued":      "Top 5% of readings since 1970. Risk management is paramount.",
-        }
-
-        data = {
-            "ratio":          ratio,
-            "ratio_1y":       ratio_1y,
-            "change_1y":      round(ratio - ratio_1y, 1),
-            "zone":           zone,
-            "zone_color":     zone_color,
-            "market_cap_b":   round(latest_mc["value"],  0),
-            "gdp_b":          round(latest_gdp["value"], 0),
-            "market_cap_date": latest_mc["date"],
-            "gdp_date":        latest_gdp["date"],
-            "history":        history,
-            "percentile":     pct,
-            "basis":          "Fed Z.1 NCBEILQ027S (nonfinancial corporate equities) / GDP; zones by percentile since 1970",
-            "blurb":          blurbs[zone],
-            "source":         "FRED: NCBEILQ027S (Fed Z.1 corporate equities) / GDP",
-        }
-
-        with sd._cache_lock:
-            sd._cache[CACHE_KEY] = {"ts": _time.time(), "data": data}
-
-        return jsonify(data)
-
-    except Exception as exc:
-        return jsonify({"error": str(exc)}), 500
-
-
-# ══════════════════════════════════════════════════════════════════
-# SPRINT 1 — Shortlist endpoints
-# ══════════════════════════════════════════════════════════════════
-
-@app.route("/api/shortlist", methods=["GET"])
-def get_shortlist():
-    stage = request.args.get("stage")
-    return jsonify(db.get_shortlist(stage))
-
-
-@app.route("/api/shortlist", methods=["POST"])
-def save_shortlist():
-    b = request.json or {}
-    if not b.get("ticker"):
-        return jsonify({"error": "ticker required"}), 400
-    db.save_shortlist_ticker(b)
-    return jsonify({"status": "ok"})
-
-
-@app.route("/api/shortlist/<ticker>", methods=["PATCH"])
-def patch_shortlist(ticker):
-    b = request.json or {}
-    updated = db.patch_shortlist(ticker.upper(), b)
-    if updated:
-        return jsonify({"status": "ok"})
-    return jsonify({"status": "not_found"}), 404
-
-
-@app.route("/api/shortlist/<ticker>", methods=["DELETE"])
-def delete_shortlist(ticker):
-    db.delete_shortlist_ticker(ticker.upper())
-    return jsonify({"status": "ok"})
-
-
-@app.route("/api/shortlist/<ticker>", methods=["GET"])
-def get_shortlist_ticker(ticker):
-    rows = db.get_shortlist()
-    match = next((r for r in rows if r["ticker"] == ticker.upper()), None)
-    if match:
-        return jsonify(match)
-    return jsonify({"error": "not found"}), 404
-
-
-# ══════════════════════════════════════════════════════════════════
-# FIRST-CUT — Upload memo (PDF / DOCX / TXT / MD)
-# ══════════════════════════════════════════════════════════════════
-
-# ══════════════════════════════════════════════════════════════════
-# SPRINT 1 — Triggers endpoints
-# ══════════════════════════════════════════════════════════════════
-
-@app.route("/api/triggers", methods=["GET"])
-def get_triggers():
-    ticker   = request.args.get("ticker")
-    # Convert query param: "false" → False, "true" → True, missing → None
-    addr_raw = request.args.get("addressed")
-    addressed = None
-    if addr_raw is not None:
-        addressed = addr_raw.lower() not in ("false", "0", "no")
-    severity = request.args.get("severity")
-    return jsonify(db.get_triggers(ticker=ticker, addressed=addressed, severity=severity))
-
-
-@app.route("/api/triggers/counts", methods=["GET"])
-def get_trigger_counts():
-    return jsonify(db.get_trigger_counts())
-
-
-@app.route("/api/triggers", methods=["POST"])
-def save_trigger():
-    b = request.json or {}
-    if not b.get("ticker") or not b.get("trigger_type"):
-        return jsonify({"error": "ticker and trigger_type required"}), 400
-    trigger_id = db.save_trigger(b)
-    return jsonify({"status": "ok", "id": trigger_id})
-
-
-@app.route("/api/triggers/<int:trigger_id>", methods=["PATCH"])
-def patch_trigger(trigger_id):
-    b = request.json or {}
-    updated = db.patch_trigger(trigger_id, b)
-    if updated:
-        return jsonify({"status": "ok"})
-    return jsonify({"status": "not_found"}), 404
-
-
-# ══════════════════════════════════════════════════════════════════
-# SPRINT 1 — Research history (novelty gate)
-# ══════════════════════════════════════════════════════════════════
-
-@app.route("/api/research-history", methods=["GET"])
-def get_research_history():
-    ticker = request.args.get("ticker")
-    return jsonify(db.get_research_history(ticker))
-
-
-@app.route("/api/research-history/tickers", methods=["GET"])
-def get_researched_tickers():
-    """Minimal novelty-gate list for Task A — just tickers."""
-    return jsonify(db.get_researched_tickers())
-
-
-@app.route("/api/research-history", methods=["POST"])
-def save_research_history():
-    b = request.json or {}
-    if not b.get("ticker"):
-        return jsonify({"error": "ticker required"}), 400
-    rec_id = db.save_research_history(b)
-    return jsonify({"status": "ok", "id": rec_id})
-
-
-# ══════════════════════════════════════════════════════════════════
-# SPRINT 1 — Valuation runs
-# ══════════════════════════════════════════════════════════════════
-
-@app.route("/api/valuation-runs", methods=["GET"])
-def get_valuation_runs():
-    ticker = request.args.get("ticker")
-    return jsonify(db.get_valuation_runs(ticker))
-
-
-@app.route("/api/valuation-runs", methods=["POST"])
-def save_valuation_run():
-    b = request.json or {}
-    if not b.get("ticker"):
-        return jsonify({"error": "ticker required"}), 400
-    run_id = db.save_valuation_run(b)
-    return jsonify({"status": "ok", "id": run_id})
-
-
-@app.route("/api/cache/clear", methods=["POST"])
-def clear_cache():
-    """Clear the in-memory data cache (forces fresh fetch next request)."""
-    import stock_data
-    with stock_data._cache_lock:
-        stock_data._cache.clear()
-    return jsonify({"status": "ok", "message": "Cache cleared"})
-
-
-def _open_browser():
-    """Wait until Flask is ready, then open the browser automatically."""
-    import threading, time, webbrowser
-    try:
-        from urllib.request import urlopen
-    except ImportError:
-        import urllib2 as urlopen  # Python 2 fallback (unlikely)
-
-    def _wait_and_open():
-        for _ in range(30):          # try for up to 60 seconds
-            time.sleep(2)
-            try:
-                urlopen("http://localhost:5001/api/health", timeout=2)
-                webbrowser.open("http://localhost:5001")
-                return
-            except Exception:
-                pass
-
-    t = threading.Thread(target=_wait_and_open, daemon=True)
-    t.start()
+        conn = _db()
+        cur = conn.cursor()
+        dump, counts = {}, {}
+        for t in _tables(cur):
+            cur.execute(f'SELECT * FROM "{t}"')
+            cols = [c[0] for c in cur.description]
+            rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+            dump[t], counts[t] = rows, len(rows)
+        payload = json.dumps({"exported": stamp, "source": "Neon Postgres (DATABASE_URL)", "row_counts": counts,
+                              "tables": dump}, default=str, ensure_ascii=False).encode("utf-8")
+        legacy = ds.folder("archive", "legacy")
+        made = ds.backend().create(legacy, f"app-db-backup_{stamp}.json", payload)
+        back = json.loads(ds.backend().read(made["id"]).decode("utf-8"))
+        if back.get("row_counts") != counts or any(len(back["tables"][t]) != n for t, n in counts.items()):
+            conn.close()
+            return err("backup verification failed; nothing was deleted", 500)
+        if counts:
+            cur.execute("TRUNCATE " + ", ".join(f'"{t}"' for t in counts) + " RESTART IDENTITY CASCADE")
+        conn.commit()
+        conn.close()
+        return jsonify({"ok": True, "backup_file": made.get("name"), "backup_id": made.get("id"),
+                        "backup_bytes": len(payload), "rows_deleted": counts})
+    except Exception as e:
+        return err(e, 500)
 
 
 if __name__ == "__main__":
-    # When running locally, open browser automatically
-    # When running on Railway/cloud (PORT env set), skip browser open
-    port = int(os.environ.get("PORT", 5001))
-    is_cloud = "PORT" in os.environ
-
-    print("\n" + "="*60)
-    print("  Value Investor App")
-    if is_cloud:
-        print(f"  Running on port {port} (cloud mode)")
-    else:
-        print("  Starting... browser will open automatically.")
-    print("  Press Ctrl+C to stop.")
-    print("="*60 + "\n")
-
-    if not is_cloud:
-        _open_browser()
-
-    app.run(debug=False, port=port, host="0.0.0.0", threaded=True)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5001)), debug=False)

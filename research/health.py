@@ -61,7 +61,14 @@ def latest_metrics(cf):
     sh = list(sh.items())
     if len(sh) >= 5:
         m["shares_yoy"] = sh[-1][1] / sh[-5][1] - 1
+    gp = ttm("gp") if "gp" in T else None
+    if rev and gp is not None:
+        m["gross_margin"] = gp / rev
     return m
+
+
+METRIC_KEYS = ("roic", "operating_margin", "net_margin", "gross_margin", "revenue_growth", "fcf",
+               "net_debt_ebitda", "shares_yoy")   # machine-checkable kill-criterion / pillar KPI keys
 
 
 def recent_8k(cik, since):
@@ -113,8 +120,14 @@ def check(th, fw, last_check=None):
 
     def breach(metric, cur, thr, direction):
         return cur is not None and thr is not None and ((cur < thr) if direction == "below" else (cur > thr))
+    kill_status, pillar_status = [], []
     for p in th.get("pillars", []):
         k = (p.get("kpi_key") or "").strip()
+        if k in METRIC_KEYS:
+            pillar_status.append({"claim": p.get("claim"), "kpi_key": k, "current": m.get(k),
+                                  "breach_threshold": p.get("breach_threshold"), "direction": p.get("breach_direction", "below"),
+                                  "breached": breach(k, m.get(k), p.get("breach_threshold"), p.get("breach_direction", "below")),
+                                  "as_of": D.TODAY, "source": "SEC XBRL (latest 10-Q/10-K)"})
         if k in m and p.get("breach_threshold") is not None:
             direction = p.get("breach_direction", "below")
             if breach(k, m[k], p["breach_threshold"], direction):
@@ -122,6 +135,12 @@ def check(th, fw, last_check=None):
                     "SEC XBRL", "re-underwrite")
     for kc in th.get("kill_criteria", []):
         k = (kc.get("metric_key") or "").strip()
+        kill_status.append({"criterion": kc.get("criterion"), "metric_key": k or None,
+                            "current": m.get(k) if k else None, "threshold": kc.get("threshold"),
+                            "direction": kc.get("direction", "below"),
+                            "breached": breach(k, m.get(k), kc.get("threshold"), kc.get("direction", "below")) if k else None,
+                            "check": "machine" if k in METRIC_KEYS else "judgement (weekly news/filings review)",
+                            "as_of": D.TODAY})
         if k in m and kc.get("threshold") is not None:
             if breach(k, m[k], kc["threshold"], kc.get("direction", "below")):
                 add("kill_criterion", "high", f"KILL: {kc['criterion']} ({k}={m[k]:.3g})", "SEC XBRL", "exit review")
@@ -144,7 +163,9 @@ def check(th, fw, last_check=None):
     sev = {i["severity"] for i in issues}
     health = "Red" if "high" in sev else "Amber" if "medium" in sev else "Green"
     return {"ticker": tk, "checked": D.TODAY, "price": D.fact(price, "Yahoo Finance"), "health": health,
-            "issues": issues, "metrics": m, "monitor_state": {"net_debt_ebitda": nde}}
+            "issues": issues, "metrics": m, "kill_status": kill_status, "pillar_status": pillar_status,
+            "monitor_state": {"net_debt_ebitda": nde, "last_price": price, "last_checked": D.TODAY,
+                              "metrics": m, "kill_status": kill_status, "pillar_status": pillar_status}}
 
 
 if __name__ == "__main__":
