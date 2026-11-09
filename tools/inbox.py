@@ -65,6 +65,13 @@ def load_thesis(cur, d):
     return f"{t} v{ver}{' (' + str(len(missing)) + ' sections missing)' if missing else ''}"
 
 
+def num_(v):
+    try:
+        return float(v) if v is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
 def load_book(cur, d):
     """Your holdings: {"type": "book", "replace": true, "items": [{"ticker", "shares", "cost"}]}.
     Each name moves to the Book with its position. With replace, Book names not listed are marked sold (back to Watchlist)."""
@@ -85,6 +92,8 @@ def load_book(cur, d):
         cur.execute("""UPDATE v2_names SET level = 'book', level_since = COALESCE(CASE WHEN level = 'book' THEN level_since END, CURRENT_DATE),
                        status = %s, research_requested = TRUE, updated_at = now() WHERE ticker = %s""",
                     ("holding" if has_thesis else "deep_dive_requested", t))
+        if (it.get("style") or "").lower() in ("value", "growth"):
+            cur.execute("UPDATE v2_names SET style = %s WHERE ticker = %s", (it["style"].lower(), t))
         if it.get("shares"):
             cur.execute("UPDATE v2_positions SET exited = %s WHERE ticker = %s AND exited IS NULL", (TODAY, t))
             cur.execute("INSERT INTO v2_positions (ticker, entered, shares, cost, notes) VALUES (%s,%s,%s,%s,'holdings import')",
@@ -105,6 +114,69 @@ def load(cur, name, d):
     kind = d.get("type")
     if kind == "book":
         return load_book(cur, d)
+    if kind == "refresh":                 # thesis refresh after results: new version with updated numbers
+        done = []
+        for it in d.get("items", []):
+            t = (it.get("ticker") or "").upper()
+            cur.execute("SELECT * FROM v2_theses WHERE ticker = %s ORDER BY version DESC LIMIT 1", (t,))
+            last = cur.fetchone()
+            if not last:
+                continue
+            val = dict(last["valuation"] or {})
+            for k, v in (it.get("valuation") or {}).items():
+                if v not in (None, "", [], {}):
+                    val[k] = v
+            pillars = it.get("pillars") or []
+            breached = [p for p in pillars if (p.get("status") or "").lower() == "breached"]
+            val["refresh"] = {"date": str(TODAY), "summary": it.get("summary"), "pillars": pillars,
+                              "previous": {"conviction": num_(last["conviction"]), "verdict": last["verdict"],
+                                           "entry_target": num_(last["entry_target"]), "iv_base": (last["valuation"] or {}).get("iv_base")}}
+            conv = it.get("conviction", last["conviction"])
+            verdict = it.get("verdict") or last["verdict"]
+            entry = it.get("entry_target", last["entry_target"])
+            cur.execute("""INSERT INTO v2_theses (ticker, version, author, approval, sections, valuation, conviction, verdict, entry_target)
+                           VALUES (%s, %s, 'claude-refresh', 'pending', %s, %s, %s, %s, %s)""",
+                        (t, last["version"] + 1, J(last["sections"]), J(val), conv, verdict, entry))
+            cur.execute("UPDATE v2_names SET refresh_due = NULL, updated_at = now() WHERE ticker = %s", (t,))
+            changed = verdict != last["verdict"] or bool(breached)
+            if it.get("full_reunderwrite") or breached:
+                cur.execute("UPDATE v2_names SET status = 'deep_dive_requested' WHERE ticker = %s", (t,))
+            bits = [f"conviction {num_(last['conviction']) or 0:.0f} → {num_(conv) or 0:.0f}"]
+            if verdict != last["verdict"]:
+                bits.append(f"verdict {last['verdict']} → {verdict}")
+            if entry and last["entry_target"] and float(entry) != float(last["entry_target"]):
+                bits.append(f"entry ${float(last['entry_target']):,.2f} → ${float(entry):,.2f}")
+            if breached:
+                bits.append("pillar breached: " + "; ".join(p.get("pillar", "")[:60] for p in breached))
+            alert(cur, t, "Thesis refreshed after results", "high" if changed else "medium",
+                  (it.get("summary") or "")[:300] + " (" + ", ".join(bits) + ")", f"refresh-{t}-{TODAY}", source="claude",
+                  action="Full re-underwrite queued" if (it.get("full_reunderwrite") or breached) else "Approve the update")
+            done.append(t)
+        return f"{len(done)} thesis refresh(es): {', '.join(done)}"
+    if kind == "week_ahead":              # Claude's Sunday look-ahead: stored for the app and digest; adds calendar rows
+        cur.execute("""INSERT INTO v2_settings (key, value, updated_at) VALUES ('week_ahead', %s, now())
+                       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()""",
+                    (J({"as_of": str(TODAY), "summary": d.get("summary"), "events": d.get("events") or []}),))
+        n = 0
+        for c in d.get("calendar") or []:
+            try:
+                cur.execute("""INSERT INTO v2_calendar (date, time_et, kind, ticker, title, detail, source)
+                               VALUES (%s,%s,%s,%s,%s,%s,'claude') ON CONFLICT (date, kind, title) DO UPDATE SET detail = EXCLUDED.detail""",
+                            (c["date"], c.get("time_et"), c.get("kind") or "policy", c.get("ticker"), c["title"], J(c.get("detail") or {})))
+                n += 1
+            except Exception:
+                continue
+        return f"Week ahead saved; {n} calendar items"
+    if kind == "tam":                     # add or refresh the TAM target on the latest thesis (no new version)
+        n = 0
+        for it in d.get("items", []):
+            t = (it.get("ticker") or "").upper()
+            if t and isinstance(it.get("tam"), dict) and it["tam"].get("scenarios"):
+                cur.execute("""UPDATE v2_theses SET valuation = COALESCE(valuation, '{}'::jsonb) || jsonb_build_object('tam', %s::jsonb)
+                               WHERE ticker = %s AND version = (SELECT MAX(version) FROM v2_theses WHERE ticker = %s)""",
+                            (J(it["tam"]), t, t))
+                n += cur.rowcount
+        return f"{n} TAM targets"
     if kind == "reason_cards":
         n = 0
         for it in d.get("items", []):

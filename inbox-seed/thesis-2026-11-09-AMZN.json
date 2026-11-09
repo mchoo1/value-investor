@@ -43,7 +43,75 @@
     "type": "manual",
     "text": "Trailing free cash flow still negative after 2027 with no capex step-down guided"
    }
-  ]
+  ],
+  "tam": {
+   "market": "Cloud infrastructure, global e-commerce (ex-China) plus seller services, and digital advertising",
+   "tam_now_bn": 6000,
+   "source": "Cloud infrastructure (IaaS/PaaS incl. AI) ~$600B annualised in 2026 from hyperscaler run-rates (AWS $184B, Google Cloud ~$123B, Azure); ValueInvestor estimate $1.8T by 2031 (~25% a year) and $3.2T by 2036 (~12% a year after). Global digital advertising ~$1.0T in 2026 (Google ~$300B and Meta ~$258B annualised alone), ValueInvestor estimate ~$1.5T by 2031 (~8-9% a year) and ~$2.2T by 2036 (in line with the ~$2.19T-by-2035 forecast reported by Communicate Online). E-commerce plus services ~$4.5T ex-China (ValueInvestor estimate).",
+   "why_share": "AWS holds ~29% of cloud infrastructure today; we assume it slips to 22% then 20% as Azure and Google grow faster. Retail share held at ~12% of a growing pie; ads hold ~10% of digital ads (from ~7%) on Prime Video and retail media.",
+   "what_must_go_right": "AWS margins hold near 30% net through the capex cycle; capex falls to ~12% of revenue by 2030; retail net margin climbs to 5-6% with robotics.",
+   "scenarios": [
+    {
+     "years": 5,
+     "segments": [
+      {
+       "name": "Cloud (AWS)",
+       "tam_bn": 1800,
+       "share_pct": 22,
+       "net_margin_pct": 28
+      },
+      {
+       "name": "Commerce and services",
+       "tam_bn": 6000,
+       "share_pct": 12,
+       "net_margin_pct": 5
+      },
+      {
+       "name": "Advertising",
+       "tam_bn": 1500,
+       "share_pct": 10,
+       "net_margin_pct": 35
+      }
+     ],
+     "other_rev_bn": 0,
+     "other_margin_pct": 0,
+     "exit_pe": 25,
+     "shares_m": 11000,
+     "dr": 10,
+     "note": "Implies AWS ~$400B revenue in 2031 (~17% a year)."
+    },
+    {
+     "years": 10,
+     "segments": [
+      {
+       "name": "Cloud (AWS)",
+       "tam_bn": 3200,
+       "share_pct": 20,
+       "net_margin_pct": 28
+      },
+      {
+       "name": "Commerce and services",
+       "tam_bn": 8500,
+       "share_pct": 12,
+       "net_margin_pct": 6
+      },
+      {
+       "name": "Advertising",
+       "tam_bn": 2200,
+       "share_pct": 10,
+       "net_margin_pct": 35
+      }
+     ],
+     "other_rev_bn": 0,
+     "other_margin_pct": 0,
+     "exit_pe": 20,
+     "shares_m": 11000,
+     "dr": 10,
+     "note": "Mature-company P/E of 20 at year 10."
+    }
+   ],
+   "as_of": "2026-11-09"
+  }
  },
  "sections": {
   "industry_map": "Three businesses in one: cloud infrastructure (AWS, #1 vs Azure and Google Cloud), e-commerce and logistics (North America and International), and digital advertising (#3 in US digital ads behind Google and Meta). Profit sits mostly in AWS and ads; retail is the scale engine that feeds them.",

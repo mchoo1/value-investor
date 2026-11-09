@@ -42,7 +42,51 @@
     "type": "manual",
     "text": "New equity or convertible issuance above 5% of shares"
    }
-  ]
+  ],
+  "tam": {
+   "market": "On-site (behind-the-meter) power for data centres and industry",
+   "tam_now_bn": 10,
+   "source": "Data-centre fuel-cell spend ~$3B a year in 2025-26, rising tenfold to ~$30B a year by 2030 (Rystad Energy); behind-the-meter data-centre capacity forecast raised to ~67 GW by 2030 (market reports, 2026). Bloom's own 2026 revenue (~$4.5B) also includes utility and industrial sales.",
+   "why_share": "Bloom is the leading fuel-cell supplier with Oracle (up to 2.8 GW), Brookfield ($25B) and NTT DATA (900 MW) programmes; we assume it keeps ~35% of a $35B annual market by 2031 (vs turbines and engines), plus service revenue.",
+   "what_must_go_right": "On-site power stays needed because grids lag; Bloom holds share against turbines; net margin ~15%; share count no more than ~320M.",
+   "scenarios": [
+    {
+     "years": 5,
+     "segments": [
+      {
+       "name": "On-site power equipment and service",
+       "tam_bn": 35,
+       "share_pct": 35,
+       "net_margin_pct": 15
+      }
+     ],
+     "other_rev_bn": 0,
+     "other_margin_pct": 0,
+     "exit_pe": 25,
+     "shares_m": 320,
+     "dr": 13,
+     "note": "Implies ~$12B revenue in 2031 (~22% a year from 2026's ~$4.5B)."
+    },
+    {
+     "years": 10,
+     "segments": [
+      {
+       "name": "On-site power equipment and service",
+       "tam_bn": 50,
+       "share_pct": 30,
+       "net_margin_pct": 15
+      }
+     ],
+     "other_rev_bn": 0,
+     "other_margin_pct": 0,
+     "exit_pe": 18,
+     "shares_m": 340,
+     "dr": 13,
+     "note": "Assumes the market matures as grid capacity catches up."
+    }
+   ],
+   "as_of": "2026-11-09"
+  }
  },
  "sections": {
   "industry_map": "Bloom makes solid-oxide fuel cells that generate electricity on site from natural gas (or hydrogen), sold to data centres, utilities (AEP), and industrial users, and financed via partners such as Brookfield.",

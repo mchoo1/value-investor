@@ -42,7 +42,51 @@
     "type": "manual",
     "text": "2027 capex guide implies negative full-year free cash flow"
    }
-  ]
+  ],
+  "tam": {
+   "market": "Global digital advertising (social, messaging, AI assistants)",
+   "tam_now_bn": 1000,
+   "source": "Global digital advertising ~$1.0T in 2026 (Google ~$300B and Meta ~$258B annualised alone), ValueInvestor estimate ~$1.5T by 2031 (~8-9% a year) and ~$2.2T by 2036 (in line with the ~$2.19T-by-2035 forecast reported by Communicate Online).",
+   "why_share": "Meta takes ~26% of global digital ads today (~$258B of ~$1T); we assume 24% then 22% as AI assistants and TikTok compete.",
+   "what_must_go_right": "AI ranking keeps lifting ad prices; WhatsApp business messaging scales; net margin recovers to ~35% after the capex peak. Figures are pre-Class C dividend (halve per-share values after 19 Jan 2027).",
+   "scenarios": [
+    {
+     "years": 5,
+     "segments": [
+      {
+       "name": "Advertising and messaging",
+       "tam_bn": 1500,
+       "share_pct": 24,
+       "net_margin_pct": 35
+      }
+     ],
+     "other_rev_bn": 0,
+     "other_margin_pct": 0,
+     "exit_pe": 22,
+     "shares_m": 2500,
+     "dr": 9.5,
+     "note": "Implies ~$360B revenue in 2031 (~7% a year from 2026's ~$258B); pre-split share count."
+    },
+    {
+     "years": 10,
+     "segments": [
+      {
+       "name": "Advertising and messaging",
+       "tam_bn": 2200,
+       "share_pct": 22,
+       "net_margin_pct": 33
+      }
+     ],
+     "other_rev_bn": 0,
+     "other_margin_pct": 0,
+     "exit_pe": 18,
+     "shares_m": 2450,
+     "dr": 9.5,
+     "note": "Reality Labs and AI glasses are excluded (option value)."
+    }
+   ],
+   "as_of": "2026-11-09"
+  }
  },
  "sections": {
   "industry_map": "Meta owns Facebook, Instagram, WhatsApp, Messenger and Threads (3.64B daily users), sells ads across them, and spends on AI (Meta Superintelligence Labs, Llama/Muse) and Reality Labs (glasses, VR).",

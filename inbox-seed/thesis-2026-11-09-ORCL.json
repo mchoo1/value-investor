@@ -42,7 +42,51 @@
     "type": "manual",
     "text": "Further equity issuance beyond the cap set at the 28 Oct 2026 Investor Day"
    }
-  ]
+  ],
+  "tam": {
+   "market": "AI cloud infrastructure plus database and enterprise applications",
+   "tam_now_bn": 1500,
+   "source": "Cloud infrastructure (IaaS/PaaS incl. AI) ~$600B annualised in 2026 from hyperscaler run-rates (AWS $184B, Google Cloud ~$123B, Azure); ValueInvestor estimate $1.8T by 2031 (~25% a year) and $3.2T by 2036 (~12% a year after). Oracle backlog (RPO) $664B at Aug 2026 (Q1 FY27 release).",
+   "why_share": "OCI is ~4% of cloud infrastructure today; the contracted backlog implies ~8% by 2031 if OpenAI and others pay. Database/apps grow ~5% a year.",
+   "what_must_go_right": "OpenAI (about half of backlog) pays in full; net margin on OCI reaches ~18% after depreciation and interest; no further large dilution beyond ~3.3B shares.",
+   "scenarios": [
+    {
+     "years": 5,
+     "segments": [
+      {
+       "name": "Cloud infrastructure (OCI)",
+       "tam_bn": 1800,
+       "share_pct": 8,
+       "net_margin_pct": 18
+      }
+     ],
+     "other_rev_bn": 80,
+     "other_margin_pct": 30,
+     "exit_pe": 18,
+     "shares_m": 3300,
+     "dr": 11,
+     "note": "Implies OCI ~$145B revenue by 2031, consistent with converting the backlog."
+    },
+    {
+     "years": 10,
+     "segments": [
+      {
+       "name": "Cloud infrastructure (OCI)",
+       "tam_bn": 3200,
+       "share_pct": 7,
+       "net_margin_pct": 20
+      }
+     ],
+     "other_rev_bn": 100,
+     "other_margin_pct": 30,
+     "exit_pe": 15,
+     "shares_m": 3400,
+     "dr": 11,
+     "note": ""
+    }
+   ],
+   "as_of": "2026-11-09"
+  }
  },
  "sections": {
   "industry_map": "Oracle sells databases and licences, cloud applications (Fusion ERP, NetSuite, health records from Cerner) and, increasingly, AI cloud infrastructure (OCI) - renting GPU capacity to OpenAI, Meta, xAI and others.",

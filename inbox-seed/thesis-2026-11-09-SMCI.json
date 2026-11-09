@@ -42,7 +42,51 @@
     "type": "manual",
     "text": "Operating cash flow negative for four straight quarters"
    }
-  ]
+  ],
+  "tam": {
+   "market": "AI servers and rack-scale data-centre systems",
+   "tam_now_bn": 300,
+   "source": "MarketsandMarkets: AI server market ~$838B by 2030; ABI Research ~$523B by 2030.",
+   "why_share": "Super Micro guides $72-82B for FY27, roughly 15-20% of AI servers; we assume 12% by 2031 as Dell and Taiwanese ODMs scale, at a ~5% net margin.",
+   "what_must_go_right": "AI capex keeps growing; Super Micro converts profit to cash; no governance or accounting setback.",
+   "scenarios": [
+    {
+     "years": 5,
+     "segments": [
+      {
+       "name": "AI servers and systems",
+       "tam_bn": 700,
+       "share_pct": 12,
+       "net_margin_pct": 5
+      }
+     ],
+     "other_rev_bn": 0,
+     "other_margin_pct": 0,
+     "exit_pe": 12,
+     "shares_m": 780,
+     "dr": 14,
+     "note": "Implies ~$84B revenue in 2031 (flat-ish vs FY27 run-rate)."
+    },
+    {
+     "years": 10,
+     "segments": [
+      {
+       "name": "AI servers and systems",
+       "tam_bn": 900,
+       "share_pct": 10,
+       "net_margin_pct": 4.5
+      }
+     ],
+     "other_rev_bn": 0,
+     "other_margin_pct": 0,
+     "exit_pe": 10,
+     "shares_m": 820,
+     "dr": 14,
+     "note": "Low exit P/E reflects a low-margin assembler."
+    }
+   ],
+   "as_of": "2026-11-09"
+  }
  },
  "sections": {
   "industry_map": "Super Micro designs and assembles servers and rack-scale systems (GPU servers, liquid cooling, 'DCBBS' data-centre building blocks) for AI data centres, cloud providers and enterprises, mainly using Nvidia and AMD chips.",

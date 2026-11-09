@@ -30,7 +30,11 @@ SECTIONS = [
         ("premortem", "Pre-mortem and conviction")]),
 ]
 FUNNELS = [("quant_value", "Quant value"), ("fallen_quality", "Fallen quality"), ("sharp_drop", "Sharp drop"),
-           ("insider", "Insider buying"), ("smart_money", "Smart money"), ("theme", "Theme")]
+           ("fast_growth", "Fast growth"), ("accelerating", "Accelerating"), ("smart_money", "Smart money"),
+           ("share_taker", "Share taker"), ("momentum_leader", "Momentum leader"), ("estimates_rising", "Estimates rising"),
+           ("insider_buying", "Insider buying"), ("activist", "Activist 13D")]
+VALUE_FUNNELS = ["quant_value", "fallen_quality", "sharp_drop", "insider_buying", "activist"]
+GROWTH_FUNNELS = ["fast_growth", "accelerating", "smart_money", "share_taker", "momentum_leader", "estimates_rising"]
 TAG_CLASS = {"strengthens": "good", "weakens": "warn", "breaks": "bad", "no change": "muted"}
 
 
@@ -66,7 +70,14 @@ def ensure_schema():
         return
     x("""ALTER TABLE v2_names ADD COLUMN IF NOT EXISTS level_since DATE;
          ALTER TABLE v2_names ADD COLUMN IF NOT EXISTS health TEXT;
-         ALTER TABLE v2_alerts ADD COLUMN IF NOT EXISTS note TEXT;""")
+         ALTER TABLE v2_alerts ADD COLUMN IF NOT EXISTS note TEXT;
+         ALTER TABLE v2_names ADD COLUMN IF NOT EXISTS style TEXT;
+         CREATE TABLE IF NOT EXISTS v2_settings (key TEXT PRIMARY KEY, value JSONB, updated_at TIMESTAMPTZ DEFAULT now());
+         CREATE TABLE IF NOT EXISTS v2_calendar (id SERIAL PRIMARY KEY, date DATE NOT NULL, time_et TEXT, kind TEXT, ticker TEXT,
+             title TEXT NOT NULL, detail JSONB, source TEXT, UNIQUE (date, kind, title));
+         CREATE TABLE IF NOT EXISTS v2_decisions (id SERIAL PRIMARY KEY, ticker TEXT NOT NULL, decided_at TIMESTAMPTZ DEFAULT now(),
+             action TEXT, decision TEXT, price NUMERIC, shares NUMERIC, note TEXT, alert_id INT, spy_price NUMERIC);
+         ALTER TABLE v2_names ADD COLUMN IF NOT EXISTS growth_score NUMERIC;""")
     _schema_ok = True
 
 
@@ -122,6 +133,31 @@ def dcf_iv(fcf_ps, g1, g2, tg, dr):
         f *= 1 + (g1 if yr <= 5 else g2)
         pv += f / (1 + dr) ** yr
     return pv + f * (1 + tg) / (dr - tg) / (1 + dr) ** 10
+
+
+def tam_calc(tam, price):
+    """TAM target values (reference only; never feeds the entry target or signals).
+    Each scenario: segments [{name, tam_bn, share_pct, net_margin_pct}], other_rev_bn, exit_pe, shares_m, dr, years."""
+    out = []
+    for sc in (tam or {}).get("scenarios") or []:
+        try:
+            segs = sc.get("segments") or []
+            rows = [{**g, "rev_bn": float(g["tam_bn"]) * float(g["share_pct"]) / 100} for g in segs]
+            for g in rows:
+                g["ni_bn"] = g["rev_bn"] * float(g["net_margin_pct"]) / 100
+            other = float(sc.get("other_rev_bn") or 0)
+            other_ni = other * float(sc.get("other_margin_pct") or 0) / 100
+            rev, ni = sum(g["rev_bn"] for g in rows) + other, sum(g["ni_bn"] for g in rows) + other_ni
+            yrs, dr, pe, sh = int(sc["years"]), float(sc["dr"]), float(sc["exit_pe"]), float(sc["shares_m"])
+            future = ni * pe * 1000 / sh
+            today = future / (1 + dr / 100) ** yrs
+            irr = ((future / price) ** (1 / yrs) - 1) if price and future > 0 else None
+            out.append({**sc, "rows": rows, "rev_bn": rev, "ni_bn": ni, "future": future, "today": today, "irr": irr,
+                        "zone": future / 1.15 ** yrs,
+                        "vs_price": (today / price - 1) if price else None})
+        except (KeyError, TypeError, ValueError, ZeroDivisionError):
+            continue
+    return out
 
 
 def num(v):
@@ -212,9 +248,11 @@ details summary{cursor:pointer;color:var(--mute)}.cmt{border-left:2px solid var(
 </style></head><body>
 <header><div class="bar"><span class="brand">ValueInvestor</span>
 <nav class="tabs">
+<a href="{{ url_for('decide') }}" class="{{ 'on' if tab=='decide' }}">Decide</a>
 <a href="{{ url_for('screen') }}" class="{{ 'on' if tab=='screen' }}">Screen</a>
 <a href="{{ url_for('watchlist') }}" class="{{ 'on' if tab=='watchlist' }}">Watchlist</a>
-<a href="{{ url_for('book') }}" class="{{ 'on' if tab=='book' }}">Book</a></nav></div></header>
+<a href="{{ url_for('book') }}" class="{{ 'on' if tab=='book' }}">Book</a>
+<a href="{{ url_for('outlook') }}" class="{{ 'on' if tab=='outlook' }}">Outlook</a></nav></div></header>
 <main>{% with m = get_flashed_messages() %}{% for x in m %}<div class="flash">{{ x }}</div>{% endfor %}{% endwith %}
 {{ body }}</main>
 <script>
@@ -236,7 +274,8 @@ def funnel_chips(f):
     return Markup("".join(f'<span class="chip acc">{label}</span>' for k, label in FUNNELS if f.get(k)))
 
 
-app.jinja_env.globals.update(funnel_chips=funnel_chips, FUNNELS=FUNNELS, TAG_CLASS=TAG_CLASS)
+app.jinja_env.globals.update(funnel_chips=funnel_chips, FUNNELS=FUNNELS, TAG_CLASS=TAG_CLASS,
+                             VALUE_FUNNELS=VALUE_FUNNELS, GROWTH_FUNNELS=GROWTH_FUNNELS)
 
 
 # ------------------------------------------------------------------ Screen
@@ -266,6 +305,7 @@ SCREEN_TPL = r"""
 </style>
 
 <h1>Screen</h1>
+<div class="row" style="margin:-4px 0 10px"><a class="btn {{ 'primary' }}" href="{{ url_for('screen') }}">Value</a><a class="btn" href="{{ url_for('screen', track='growth') }}">Growth</a></div>
 <p class="sub">{% if run %}Weekly screen of {{ run.date|d }} · {{ st.with_fundamentals or run.funnel_counts.scored }} US stocks scored · data: SEC filings, Nasdaq, Yahoo, FRED (all free){% else %}No screen has run yet. The Saturday run fills this page.{% endif %}</p>
 
 {% if run %}
@@ -289,7 +329,7 @@ SCREEN_TPL = r"""
 {% set top = st.listings or 1 %}
 {% for k,label in [('listings','All Nasdaq/NYSE listings'),('us_2b','US, market cap ≥ $2B'),('priced','With 1y price history'),('liquid','Trades ≥ $10M a day'),('with_fundamentals','With SEC financials'),('gate_pass','Passed balance-sheet gates'),('any_funnel','Hit at least one funnel'),('top10','Top 10'),('cleared_bar','Cleared deep-dive bar')] %}
 {% if st.get(k) is not none %}<div class="fbar"><span>{{ label }}</span><div><div class="b" style="width:{{ (100*st[k]/top)|round(1) }}%"></div></div><span class="n">{{ '{:,}'.format(st[k]) }}</span></div>{% endif %}{% endfor %}
-<div class="row" style="margin-top:10px">{% for k,label in FUNNELS %}{% if run.funnel_counts.get(k) is not none %}<span class="chip acc">{{ label }} {{ run.funnel_counts[k] }}</span>{% endif %}{% endfor %}</div>
+<div class="row" style="margin-top:10px">{% for k,label in FUNNELS if k in VALUE_FUNNELS %}{% if run.funnel_counts.get(k) is not none %}<span class="chip acc">{{ label }} {{ run.funnel_counts[k] }}</span>{% endif %}{% endfor %}</div>
 </div></div>
 <div><h2>Where the value is, by sector</h2><div class="tablewrap"><table><thead><tr><th>Sector</th><th class="r">Scored</th><th class="r">Funnel hits</th>
 <th class="r">Median P/E</th><th class="r">Median FCF yield</th><th class="r">Median off high</th></tr></thead><tbody>
@@ -298,7 +338,7 @@ SCREEN_TPL = r"""
 <td class="r">{{ s.fcf|pct }}</td><td class="r">{{ s.dd|pct }}</td></tr>{% endfor %}</tbody></table></div></div>
 </div>
 
-<h2>Top 10 this week</h2>
+<h2>Value top 10 this week</h2>
 <div class="top">
 {% for t in top10 %}{% set m = t.m %}<div class="card">
 <h3><span><a href="{{ url_for('name', ticker=t.ticker) }}">{{ loop.index }}. {{ t.ticker }}</a> <span class="muted" style="font-weight:400">{{ (m.name or '')|cname }}</span></span><span>{{ t.score|n1 }}</span></h3>
@@ -518,6 +558,8 @@ def home():
 
 @app.route("/screen")
 def screen():
+    if request.args.get("track") == "growth":
+        return screen_growth()
     names = q("SELECT * FROM v2_names WHERE level = 'screen' ORDER BY score DESC NULLS LAST, ticker")
     counts = {}
     for n in names:
@@ -538,7 +580,7 @@ def screen():
             f = s["funnels"] or {}
             row = {"ticker": s["ticker"], "name": clean_name(m.get("name")), "sector": m.get("sector") or "Other",
                    "mcap": m.get("mcap"), "score": num(s["score"]), "flow": num(s["flow_score"]),
-                   "funnels": f, "hits": sum(1 for v in f.values() if v),
+                   "funnels": f, "hits": sum(1 for k in VALUE_FUNNELS if f.get(k)),
                    "level": n.get("level", "screen"), "status": n.get("status", "new"),
                    "gate_pass": fin.get("gate_pass"), "tests_passed": fin.get("tests_passed"),
                    "tests_available": fin.get("tests_available")}
@@ -569,6 +611,129 @@ def screen():
         ctx.update(run=run, rows=rows, top10=top10, sectors=sec_rows, mkt=run.get("market") or {},
                    st=run.get("stages") or {})
     return page("screen", "Screen", SCREEN_TPL, **ctx)
+
+
+GROWTH_TPL = r"""
+<style>
+.top{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(380px,1fr))}
+.top .card h3{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px}
+.parts{display:grid;grid-template-columns:110px 1fr 34px;gap:4px 8px;align-items:center;font-size:12px;margin:10px 0}
+.parts .b{height:8px;border-radius:4px;background:var(--panel2)}.parts .b i{display:block;height:8px;border-radius:4px;background:var(--accent)}
+.mini{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:10px 0}
+.mini div{background:var(--panel2);border-radius:8px;padding:6px 8px}.mini b{display:block;font-size:14px}.mini span{font-size:11px;color:var(--mute)}
+.flags{margin-top:6px}.flags .chip{background:rgba(210,153,34,.15);color:var(--warn)}
+.rc{font-size:13px;border-top:1px solid var(--line);padding-top:8px;margin-top:8px}.rc div{margin:2px 0}
+.fbar{display:grid;grid-template-columns:170px 1fr 60px;gap:8px;align-items:center;margin:4px 0;font-size:13px}
+.fbar .b{height:16px;border-radius:4px;background:var(--accent);opacity:.85;min-width:2px}.fbar .n{text-align:right;font-weight:600}
+.up{color:var(--good)}.dn{color:var(--bad)}
+#gres th{cursor:pointer;user-select:none}#gres td{white-space:nowrap;font-size:13px;padding:6px 8px}
+</style>
+<h1>Screen</h1>
+<div class="row" style="margin:-4px 0 10px"><a class="btn" href="{{ url_for('screen') }}">Value</a><a class="btn primary" href="{{ url_for('screen', track='growth') }}">Growth</a></div>
+<p class="sub">{% if run %}Growth track of {{ run.date|d }} · US, market cap ≥ $1B · any one growth funnel gets a name in, with no price or profit filter ·
+scored on moat 30, growth and acceleration 25, industry acceleration 25, smart money 10, valuation 10 (+5 for a strong moat in an accelerating industry) · risks are flagged, never used to exclude{% else %}No screen has run yet.{% endif %}</p>
+{% if run %}
+<div class="grid g2">
+<div><h2>This week's growth funnel</h2><div class="card">
+{% set top = st.listings or 1 %}
+{% for k,label in [('listings','All listings'),('us_1b','US, market cap ≥ $1B'),('with_fundamentals','With SEC financials'),('growth_any_funnel','Hit a growth funnel'),('growth_top10','Top 10'),('growth_cleared_bar','Deep dives this week')] %}
+{% if st.get(k) is not none %}<div class="fbar"><span>{{ label }}</span><div><div class="b" style="width:{{ (100*st[k]/top)|round(1) }}%"></div></div><span class="n">{{ '{:,}'.format(st[k]) }}</span></div>{% endif %}{% endfor %}
+<div class="row" style="margin-top:10px">{% for k,label in FUNNELS if k in GROWTH_FUNNELS %}{% if run.funnel_counts.get(k) is not none %}<span class="chip acc">{{ label }} {{ run.funnel_counts[k] }}</span>{% endif %}{% endfor %}</div>
+<p class="muted" style="font-size:12px;margin-bottom:0"><b>Fast growth</b>: revenue +20% (latest quarter or year) or +15% a year over 5 years ·
+<b>Accelerating</b>: growth 10%+ and rising 5+ points · <b>Smart money</b>: 2+ growth funds bought last quarter (13F), or 4+ hold with none selling ·
+<b>Share taker</b>: in one of your themes and growing 10+ points faster than its industry · <b>Momentum leader</b>: 20%+ ahead of the S&amp;P over 6 months, near its high, growing 10%+ ·
+<b>Estimates rising</b>: analysts' next-year EPS up 5%+ in 90 days, more upgrades than cuts (checked for the best 60) · foreign companies listed in the US are included</p>
+</div></div>
+<div><h2>Industry acceleration: your themes vs the S&amp;P (6 months)</h2><div class="card">
+{% for th, v in (mkt.theme_strength_6m or {}).items() %}<div class="fbar"><span>{{ th }}</span><div><div class="b" style="width:{{ ((v + 0.4) / 0.8 * 100)|round(1) if v is not none else 0 }}%;background:{{ 'var(--good)' if v and v > 0 else 'var(--bad)' }}"></div></div><span class="n {{ 'up' if v and v > 0 else 'dn' }}">{{ v|pct(true) }}</span></div>
+{% else %}<p class="empty">Theme strength arrives with the next Saturday screen.</p>{% endfor %}
+<p class="muted" style="font-size:12px;margin-bottom:0">Industry score also uses each company's peer group: median revenue growth and whether it is speeding up.</p>
+</div></div></div>
+
+<h2>Growth top 10 this week</h2>
+<div class="top">
+{% for t in top10 %}{% set m = t.m %}{% set g = m.growth or {} %}<div class="card">
+<h3><span><a href="{{ url_for('name', ticker=t.ticker) }}">{{ loop.index }}. {{ t.ticker }}</a> <span class="muted" style="font-weight:400">{{ (m.name or '')|cname }}</span></span><span>{{ t.score|n1 }}</span></h3>
+<div class="muted" style="font-size:12px">{{ m.industry or m.sector }}{% if g.themes %} · {{ g.themes|join(', ') }}{% endif %}</div>
+<div style="margin-top:6px">{{ funnel_chips(t.funnels) }}{% if t.promote %}<span class="chip good">Deep dive this week</span>{% endif %}
+{% if t.status == 'deep_dive_requested' %}<span class="chip acc">Deep dive requested</span>{% endif %}</div>
+<div class="parts">{% for k,label in [('moat','Moat'),('growth','Growth'),('industry','Industry'),('smart','Smart money'),('valuation','Valuation')] %}
+<span>{{ label }}</span><div class="b"><i style="width:{{ (t.parts or {}).get(k, 0) }}%"></i></div><b>{{ (t.parts or {}).get(k, 0)|round|int }}</b>{% endfor %}</div>
+<div class="mini">
+<div><span>Revenue growth</span><b>{{ g.g_now|pct }}</b></div><div><span>Acceleration</span><b class="{{ 'up' if g.accel and g.accel > 0 else 'dn' }}">{{ ('%+.0f pts'|format(g.accel*100)) if g.accel is not none else '—' }}</b></div>
+<div><span>Gross margin</span><b>{{ m.fin.gross_margin|pct }}</b></div><div><span>Rule of 40</span><b>{{ ((g.rule_of_40 or 0)*100)|round|int if g.rule_of_40 is not none else '—' }}</b></div>
+<div><span>Peers' growth</span><b>{{ g.peer_growth|pct }}</b></div><div><span>vs S&amp;P 6m</span><b class="{{ 'up' if g.rs_6m and g.rs_6m > 0 else 'dn' }}">{{ g.rs_6m|pct(true) }}</b></div>
+<div><span>EV / sales</span><b>{{ '%.1fx'|format(m.fin.ev_rev) if m.fin.ev_rev else '—' }}</b></div><div><span>Price</span><b>{{ m.px.price|money }}</b></div></div>
+{% if g.smart_money %}{% set sm = g.smart_money %}<div style="font-size:12px"><b>Smart money ({{ sm.period }}):</b>
+{% if sm.new %}new: {{ sm.new|join(', ') }}. {% endif %}{% if sm.added %}added: {{ sm.added|join(', ') }}. {% endif %}{% if sm.trimmed or sm.sold %}<span class="dn">cut/sold: {{ (sm.trimmed + sm.sold)|join(', ') }}.</span> {% endif %}
+{{ sm.holders|length }} growth funds hold{% if sm.inst_change is not none and sm.inst_change < 1 %} · big institutions {{ sm.inst_change|pct(true) }}{% endif %}</div>{% endif %}
+{% if g.insiders %}<div style="font-size:12px"><b>Insiders bought</b> ${{ '{:,.1f}'.format(g.insiders.value/1e6) }}M ({{ g.insiders.buyers|length }} people{% if g.insiders.ceo_cfo %}, incl. CEO/CFO/chair{% endif %}), last {{ g.insiders.last }}</div>{% endif %}
+{% if g.activist %}<div style="font-size:12px"><b>Activist 13D</b> filed {{ g.activist.last }}{% if g.activist.filers %} by {{ g.activist.filers|join(', ') }}{% endif %}</div>{% endif %}
+{% if g.estimates and g.estimates.chg_90d is not none %}<div style="font-size:12px"><b>Next-year EPS estimate</b> {{ g.estimates.chg_90d|pct(true) }} in 90 days ({{ g.estimates.up_30d or 0 }} up / {{ g.estimates.down_30d or 0 }} down in 30 days)</div>{% endif %}
+<div class="flags">{% for f in t.flags or [] %}<span class="chip">⚠ {{ f }}</span>{% else %}<span class="muted" style="font-size:12px">No risk flags from the numbers.</span>{% endfor %}</div>
+<div class="rc">{% if t.reason_card %}{% set rc = t.reason_card %}
+<div><b>Why it can keep compounding:</b> {{ rc.why_cheap }}</div><div><b>Who owns / is buying:</b> {{ rc.who_selling }}</div>
+<div><b>What the market may underestimate:</b> {{ rc.market_missing }}</div><div><b>Biggest risk and what to watch:</b> {{ rc.buyers_back }}</div>
+{% else %}<span class="empty">Growth card pending: written by Sunday's overnight task.</span>{% endif %}</div>
+<div class="row" style="margin-top:10px">
+{% if t.status != 'deep_dive_requested' %}<form class="inline" method="post" action="{{ url_for('deepdive', ticker=t.ticker) }}"><button>Request deep dive</button></form>{% endif %}
+<form class="inline" method="post" action="{{ url_for('move', ticker=t.ticker) }}"><input type="hidden" name="to" value="watchlist"><button>+ Watch</button></form>
+<a class="btn" href="{{ url_for('name', ticker=t.ticker) }}">Details</a></div>
+</div>{% else %}<p class="empty">The growth track fills after the next Saturday screen.</p>{% endfor %}</div>
+
+<h2>All growth-funnel names <span class="muted" style="font-weight:400">({{ rows|length }})</span></h2>
+<div class="card"><div class="row"><input id="gq" placeholder="Ticker, company or industry" oninput="gfilter()" style="min-width:260px">
+<select id="gf" onchange="gfilter()"><option value="">Any growth funnel</option>{% for k,label in FUNNELS if k in GROWTH_FUNNELS %}<option value="{{ k }}">{{ label }}</option>{% endfor %}</select>
+<label class="muted"><input type="checkbox" id="gnf" onchange="gfilter()"> Hide names with risk flags</label></div></div>
+<div class="tablewrap"><table id="gres"><thead><tr>
+{% for h in ['Ticker','Company','Industry','Score','Moat','Growth','Industry score','Smart','Valuation','Rev growth','Accel (pts)','Gross margin','Rule of 40','EV/sales','vs S&P 6m','Mkt cap $B','Funnels','Risks'] %}<th onclick="gsort({{ loop.index0 }})">{{ h }}</th>{% endfor %}</tr></thead><tbody>
+{% for r in rows %}<tr data-f="{{ r.fun|join(' ') }}" data-flag="{{ 1 if r.flags else 0 }}">
+<td><a href="{{ url_for('name', ticker=r.ticker) }}">{{ r.ticker }}</a></td><td>{{ (r.name or '')|cname|truncate(26, True, '…') }}</td><td class="muted">{{ (r.industry or '')|truncate(28, True, '…') }}</td>
+<td class="r"><b>{{ r.score|n1 }}</b></td>{% for k in ['moat','growth','industry','smart','valuation'] %}<td class="r">{{ r.parts[k]|round|int }}</td>{% endfor %}
+<td class="r" data-v="{{ r.g or 0 }}">{{ r.g|pct }}</td><td class="r" data-v="{{ r.accel or 0 }}">{{ ('%+.0f'|format(r.accel*100)) if r.accel is not none else '—' }}</td>
+<td class="r" data-v="{{ r.gm or 0 }}">{{ r.gm|pct }}</td><td class="r">{{ ((r.r40 or 0)*100)|round|int if r.r40 is not none else '—' }}</td>
+<td class="r" data-v="{{ r.evs or 0 }}">{{ '%.1f'|format(r.evs) if r.evs else '—' }}</td><td class="r" data-v="{{ r.rs or 0 }}">{{ r.rs|pct(true) }}</td>
+<td class="r">{{ '%.1f'|format(r.mcap/1e9) if r.mcap else '—' }}</td><td>{{ funnel_chips(r.funnels) }}</td><td class="muted" style="font-size:12px">{{ r.flags|join('; ') }}</td></tr>{% endfor %}
+</tbody></table></div>
+<script>
+function gfilter(){const q=document.getElementById('gq').value.toLowerCase(),f=document.getElementById('gf').value,nf=document.getElementById('gnf').checked;
+ document.querySelectorAll('#gres tbody tr').forEach(tr=>{const ok=(!q||tr.innerText.toLowerCase().includes(q))&&(!f||tr.dataset.f.split(' ').includes(f))&&(!nf||tr.dataset.flag==='0');tr.style.display=ok?'':'none';});}
+let gdir={};function gsort(i){const tb=document.querySelector('#gres tbody');const rows=[...tb.rows];gdir[i]=!gdir[i];
+ const val=td=>{const v=td.dataset.v!==undefined?td.dataset.v:td.innerText.replace(/[%,$+]/g,'');const n=parseFloat(v);return isNaN(n)?td.innerText.toLowerCase():n;};
+ rows.sort((a,b)=>{const x=val(a.cells[i]),y=val(b.cells[i]);return (x>y?1:x<y?-1:0)*(gdir[i]?-1:1);});rows.forEach(r=>tb.appendChild(r));}
+</script>
+{% endif %}
+"""
+
+
+def screen_growth():
+    run = q1("SELECT * FROM v2_screen_runs ORDER BY run_date DESC LIMIT 1")
+    ctx = dict(run=None, rows=[], top10=[], st={}, mkt={})
+    if run:
+        run["date"] = run["run_date"].isoformat()
+        info = {r["ticker"]: r for r in q("SELECT ticker, level, status, reason_card FROM v2_names")}
+        scores = q("""SELECT ticker, growth_score, funnels, metrics FROM v2_screen_scores WHERE run_date = %s
+                      AND growth_score IS NOT NULL ORDER BY growth_score DESC""", (run["run_date"],))
+        rows, by_t = [], {}
+        for sc in scores:
+            f = sc["funnels"] or {}
+            fun = [k for k in GROWTH_FUNNELS if f.get(k)]
+            m = sc["metrics"] or {}
+            by_t[sc["ticker"]] = m
+            if not fun:
+                continue
+            g, fin = m.get("growth") or {}, m.get("fin") or {}
+            rows.append({"ticker": sc["ticker"], "name": m.get("name"), "industry": m.get("industry"), "mcap": m.get("mcap"),
+                         "score": num(sc["growth_score"]), "parts": g.get("parts") or {}, "g": g.get("g_now"),
+                         "accel": g.get("accel"), "gm": fin.get("gross_margin"), "r40": g.get("rule_of_40"),
+                         "evs": fin.get("ev_rev") or fin.get("ps"), "rs": g.get("rs_6m"), "flags": g.get("flags") or [],
+                         "fun": fun, "funnels": {k: True for k in fun}})
+        top10 = []
+        for t in run.get("growth_top10") or []:
+            n = info.get(t["ticker"], {})
+            top10.append({**t, "m": by_t.get(t["ticker"], {}), "status": n.get("status"), "reason_card": n.get("reason_card")})
+        ctx.update(run=run, rows=rows, top10=top10, st=run.get("stages") or {}, mkt=run.get("market") or {})
+    return page("screen", "Screen · Growth", GROWTH_TPL, **ctx)
 
 
 @app.post("/screen/bulk")
@@ -703,14 +868,18 @@ def watchlist():
     weakest = sorted(pool, key=lambda r: -r["penalty"])[:5]
     # swap suggestions: this week's screen names scoring above the weakest non-core Watchlist name
     swaps = []
-    scored = [r for r in pool if num(r.get("score")) is not None]
+    best = lambda r: max(num(r.get("score")) or 0, num(r.get("growth_score")) or 0)   # value or growth score, whichever is higher
+    scored = [r for r in pool if num(r.get("score")) is not None or num(r.get("growth_score")) is not None]
     if scored:
-        low = min(scored, key=lambda r: num(r["score"]))
-        swaps = [dict(s, vs=low["ticker"], vs_score=num(low["score"])) for s in q(
-            """SELECT s.ticker, s.score, s.metrics->>'name' AS name FROM v2_screen_scores s
+        low = min(scored, key=best)
+        swaps = [dict(s, vs=low["ticker"], vs_score=best(low)) for s in q(
+            """SELECT s.ticker, GREATEST(COALESCE(s.score, 0), COALESCE(s.growth_score, 0)) AS score,
+                      CASE WHEN COALESCE(s.growth_score, 0) > COALESCE(s.score, 0) THEN 'growth' ELSE 'value' END AS track,
+                      s.metrics->>'name' AS name FROM v2_screen_scores s
                JOIN v2_names n USING (ticker)
                WHERE s.run_date = (SELECT MAX(run_date) FROM v2_screen_scores) AND n.level = 'screen'
-                 AND n.status <> 'rejected' AND s.score > %s ORDER BY s.score DESC LIMIT 5""", (num(low["score"]),))]
+                 AND n.status <> 'rejected' AND GREATEST(COALESCE(s.score, 0), COALESCE(s.growth_score, 0)) > %s
+               ORDER BY 2 DESC LIMIT 5""", (best(low),))]
     return page("watchlist", "Watchlist", WATCH_TPL, rows=rows, weakest=weakest, cap=WATCH_CAP, swaps=swaps,
                 core=sum(1 for r in rows if r["is_core"]), core_cap=CORE_CAP)
 
@@ -719,20 +888,26 @@ def watchlist():
 BOOK_TPL = r"""
 <h1>Book</h1>
 <p class="sub">{{ rows|length }} name{{ "" if rows|length == 1 else "s" }} owned (target about {{ target }}) · monitored daily: company releases, price, themes, analysts, kill criteria.</p>
+<p class="muted" style="font-size:12px;margin-top:-8px"><b>Value</b> holdings: add at the entry target, review at Claude's base value, trim above the high value; held 2-4 years.
+<b>Growth</b> holdings: add where the 5-year market-size case returns 15%+ a year, trim only when the price is beyond that case (under 5% a year); held 5-10 years and ended mainly by a broken thesis, not by valuation.</p>
 {% if rows|length > target %}<div class="flash">The Book holds {{ rows|length }} names, above your target of {{ target }}.</div>{% endif %}
 <div class="tablewrap"><table><thead><tr><th>Health</th><th>Ticker</th><th class="r">Price</th><th class="r">Cost</th>
-<th class="r">P&amp;L</th><th class="r">Claude base value</th><th class="r">Price / value</th><th class="r">Analyst mean</th>
+<th class="r">P&amp;L</th><th>Style</th><th>Now</th><th class="r">Add at</th><th class="r">Trim at</th><th class="r">Claude base value</th><th class="r">Analyst mean</th>
 <th class="r">Open alerts</th><th></th></tr></thead><tbody>
 {% for r in rows %}<tr>
 <td title="{{ r.health_why or '' }}"><span class="dot {{ r.health or '' }}"></span>{{ r.health or '—' }}{% if r.health_why %}<br><span class="muted" style="font-size:11px">{{ r.health_why }}</span>{% endif %}</td>
 <td><a href="{{ url_for('name', ticker=r.ticker) }}"><b>{{ r.ticker }}</b></a><br><span class="muted">{{ r.name or '' }}</span></td>
 <td class="r">{{ r.price|money }}</td><td class="r">{{ r.cost|money }}</td>
 <td class="r {{ 'good' if r.pnl and r.pnl > 0 else ('bad' if r.pnl and r.pnl < 0) }}">{{ r.pnl|pct(true) }}</td>
-<td class="r">{{ r.iv_base|money }}</td><td class="r">{{ r.p_iv|pct }}</td>
+<td><span class="chip {{ 'acc' if r.style == 'growth' else '' }}" title="Hold for {{ r.hold }}">{{ r.style }}</span>{% if r.style_how == 'auto' %}<br><span class="muted" style="font-size:11px">auto</span>{% endif %}</td>
+<td>{% if r.state == 'add' %}<span class="chip good">Add zone</span>{% elif r.state == 'trim' %}<span class="chip warn">Trim zone</span>{% elif r.state == 'fair' %}<span class="chip warn">At fair value</span>{% else %}<span class="chip">Hold</span>{% endif %}
+{% if r.tam_irr is not none %}<br><span class="muted" style="font-size:11px">5y case {{ r.tam_irr|pct }}/yr</span>{% endif %}</td>
+<td class="r">{{ r.add_at|money }}</td><td class="r">{{ r.trim_at|money }}</td>
+<td class="r">{{ r.iv_base|money }}</td>
 <td class="r">{{ (r.analyst or {}).get('mean')|money }}</td><td class="r">{{ r.alerts or '' }}</td>
 <td><form class="inline" method="post" action="{{ url_for('move', ticker=r.ticker) }}"><input type="hidden" name="to" value="watchlist">
 <button title="Sold, but still like the business">Back to Watchlist</button></form></td>
-</tr>{% else %}<tr><td colspan="10" class="empty">Nothing in the Book yet. Move a Watchlist name here when you buy it.</td></tr>{% endfor %}
+</tr>{% else %}<tr><td colspan="13" class="empty">Nothing in the Book yet. Move a Watchlist name here when you buy it.</td></tr>{% endfor %}
 </tbody></table></div>
 
 <h2>Alerts</h2>
@@ -749,6 +924,52 @@ BOOK_TPL = r"""
 </tr>{% else %}<tr><td colspan="6" class="empty">No alerts.</td></tr>{% endfor %}</tbody></table></div>
 """
 
+HOLD = {"value": "2-4 years, or until the price reaches Claude's value",
+        "growth": "5-10 years, while the moat and the industry keep growing; valuation alone rarely ends it"}
+
+
+def name_style(n, thesis):
+    if n.get("style") in ("value", "growth"):
+        return n["style"], "set"
+    has_tam = bool(((thesis or {}).get("valuation") or {}).get("tam"))
+    auto = "growth" if has_tam and (num(n.get("growth_score")) or 0) > (num(n.get("score")) or 0) else "value"
+    return auto, "auto"
+
+
+def book_zones(r):
+    """Style-aware add / trim levels, mirrored from the daily monitor (tools/monitor.py book_zones)."""
+    th = q1("SELECT * FROM v2_theses WHERE ticker = %s ORDER BY version DESC LIMIT 1", (r["ticker"],)) or {}
+    style, how = name_style(r, th)
+    val = th.get("valuation") or {}
+    price = r.get("price")
+    out = {"style": style, "style_how": how, "hold": HOLD[style], "add_at": None, "trim_at": None, "state": "hold", "tam_irr": None}
+    if style == "growth":
+        five = [t for t in tam_calc(val.get("tam"), price) if t["years"] == 5]
+        if five:
+            out["add_at"], out["trim_at"] = five[0]["zone"], five[0]["future"] / 1.05 ** 5
+            out["tam_irr"] = five[0]["irr"]
+    else:
+        out["add_at"], out["trim_at"] = num(th.get("entry_target")) or r.get("target"), num(val.get("iv_high"))
+        out["review_at"] = num(val.get("iv_base"))
+    if price and out["add_at"] and price <= out["add_at"]:
+        out["state"] = "add"
+    elif price and out["trim_at"] and price >= out["trim_at"]:
+        out["state"] = "trim"
+    elif style == "value" and price and out.get("review_at") and price >= out["review_at"]:
+        out["state"] = "fair"
+    return out
+
+
+@app.post("/name/<ticker>/style")
+def set_style(ticker):
+    st = request.form.get("style")
+    if st in ("value", "growth"):
+        x("UPDATE v2_names SET style = %s, updated_at = now() WHERE ticker = %s", (st, ticker.upper()))
+        x("INSERT INTO v2_comments (ticker, section, body) VALUES (%s, 'move', %s)", (ticker.upper(), f"Tagged as {st}"))
+        flash(f"{ticker.upper()} tagged as {st}.")
+    return back(url_for("name", ticker=ticker.upper()))
+
+
 
 @app.route("/book")
 def book():
@@ -759,6 +980,7 @@ def book():
         r["cost"] = num((pos.get(r["ticker"]) or {}).get("cost"))
         r["pnl"] = (r["price"] / r["cost"] - 1) if r["price"] and r["cost"] else None
         r["p_iv"] = (r["price"] / r["iv_base"]) if r["price"] and r["iv_base"] else None
+        r.update(book_zones(r))
     alerts = q("SELECT a.* FROM v2_alerts a JOIN v2_names n USING (ticker) WHERE n.level IN ('book','watchlist') "
                "ORDER BY a.addressed, a.fired_at DESC LIMIT 100")
     return page("book", "Book", BOOK_TPL, rows=rows, alerts=alerts, target=BOOK_TARGET)
@@ -767,7 +989,10 @@ def book():
 # ------------------------------------------------------------------ Name / thesis page
 NAME_TPL = r"""
 <div class="row" style="justify-content:space-between">
-<div><h1>{{ n.ticker }} <span class="muted" style="font-weight:400">{{ (n.name or '')|cname }}</span></h1>
+<div><h1>{{ n.ticker }} <span class="muted" style="font-weight:400">{{ (n.name or '')|cname }}</span>
+<span class="chip {{ 'acc' if style == 'growth' }}" style="font-size:12px;vertical-align:middle">{{ style }}{% if style_how == 'auto' %} (auto){% endif %}</span></h1>
+<form class="inline" method="post" action="{{ url_for('set_style', ticker=n.ticker) }}"><span class="muted" style="font-size:12px">Tag as</span>
+<button name="style" value="value">Value</button><button name="style" value="growth">Growth</button></form>
 <p class="sub"><span class="chip acc">{{ n.level }}</span><span class="chip">{{ n.status }}</span>{% if n.is_core %}<span class="chip acc">core</span>{% endif %}
 {{ n.sector or '' }}{% if n.industry %} · {{ n.industry }}{% endif %} · last screened {{ n.last_screened|d }}</p></div>
 <div class="row">
@@ -793,6 +1018,24 @@ NAME_TPL = r"""
 <div class="card tile"><div class="k">Moat · risk</div><div class="v" style="font-size:18px">{{ r.moat.rating }} · {{ r.risk.rating }}</div>
 <div class="k">{{ r.red_flags|length }} red flag{{ '' if r.red_flags|length == 1 else 's' }}</div></div>{% endif %}
 </div>
+{% if val.refresh %}{% set rf = val.refresh %}<div class="card" style="margin-top:12px" id="refresh"><h3>Latest results refresh <span class="muted" style="font-weight:400;font-size:13px">{{ rf.date }}</span></h3>
+<p style="margin-top:0">{{ rf.summary }}</p>
+{% if rf.previous %}<p class="muted" style="font-size:12px">Before: conviction {{ rf.previous.conviction|n1 }}, {{ rf.previous.verdict }}, entry {{ rf.previous.entry_target|money }}, base value {{ rf.previous.iv_base|money }}</p>{% endif %}
+{% if rf.pillars %}<table><thead><tr><th>Pillar</th><th>Status</th><th>What the results said</th></tr></thead><tbody>
+{% for p in rf.pillars %}<tr><td>{{ p.pillar }}</td><td><span class="chip {{ {'intact':'good','watch':'warn','breached':'bad'}.get((p.status or '')|lower, '') }}">{{ p.status }}</span></td><td>{{ p.note }}</td></tr>{% endfor %}</tbody></table>{% endif %}
+</div>{% endif %}
+{% if tam_rows %}<div class="card" style="margin-top:12px" id="tam"><h3>Growth target (TAM) <span class="muted" style="font-weight:400;font-size:13px">separate from the value entry target</span></h3>
+<p class="muted" style="margin-top:0">{{ val.tam.market }}{% if val.tam.tam_now_bn %} · market today ${{ '{:,.0f}'.format(val.tam.tam_now_bn|float) }}B{% endif %}{% if val.tam.source %} · {{ val.tam.source }}{% endif %}</p>
+<table><thead><tr><th>Horizon</th><th>Segments: market × share × net margin</th><th class="r">Revenue</th><th class="r">Earnings</th><th class="r">Exit P/E</th><th class="r">Value then</th><th class="r">Value today</th><th class="r">vs price</th><th class="r">Return a year from today's price</th></tr></thead><tbody>
+{% for t in tam_rows %}<tr><td><b>{{ t.years }} years</b><br><span class="muted">{{ t.dr }}% discount · {{ '{:,.0f}'.format(t.shares_m|float) }}M shares</span></td>
+<td>{% for g in t.rows %}<div>{{ g.name }}: ${{ '{:,.0f}'.format(g.tam_bn|float) }}B × {{ g.share_pct }}% × {{ g.net_margin_pct }}%</div>{% endfor %}{% if t.other_rev_bn %}<div class="muted">Other: ${{ t.other_rev_bn }}B at {{ t.other_margin_pct or 0 }}%</div>{% endif %}</td>
+<td class="r">${{ '{:,.0f}'.format(t.rev_bn) }}B</td><td class="r">${{ '{:,.1f}'.format(t.ni_bn) }}B</td><td class="r">{{ t.exit_pe }}x</td>
+<td class="r">{{ t.future|money }}</td><td class="r"><b>{{ t.today|money }}</b></td><td class="r {{ 'good' if t.vs_price and t.vs_price > 0 else 'bad' }}">{{ t.vs_price|pct(true) }}</td><td class="r">{{ t.irr|pct }}</td></tr>
+{% if t.note %}<tr><td></td><td colspan="8" class="muted">{{ t.note }}</td></tr>{% endif %}{% endfor %}</tbody></table>
+{% for t in tam_rows if t.years == 5 %}<p><b>Growth buy zone:</b> at or below <b>{{ t.zone|money }}</b> the 5-year case returns 15%+ a year{% if price %} · today {{ price|money }} ({{ (price / t.zone - 1)|pct(true) }} vs the zone){% endif %}. Watchlist names alert here; Claude re-checks the case overnight before it is sent.</p>{% endfor %}
+{% if val.tam.why_share %}<p><b>Why this share is reachable:</b> {{ val.tam.why_share }}</p>{% endif %}
+{% if val.tam.what_must_go_right %}<p><b>What must go right:</b> {{ val.tam.what_must_go_right }}</p>{% endif %}
+</div>{% endif %}
 {% if spark %}<div class="card" style="margin-top:12px">{{ spark }}</div>{% endif %}
 
 {{ research }}
@@ -994,7 +1237,8 @@ def name(ticker):
                 alerts=q("SELECT * FROM v2_alerts WHERE ticker = %s ORDER BY fired_at DESC LIMIT 10", (ticker,)),
                 news=q("SELECT * FROM v2_news WHERE ticker = %s ORDER BY published DESC NULLS LAST LIMIT 8", (ticker,)),
                 events=q("SELECT * FROM v2_events WHERE ticker = %s ORDER BY filed DESC LIMIT 8", (ticker,)),
-                legacy=(n.get("legacy") or {}).get("thesis"))
+                legacy=(n.get("legacy") or {}).get("thesis"), tam_rows=tam_calc(val.get("tam"), price),
+                style=name_style(n, thesis)[0], style_how=name_style(n, thesis)[1])
 
 
 # ------------------------------------------------------------------ actions
@@ -1102,6 +1346,294 @@ def ack(alert_id):
     x("UPDATE v2_alerts SET addressed = TRUE, action = %s, note = %s WHERE id = %s",
       (action, (request.form.get("note") or "").strip() or None, alert_id))
     return back(url_for("book"))
+
+
+# ------------------------------------------------------------------ Decide: one list of everything that needs a decision
+SIZING = {"value": {"starter": 0.03, "full": 0.05}, "growth": {"starter": 0.02, "full": 0.06}}
+LIMITS = {"name": 0.10, "theme": 0.35, "style": 0.80}
+ACTIONS = {  # alert kind -> (action, order)
+    "Buy signal confirmed": ("BUY", 1), "Buy signal": ("BUY", 1), "Old idea at buy level": ("RE-CHECK", 6),
+    "Add zone": ("ADD", 2), "Add zone, thesis flagged": ("REVIEW", 3), "Trim zone": ("TRIM", 2),
+    "Fair value reached": ("REVIEW", 4), "Kill criterion hit": ("EXIT?", 0), "Buy signal, thesis weakened": ("REVIEW", 3),
+    "Buy signal paused": ("REVIEW", 4), "Thesis refreshed after results": ("APPROVE", 5),
+    "Screen idea on sale": ("LOOK", 7), "Earnings preview": ("PREPARE", 5),
+}
+
+
+def portfolio():
+    """Positions with live weights by name, theme and style; cash from settings."""
+    pos = q("""SELECT DISTINCT ON (p.ticker) p.*, n.themes, n.style, n.score, n.growth_score, n.name FROM v2_positions p
+               JOIN v2_names n USING (ticker) WHERE p.exited IS NULL AND n.level = 'book' ORDER BY p.ticker, p.entered DESC""")
+    px = latest_prices([p["ticker"] for p in pos])
+    st = q1("SELECT value FROM v2_settings WHERE key = 'portfolio'") or {}
+    cash = num((st.get("value") or {}).get("cash")) or 0
+    rows, total = [], cash
+    for p in pos:
+        th = q1("SELECT * FROM v2_theses WHERE ticker = %s ORDER BY version DESC LIMIT 1", (p["ticker"],)) or {}
+        mv = (num(p["shares"]) or 0) * (px.get(p["ticker"]) or 0)
+        total += mv
+        rows.append({**p, "mv": mv, "price": px.get(p["ticker"]), "style": name_style(p, th)[0], "conviction": num(th.get("conviction")),
+                     "themes": p.get("themes") or []})
+    by_theme, by_style = {}, {}
+    for r in rows:
+        r["w"] = r["mv"] / total if total else 0
+        for t in r["themes"] or ["(no theme)"]:
+            by_theme[t] = by_theme.get(t, 0) + r["w"] / max(len(r["themes"] or [1]), 1)
+        by_style[r["style"]] = by_style.get(r["style"], 0) + r["w"]
+    warn = [f"{r['ticker']} is {r['w']:.0%} of the portfolio (limit {LIMITS['name']:.0%})" for r in rows if r["w"] > LIMITS["name"]]
+    warn += [f"{t} is {w:.0%} (theme limit {LIMITS['theme']:.0%})" for t, w in by_theme.items() if w > LIMITS["theme"]]
+    warn += [f"{s.title()} holdings are {w:.0%} (limit {LIMITS['style']:.0%})" for s, w in by_style.items() if w > LIMITS["style"]]
+    return {"rows": sorted(rows, key=lambda r: -r["mv"]), "total": total, "cash": cash, "by_theme": by_theme,
+            "by_style": by_style, "warn": warn}
+
+
+def size_for(ticker, style, conviction, pf, price):
+    """Suggested amount to buy or add: target weight from style and conviction, capped by the name and theme limits."""
+    s = SIZING.get(style, SIZING["value"])
+    c = conviction or 0
+    target = s["full"] if c >= 75 else (s["starter"] + s["full"]) / 2 if c >= 60 else s["starter"]
+    cur_w = next((r["w"] for r in pf["rows"] if r["ticker"] == ticker), 0)
+    n = q1("SELECT themes FROM v2_names WHERE ticker = %s", (ticker,)) or {}
+    room = [LIMITS["name"] - cur_w]
+    for t in n.get("themes") or []:
+        room.append(LIMITS["theme"] - pf["by_theme"].get(t, 0))
+    add_w = max(0.0, min(target - cur_w, *room))
+    amt = add_w * pf["total"] if pf["total"] else None
+    why = f"{style} · conviction {c:.0f} → target {target:.0%} of the portfolio, now {cur_w:.1%}"
+    if add_w <= 0 and target > cur_w:
+        why += " · no room: a name or theme limit is already reached (trim elsewhere first, or accept the extra concentration)"
+    elif add_w < target - cur_w:
+        why += " · reduced to stay within a portfolio limit"
+    return {"target_w": target, "cur_w": cur_w, "add_w": add_w, "amount": amt,
+            "shares": int(amt // price) if amt and price else None, "why": why}
+
+
+DECIDE_TPL = r"""
+<style>.dec{display:grid;gap:10px}.dec .card{display:grid;grid-template-columns:110px 1fr 320px;gap:14px;align-items:start}
+.act{font-weight:700;font-size:13px;padding:6px 8px;border-radius:8px;text-align:center;background:var(--panel2)}
+.act.BUY,.act.ADD{background:rgba(46,160,67,.18);color:var(--good)}.act.TRIM,.act.EXIT\?{background:rgba(248,81,73,.15);color:var(--bad)}
+.act.REVIEW,.act.APPROVE,.act.PREPARE{background:rgba(210,153,34,.15);color:var(--warn)}
+.kv{display:grid;grid-template-columns:repeat(4,auto);gap:2px 14px;font-size:12px;margin-top:6px}.kv b{font-size:13px}
+.wbar{display:grid;grid-template-columns:200px 1fr 50px;gap:8px;align-items:center;font-size:13px;margin:3px 0}
+.wbar .b{height:12px;border-radius:4px;background:var(--accent)}.wbar .b.over{background:var(--bad)}
+@media (max-width:800px){.dec .card{grid-template-columns:1fr}}</style>
+<h1>Decide</h1>
+<p class="sub">Everything that needs a decision, most urgent first. Each item shows why, the numbers that matter, Claude's check and a suggested size. Done or Skip records it in the decision journal.</p>
+{% if pf.warn %}<div class="flash">⚠ Portfolio limits: {{ pf.warn|join(' · ') }}</div>{% endif %}
+<div class="dec">
+{% for d in items %}<div class="card">
+<div><div class="act {{ d.action }}">{{ d.action }}</div><div class="muted" style="font-size:11px;margin-top:6px">{{ d.when|d }}</div></div>
+<div><b><a href="{{ url_for('name', ticker=d.ticker) }}">{{ d.ticker }}</a></b> <span class="muted">{{ (d.name or '')|cname }}</span>
+{% if d.style %}<span class="chip {{ 'acc' if d.style == 'growth' }}">{{ d.style }}</span>{% endif %} <span class="chip">{{ d.level }}</span>
+<div style="margin-top:4px">{{ d.kind }}: {{ d.detail }}</div>
+<div class="kv"><span>Price<br><b>{{ d.price|money }}</b></span><span>{{ 'Growth zone' if d.style == 'growth' else 'Entry target' }}<br><b>{{ d.buy_at|money }}</b></span>
+<span>Claude base value<br><b>{{ d.iv_base|money }}</b></span><span>Conviction<br><b>{{ d.conviction|n1 }}</b></span></div>
+{% if d.check %}<div style="font-size:12px;margin-top:6px"><b>Claude's check:</b> {{ d.check }}</div>{% endif %}
+{% if d.size %}<div style="font-size:12px;margin-top:6px"><b>Suggested size:</b> {% if d.size.amount %}${{ '{:,.0f}'.format(d.size.amount) }}{% if d.size.shares %} (~{{ d.size.shares }} shares){% endif %}{% elif d.size.add_w <= 0 %}none{% else %}add positions to see amounts{% endif %}
+<span class="muted">· {{ d.size.why }}</span></div>{% endif %}
+{% if d.trim_note %}<div style="font-size:12px;margin-top:6px"><b>Trim guide:</b> {{ d.trim_note }}</div>{% endif %}
+</div>
+<form method="post" action="{{ url_for('decide_record') }}"><input type="hidden" name="alert_id" value="{{ d.id or '' }}"><input type="hidden" name="ticker" value="{{ d.ticker }}"><input type="hidden" name="action" value="{{ d.action }}"><input type="hidden" name="price" value="{{ d.price or '' }}">
+<div class="row"><input name="shares" placeholder="Shares (if traded)" style="width:130px"><input name="note" placeholder="Why (for the journal)" style="flex:1;min-width:150px"></div>
+<div class="row" style="margin-top:6px"><button class="primary" name="decision" value="done">Done</button><button name="decision" value="skipped">Skip</button><button name="decision" value="later">Later</button></div></form>
+</div>{% else %}<p class="empty">Nothing needs a decision right now.</p>{% endfor %}
+</div>
+
+<h2>Portfolio</h2>
+<div class="grid g2"><div class="card"><h3>By name</h3>
+{% for r in pf.rows %}<div class="wbar"><span><a href="{{ url_for('name', ticker=r.ticker) }}">{{ r.ticker }}</a> <span class="muted">{{ r.style }}</span></span><div><div class="b {{ 'over' if r.w > limits.name }}" style="width:{{ (r.w / 0.15 * 100)|round(1) if r.w < 0.15 else 100 }}%"></div></div><b>{{ r.w|pct }}</b></div>
+{% else %}<p class="empty">Add shares and costs to your Book to see weights.</p>{% endfor %}
+<p class="muted" style="font-size:12px">Total ${{ '{:,.0f}'.format(pf.total) }} incl. cash ${{ '{:,.0f}'.format(pf.cash) }}.</p>
+<form method="post" action="{{ url_for('set_cash') }}" class="row"><input name="cash" placeholder="Cash available (USD)" value="{{ pf.cash|int if pf.cash else '' }}"><button>Save cash</button></form></div>
+<div class="card"><h3>By theme and style</h3>
+{% for t, w in pf.by_theme.items()|sort(attribute='1', reverse=True) %}<div class="wbar"><span>{{ t }}</span><div><div class="b {{ 'over' if w > limits.theme }}" style="width:{{ (w * 100)|round(1) }}%"></div></div><b>{{ w|pct }}</b></div>{% endfor %}
+<hr>{% for s, w in pf.by_style.items() %}<div class="wbar"><span>{{ s|title }}</span><div><div class="b {{ 'over' if w > limits.style }}" style="width:{{ (w * 100)|round(1) }}%"></div></div><b>{{ w|pct }}</b></div>{% endfor %}
+<p class="muted" style="font-size:12px">Sizing: value starter {{ sizing.value.starter|pct }}, full {{ sizing.value.full|pct }}; growth starter {{ sizing.growth.starter|pct }}, full {{ sizing.growth.full|pct }} (full at conviction 75+, half-way at 60-74). Limits: {{ limits.name|pct }} a name, {{ limits.theme|pct }} a theme, {{ limits.style|pct }} a style.</p></div></div>
+
+<h2>Decision journal</h2>
+<div class="tablewrap"><table><thead><tr><th>Date</th><th>Ticker</th><th>Action</th><th>Decision</th><th class="r">Price then</th><th class="r">Shares</th><th class="r">Since</th><th class="r">vs S&amp;P</th><th>Note</th></tr></thead><tbody>
+{% for j in journal %}<tr><td class="muted">{{ j.decided_at|d }}</td><td><a href="{{ url_for('name', ticker=j.ticker) }}">{{ j.ticker }}</a></td><td>{{ j.action }}</td><td>{{ j.decision }}</td>
+<td class="r">{{ j.price|money }}</td><td class="r">{{ j.shares or '' }}</td><td class="r {{ 'good' if j.ret and j.ret > 0 else 'bad' if j.ret }}">{{ j.ret|pct(true) }}</td><td class="r {{ 'good' if j.rel and j.rel > 0 else 'bad' if j.rel }}">{{ j.rel|pct(true) }}</td><td class="muted">{{ j.note or '' }}</td></tr>
+{% else %}<tr><td colspan="9" class="empty">Decisions you record appear here, scored against the S&amp;P over time.</td></tr>{% endfor %}</tbody></table></div>
+<p class="muted" style="font-size:12px">"Since" is the stock's move since the decision; for a skip, a good skip is a negative number. Reviewed in the Sunday digest at 6 and 12 months.</p>
+"""
+
+
+@app.route("/decide")
+def decide():
+    pf = portfolio()
+    al = q("""SELECT a.*, n.name, n.level, n.style, n.score, n.growth_score FROM v2_alerts a JOIN v2_names n USING (ticker)
+              WHERE NOT a.addressed AND a.kind = ANY(%s) AND a.fired_at > now() - interval '21 days'
+                AND COALESCE(a.sent_via, '') <> 'hold' ORDER BY a.fired_at DESC""", (list(ACTIONS),))
+    seen, items = set(), []
+    px = latest_prices(list({a["ticker"] for a in al}))
+    for a in al:
+        act, order = ACTIONS[a["kind"]]
+        if (a["ticker"], act) in seen:
+            continue
+        seen.add((a["ticker"], act))
+        th = q1("SELECT * FROM v2_theses WHERE ticker = %s ORDER BY version DESC LIMIT 1", (a["ticker"],)) or {}
+        val = th.get("valuation") or {}
+        style = name_style(a, th)[0]
+        price = px.get(a["ticker"])
+        five = [t for t in tam_calc(val.get("tam"), price) if t["years"] == 5]
+        buy_at = five[0]["zone"] if style == "growth" and five else num(th.get("entry_target"))
+        chk = q1("""SELECT kind, detail FROM v2_alerts WHERE ticker = %s AND kind IN ('Buy signal confirmed','Buy signal, thesis weakened')
+                    ORDER BY fired_at DESC LIMIT 1""", (a["ticker"],))
+        d = {**a, "action": act, "order": order, "when": a["fired_at"], "price": price, "style": style, "buy_at": buy_at,
+             "iv_base": num(val.get("iv_base")), "conviction": num(th.get("conviction")),
+             "check": (chk["detail"] if chk else None)}
+        if act in ("BUY", "ADD"):
+            d["size"] = size_for(a["ticker"], style, d["conviction"], pf, price)
+        if act == "TRIM":
+            cur_w = next((r["w"] for r in pf["rows"] if r["ticker"] == a["ticker"]), 0)
+            d["trim_note"] = (f"now {cur_w:.1%} of the portfolio; " +
+                              ("growth holding: trim a third, keep a core position while the thesis holds" if style == "growth"
+                               else "value holding: trim half above the high value, sell the rest if the value has not grown"))
+        items.append(d)
+    pend = q("""SELECT DISTINCT ON (t.ticker) t.ticker, t.created_at, t.verdict, t.conviction, n.name, n.level, n.style
+                FROM v2_theses t JOIN v2_names n USING (ticker)
+                WHERE t.approval = 'pending' AND n.level IN ('watchlist','book') ORDER BY t.ticker, t.version DESC""")
+    ppx = latest_prices([p["ticker"] for p in pend])
+    for p in pend:
+        if (p["ticker"], "APPROVE") in seen:
+            continue
+        th = q1("SELECT * FROM v2_theses WHERE ticker = %s ORDER BY version DESC LIMIT 1", (p["ticker"],)) or {}
+        val = th.get("valuation") or {}
+        sty = name_style(p, th)[0]
+        five = [t for t in tam_calc(val.get("tam"), ppx.get(p["ticker"])) if t["years"] == 5]
+        items.append({"ticker": p["ticker"], "name": p["name"], "level": p["level"], "style": p["style"], "action": "APPROVE",
+                      "order": 5, "when": p["created_at"], "kind": "Thesis waiting for approval",
+                      "detail": f"{p['verdict']} · conviction {num(p['conviction']) or 0:.0f}. Read it, comment, then approve",
+                      "price": ppx.get(p["ticker"]), "style": sty,
+                      "buy_at": five[0]["zone"] if sty == "growth" and five else num(th.get("entry_target")),
+                      "iv_base": num(val.get("iv_base")), "conviction": num(p["conviction"])})
+    items.sort(key=lambda d: (d["order"], -(d["when"].timestamp() if hasattr(d["when"], "timestamp") else 0)))
+    journal = q("SELECT * FROM v2_decisions ORDER BY decided_at DESC LIMIT 60")
+    jpx = latest_prices(list({j["ticker"] for j in journal}) + ["SPY"])
+    for j in journal:
+        p0, p1 = num(j["price"]), jpx.get(j["ticker"])
+        j["ret"] = (p1 / p0 - 1) if p0 and p1 else None
+        s0, s1 = num(j.get("spy_price")), jpx.get("SPY")
+        j["rel"] = (j["ret"] - (s1 / s0 - 1)) if j["ret"] is not None and s0 and s1 else None
+    return page("decide", "Decide", DECIDE_TPL, items=items, pf=pf, journal=journal, limits=LIMITS, sizing=SIZING)
+
+
+@app.post("/decide/record")
+def decide_record():
+    f = request.form
+    t, act, dec = f.get("ticker", "").upper(), f.get("action"), f.get("decision")
+    if dec == "later":
+        return back(url_for("decide"))
+    shares = num(f.get("shares"))
+    price = num(f.get("price"))
+    spy = latest_prices(["SPY"]).get("SPY")
+    x("""INSERT INTO v2_decisions (ticker, action, decision, price, shares, note, alert_id, spy_price)
+         VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""", (t, act, dec, price, shares, (f.get("note") or "").strip() or None,
+                                              num(f.get("alert_id")), spy))
+    if f.get("alert_id"):
+        x("UPDATE v2_alerts SET addressed = TRUE, action = %s, note = %s WHERE id = %s",
+          ("acted" if dec == "done" else "dismissed", f.get("note") or None, int(f["alert_id"])))
+    if dec == "done" and act == "APPROVE":
+        x("""UPDATE v2_theses SET approval = 'approved' WHERE ticker = %s
+             AND version = (SELECT MAX(version) FROM v2_theses WHERE ticker = %s)""", (t, t))
+    if dec == "done" and shares and price and act in ("BUY", "ADD", "TRIM", "EXIT?"):
+        p = q1("SELECT * FROM v2_positions WHERE ticker = %s AND exited IS NULL ORDER BY entered DESC LIMIT 1", (t,))
+        if act in ("BUY", "ADD"):
+            if p:
+                old_sh, old_c = num(p["shares"]) or 0, num(p["cost"]) or price
+                new_sh = old_sh + shares
+                x("UPDATE v2_positions SET shares = %s, cost = %s WHERE id = %s",
+                  (new_sh, (old_sh * old_c + shares * price) / new_sh, p["id"]))
+            else:
+                x("INSERT INTO v2_positions (ticker, entered, shares, cost, notes) VALUES (%s, CURRENT_DATE, %s, %s, 'Decide page')",
+                  (t, shares, price))
+            if (q1("SELECT level FROM v2_names WHERE ticker = %s", (t,)) or {}).get("level") != "book":
+                x("UPDATE v2_names SET level = 'book', status = 'holding', level_since = CURRENT_DATE WHERE ticker = %s", (t,))
+                x("INSERT INTO v2_comments (ticker, section, body) VALUES (%s, 'move', 'Moved → book (bought, Decide page)')", (t,))
+        elif p:
+            left = (num(p["shares"]) or 0) - shares
+            if left > 0:
+                x("UPDATE v2_positions SET shares = %s WHERE id = %s", (left, p["id"]))
+            else:
+                x("UPDATE v2_positions SET exited = CURRENT_DATE WHERE id = %s", (p["id"],))
+                x("UPDATE v2_names SET level = 'watchlist', status = 'exited', level_since = CURRENT_DATE WHERE ticker = %s", (t,))
+                x("INSERT INTO v2_comments (ticker, section, body) VALUES (%s, 'move', 'Moved book → watchlist (sold, Decide page)')", (t,))
+    flash(f"{t}: {act} recorded as {dec}.")
+    return back(url_for("decide"))
+
+
+@app.post("/decide/cash")
+def set_cash():
+    cash = num((request.form.get("cash") or "").replace(",", "")) or 0
+    x("""INSERT INTO v2_settings (key, value) VALUES ('portfolio', %s)
+         ON CONFLICT (key) DO UPDATE SET value = v2_settings.value || EXCLUDED.value""", (psycopg2.extras.Json({"cash": cash}),))
+    return back(url_for("decide"))
+
+
+# ------------------------------------------------------------------ Outlook: macro regime, what-if, calendar, week ahead
+OUTLOOK_TPL = r"""
+<style>.tiles{display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}
+.tile{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px}.tile span{font-size:12px;color:var(--mute)}
+.tile b{display:block;font-size:18px}.tile i{font-style:normal;font-size:12px}
+.cal td{vertical-align:top}.day{white-space:nowrap;font-weight:600}.k{font-size:11px;padding:1px 6px;border-radius:6px;background:var(--chip)}
+.up{color:var(--good)}.dn{color:var(--bad)}</style>
+<h1>Outlook</h1>
+<p class="sub">What could move your stocks next: the macro backdrop, how your names have reacted to rates, the dollar, oil and the market, and the event calendar.{% if m %} Updated {{ m.as_of }}.{% endif %}</p>
+{% if wa and wa.summary %}<h2>Week ahead <span class="muted" style="font-weight:400;font-size:13px">by Claude, {{ wa.as_of }}</span></h2>
+<div class="card"><p style="margin-top:0">{{ wa.summary }}</p>
+{% for e in wa.events or [] %}<div style="margin:6px 0"><b>{{ e.date }} · {{ e.title }}</b>{% if e.names %} <span class="muted">({{ e.names|join(', ') }})</span>{% endif %}<br>
+<span class="muted">{{ e.why }}</span>{% if e.playbook %}<br>→ {{ e.playbook }}{% endif %}</div>{% endfor %}</div>{% endif %}
+{% if m %}{% set r = m.regime %}
+<h2>Macro backdrop</h2>
+{% if m.flags %}<div class="flash">⚠ {{ m.flags|join(' · ') }}</div>{% endif %}
+<div class="tiles">
+<div class="tile"><span>S&amp;P 500</span><b>{{ '{:,.0f}'.format(r.spx) if r.spx }}</b><i class="{{ 'up' if (r.spx_vs_200d or 0) > 0 else 'dn' }}">{{ r.spx_vs_200d|pct(true) }} vs 200-day</i></div>
+<div class="tile"><span>VIX (fear gauge)</span><b>{{ '%.1f'|format(r.vix) if r.vix }}</b><i>{{ 'stressed' if r.vix and r.vix > 25 else 'calm' if r.vix and r.vix < 15 else 'normal' }}</i></div>
+<div class="tile"><span>US 10-year yield</span><b>{{ '%.2f%%'|format(r.y10) if r.y10 }}</b><i class="{{ 'dn' if (r.y10_chg_1m or 0) > 0 else 'up' }}">{{ ('%+.2fpt'|format(r.y10_chg_1m)) if r.y10_chg_1m is not none }} in a month</i></div>
+<div class="tile"><span>3-month bill</span><b>{{ '%.2f%%'|format(r.y3m) if r.y3m }}</b><i>proxy for the Fed rate</i></div>
+<div class="tile"><span>Curve (10y − 3m)</span><b>{{ ('%+.2fpt'|format(r.curve_10y_3m)) if r.curve_10y_3m is not none }}</b><i>{{ 'inverted: recession signal' if r.curve_10y_3m is not none and r.curve_10y_3m < 0 else 'normal' }}</i></div>
+<div class="tile"><span>Dollar index</span><b>{{ '%.1f'|format(r.usd) if r.usd }}</b><i>{{ r.usd_chg_1m|pct(true) }} in a month</i></div>
+<div class="tile"><span>Oil (WTI)</span><b>{{ r.oil|money }}</b><i>{{ r.oil_chg_1m|pct(true) }} in a month</i></div>
+<div class="tile"><span>High-yield bonds</span><b>{{ r.hyg_chg_1m|pct(true) }}</b><i>1 month; falling = credit stress</i></div>
+</div>
+
+<h2>What if…</h2>
+<p class="muted" style="margin-top:-6px">Estimated move for your Book from each shock, using how each name reacted over the past two years (weekly). A guide to exposure, not a forecast.</p>
+<div class="tablewrap"><table><thead><tr><th>Scenario</th><th class="r">Book</th><th>Hit hardest</th><th>Holds up best</th></tr></thead><tbody>
+{% for name, s in m.scenarios.items() %}<tr><td>{{ name }}</td><td class="r {{ 'good' if s.book and s.book > 0 else 'bad' if s.book }}"><b>{{ s.book|pct(true) }}</b></td>
+<td>{% for t, v in s.worst %}<a href="{{ url_for('name', ticker=t) }}">{{ t }}</a> {{ v|pct(true) }}{% if not loop.last %} · {% endif %}{% endfor %}</td>
+<td>{% for t, v in s.best %}<a href="{{ url_for('name', ticker=t) }}">{{ t }}</a> {{ v|pct(true) }}{% if not loop.last %} · {% endif %}{% endfor %}</td></tr>{% endfor %}</tbody></table></div>
+
+<h2>Sensitivity by name</h2>
+<div class="tablewrap"><table><thead><tr><th>Ticker</th><th></th><th class="r">Market beta</th><th class="r">10-year +1pt</th><th class="r">Dollar +5%</th><th class="r">Oil +20%</th><th class="r">Explained (R²)</th><th>Reads as</th></tr></thead><tbody>
+{% for t, s in sens %}<tr><td><a href="{{ url_for('name', ticker=t) }}"><b>{{ t }}</b></a></td><td class="muted">{{ s.level }}</td>
+<td class="r">{{ '%.2f'|format(s.beta_spx) }}</td><td class="r {{ 'bad' if s.per_y10_pt < -0.03 else 'good' if s.per_y10_pt > 0.03 }}">{{ s.per_y10_pt|pct(true) }}</td>
+<td class="r">{{ (s.per_usd * 0.05)|pct(true) }}</td><td class="r">{{ (s.per_oil * 0.2)|pct(true) }}</td><td class="r muted">{{ s.r2|pct }}</td>
+<td class="muted" style="font-size:12px">{{ 'High beta' if s.beta_spx > 1.5 else 'Defensive' if s.beta_spx < 0.7 else 'Market-like' }}{% if s.per_y10_pt < -0.05 %} · hurt by higher rates{% elif s.per_y10_pt > 0.05 %} · helped by higher rates{% endif %}</td></tr>{% endfor %}</tbody></table></div>
+{% else %}<p class="empty">The macro view fills after the next daily run.</p>{% endif %}
+
+<h2>Calendar · next 30 days</h2>
+<div class="tablewrap"><table class="cal"><thead><tr><th>Date</th><th>Time (ET)</th><th>What</th><th>Why it matters</th></tr></thead><tbody>
+{% for e in cal %}<tr><td class="day">{{ e.date.strftime('%a %d %b') }}</td><td class="muted">{{ e.time_et or '' }}</td>
+<td><span class="k">{{ e.kind }}</span> {% if e.ticker %}<a href="{{ url_for('name', ticker=e.ticker) }}"><b>{{ e.ticker }}</b></a> results <span class="muted">({{ e.level }})</span>{% else %}{{ e.title }}{% endif %}</td>
+<td class="muted" style="font-size:12px">{% set d = e.detail or {} %}{% if d.implied_move %}options imply ±{{ d.implied_move|pct }} · {% endif %}{% if d.eps_est %}EPS est {{ '%.2f'|format(d.eps_est) }} · {% endif %}{{ d.why or '' }}</td></tr>
+{% else %}<tr><td colspan="4" class="empty">The calendar fills after the next daily run.</td></tr>{% endfor %}</tbody></table></div>
+"""
+
+
+@app.route("/outlook")
+def outlook():
+    m = (q1("SELECT value FROM v2_settings WHERE key = 'macro'") or {}).get("value")
+    wa = (q1("SELECT value FROM v2_settings WHERE key = 'week_ahead'") or {}).get("value")
+    try:
+        cal = q("""SELECT c.*, n.level FROM v2_calendar c LEFT JOIN v2_names n USING (ticker)
+                   WHERE c.date BETWEEN CURRENT_DATE AND CURRENT_DATE + 30
+                     AND (c.kind <> 'earnings' OR n.level IN ('watchlist','book')) ORDER BY c.date, c.time_et NULLS LAST""")
+    except psycopg2.Error:
+        cal = []
+    sens = sorted(((m or {}).get("sens") or {}).items(), key=lambda kv: (kv[1].get("level") != "book", kv[0]))
+    return page("outlook", "Outlook", OUTLOOK_TPL, m=m, wa=wa, cal=cal, sens=sens)
 
 
 RESEARCH_TPL = r"""

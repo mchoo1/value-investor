@@ -584,6 +584,8 @@ else:
     cur.execute("""SELECT ticker FROM v2_names WHERE level IN ('watchlist','book') OR is_core
                      OR status IN ('candidate','deep_dive_requested') OR research_requested
                    UNION SELECT jsonb_array_elements(top10)->>'ticker' FROM v2_screen_runs
+                     WHERE run_date = (SELECT MAX(run_date) FROM v2_screen_runs)
+                   UNION SELECT jsonb_array_elements(COALESCE(growth_top10, '[]'::jsonb))->>'ticker' FROM v2_screen_runs
                      WHERE run_date = (SELECT MAX(run_date) FROM v2_screen_runs)""")
     tickers = sorted({r["ticker"] for r in cur.fetchall()})
 

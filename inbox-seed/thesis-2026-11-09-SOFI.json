@@ -42,7 +42,51 @@
     "type": "manual",
     "text": "Member growth below 20% for two quarters (now 35%)"
    }
-  ]
+  ],
+  "tam": {
+   "market": "US consumer lending, deposits and digital banking, plus financial technology services",
+   "tam_now_bn": 400,
+   "source": "ValueInvestor estimate: US consumer banking and lending revenue pool for prime and near-prime digital customers ~$400B (personal, student, home loans, deposits, cards).",
+   "why_share": "SoFi's ~$5B 2026 revenue is ~1.3% of the pool; members growing 35% a year support ~3% by 2031.",
+   "what_must_go_right": "Charge-offs stay under ~4%; net margin reaches ~22% (like a strong consumer bank); no large dilution beyond ~1.35B shares.",
+   "scenarios": [
+    {
+     "years": 5,
+     "segments": [
+      {
+       "name": "US consumer banking and lending",
+       "tam_bn": 470,
+       "share_pct": 3,
+       "net_margin_pct": 22
+      }
+     ],
+     "other_rev_bn": 0,
+     "other_margin_pct": 0,
+     "exit_pe": 16,
+     "shares_m": 1350,
+     "dr": 12,
+     "note": "Implies ~$14B revenue in 2031 (~23% a year)."
+    },
+    {
+     "years": 10,
+     "segments": [
+      {
+       "name": "US consumer banking and lending",
+       "tam_bn": 550,
+       "share_pct": 4.5,
+       "net_margin_pct": 23
+      }
+     ],
+     "other_rev_bn": 0,
+     "other_margin_pct": 0,
+     "exit_pe": 13,
+     "shares_m": 1400,
+     "dr": 12,
+     "note": ""
+    }
+   ],
+   "as_of": "2026-11-09"
+  }
  },
  "sections": {
   "industry_map": "SoFi is a national bank and fintech: personal, student and home loans; deposits and checking; investing and crypto; a loan platform business that originates loans for third parties; and Galileo/Technisys technology serving other fintechs and banks.",

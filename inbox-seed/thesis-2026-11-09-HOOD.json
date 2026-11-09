@@ -42,7 +42,51 @@
     "type": "manual",
     "text": "Funded customers decline for two quarters"
    }
-  ]
+  ],
+  "tam": {
+   "market": "US and international retail brokerage, wealth, crypto, prediction markets and consumer banking",
+   "tam_now_bn": 170,
+   "source": "ValueInvestor estimate: US retail brokerage and wealth revenue pool ~$150B (Schwab, Fidelity, Vanguard, IBKR, Coinbase revenues) plus ~$20B international and event contracts.",
+   "why_share": "Robinhood revenue ~$5.6B annualised is ~3% of the pool; assets $396B (+19%) and net deposits $71B a year support ~7% by 2031.",
+   "what_must_go_right": "Asset gathering continues at ~20% a year; prediction markets survive regulation; net margin ~38%.",
+   "scenarios": [
+    {
+     "years": 5,
+     "segments": [
+      {
+       "name": "Retail brokerage, wealth and banking",
+       "tam_bn": 230,
+       "share_pct": 7,
+       "net_margin_pct": 38
+      }
+     ],
+     "other_rev_bn": 0,
+     "other_margin_pct": 0,
+     "exit_pe": 22,
+     "shares_m": 900,
+     "dr": 12,
+     "note": "Implies ~$16B revenue in 2031 (~23% a year)."
+    },
+    {
+     "years": 10,
+     "segments": [
+      {
+       "name": "Retail brokerage, wealth and banking",
+       "tam_bn": 320,
+       "share_pct": 9,
+       "net_margin_pct": 38
+      }
+     ],
+     "other_rev_bn": 0,
+     "other_margin_pct": 0,
+     "exit_pe": 18,
+     "shares_m": 920,
+     "dr": 12,
+     "note": ""
+    }
+   ],
+   "as_of": "2026-11-09"
+  }
  },
  "sections": {
   "industry_map": "Robinhood is a retail brokerage and financial app: stock and options trading, crypto (plus Bitstamp exchange), prediction markets (event contracts), Gold subscription, cash sweep, credit card, retirement and banking.",

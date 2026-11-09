@@ -72,7 +72,7 @@ def alerts(conn, with_health=False):
             parts.append("⚙️ <i>Data issues today: " + esc(", ".join(f"{k.replace('_', ' ')} {len(v)}" for k, v in fails.items()))
                          + ". Alerts may be incomplete.</i>")
     if parts and (high or now_ or (with_health and parts)):
-        ok = telegram("\n\n".join(parts) + f'\n\n<a href="{APP_URL}/book">Open the Book</a>')
+        ok = telegram("\n\n".join(parts) + f'\n\n<a href="{APP_URL}/decide">Decide</a> · <a href="{APP_URL}/book">Book</a>')
         if not ok:
             print("Telegram not delivered; alerts stay queued.")
             return
@@ -89,23 +89,41 @@ def screen(conn):
     if not run:
         print("No screen run yet.")
         return
-    st, top = run.get("stages") or {}, run.get("top10") or []
+    st, top, gtop = run.get("stages") or {}, run.get("top10") or [], run.get("growth_top10") or []
     names = {}
-    if top:
-        cur.execute("SELECT ticker, name FROM v2_names WHERE ticker = ANY(%s)", ([t["ticker"] for t in top],))
+    allt = [t["ticker"] for t in top + gtop]
+    if allt:
+        cur.execute("SELECT ticker, name FROM v2_names WHERE ticker = ANY(%s)", (allt,))
         names = {r["ticker"]: r["name"] for r in cur.fetchall()}
     label = {"quant_value": "value", "fallen_quality": "fallen quality", "sharp_drop": "sharp drop",
-             "insider": "insiders", "smart_money": "smart money", "theme": "theme"}
-    rows = [f"{i}. {link(t['ticker'])} {esc(cname(names.get(t['ticker']))[:30])} · {t['score']:.0f} · "
-            + ", ".join(label.get(k, k) for k, v in (t.get("funnels") or {}).items() if v)
-            + (" ✅" if t.get("promote") else "") for i, t in enumerate(top, 1)]
+             "fast_growth": "fast growth", "accelerating": "accelerating", "smart_money": "smart money",
+             "share_taker": "share taker", "momentum_leader": "momentum",
+             "estimates_rising": "estimates up", "insider_buying": "insiders buying", "activist": "activist 13D"}
+
+    def rows(lst, growth=False):
+        out = []
+        for i, t in enumerate(lst, 1):
+            line_ = (f"{i}. {link(t['ticker'])} {esc(cname(names.get(t['ticker']))[:28])} · {t['score']:.0f} · "
+                     + ", ".join(label.get(k, k) for k, v in (t.get("funnels") or {}).items() if v)
+                     + (" ✅" if t.get("promote") else ""))
+            if growth and t.get("parts"):
+                line_ += f" · moat {t['parts'].get('moat', 0):.0f}"
+            if growth and t.get("flags"):
+                line_ += f"\n    ⚠ {esc(t['flags'][0])}"
+            out.append(line_)
+        return "\n".join(out)
     b = (run.get("market") or {}).get("buffett")
+    ts = (run.get("market") or {}).get("theme_strength_6m") or {}
+    tline = " · ".join(f"{k.split(' and ')[0]} {v:+.0%}" for k, v in sorted(ts.items(), key=lambda kv: -(kv[1] or -9)) if v is not None)
     msg = (f"<b>Weekly screen · {run['run_date']:%d %b}</b>\n"
-           f"{st.get('listings', '?'):,} listings → {st.get('with_fundamentals', '?'):,} scored → "
-           f"{st.get('any_funnel', '?')} hit a funnel → {st.get('cleared_bar', 0)} cleared the deep-dive bar ✅\n\n"
-           + "\n".join(rows)
-           + (f"\n\nBuffett indicator {b['ratio_est']:.0%} of GDP · {b['zone']}" if b else "")
-           + f"\n\nReason cards arrive Sunday morning, deep dives Monday morning.\n<a href=\"{APP_URL}/screen\">Open the Screen</a>")
+           f"<b>Value</b> ($2B+): {st.get('us_2b', '?'):,} → {st.get('any_funnel', '?')} hit a funnel → "
+           f"{st.get('cleared_bar', 0)} deep dive(s) ✅\n" + rows(top)
+           + f"\n\n<b>Growth</b> ($1B+): {st.get('us_1b', '?'):,} → {st.get('growth_any_funnel', '?')} hit a funnel → "
+           f"{st.get('growth_cleared_bar', 0)} deep dive(s) ✅\n" + (rows(gtop, True) or "none yet")
+           + (f"\n\nThemes vs S&amp;P, 6 months: {esc(tline)}" if tline else "")
+           + (f"\nBuffett indicator {b['ratio_est']:.0%} of GDP · {b['zone']}" if b else "")
+           + f"\n\nReason and growth cards arrive Sunday morning, deep dives (2 value + 2 growth) Monday morning."
+           + f'\n<a href="{APP_URL}/screen">Value screen</a> · <a href="{APP_URL}/screen?track=growth">Growth screen</a>')
     print("Screen summary sent." if telegram(msg) else "Screen summary not delivered.")
 
 
@@ -117,6 +135,22 @@ def digest(conn):
     b_ = counts.get('book', 0)
     out.append(f"Book {b_} name{'' if b_ == 1 else 's'} · Watchlist {counts.get('watchlist', 0)}/50")
 
+    cur.execute("SELECT value FROM v2_settings WHERE key = 'week_ahead'")
+    wa = (cur.fetchone() or {}).get("value") or {}
+    cur.execute("""SELECT c.* FROM v2_calendar c LEFT JOIN v2_names n USING (ticker)
+                   WHERE c.date BETWEEN CURRENT_DATE AND CURRENT_DATE + 7
+                     AND (c.kind <> 'earnings' OR n.level IN ('watchlist','book')) ORDER BY c.date, c.time_et""")
+    evs = cur.fetchall()
+    if wa.get("summary") or evs:
+        lines = [esc(wa["summary"])] if wa.get("summary") else []
+        for e in evs[:14]:
+            im = (e["detail"] or {}).get("implied_move")
+            lines.append(f"• {e['date']:%a %d} {link(e['ticker']) if e['ticker'] else ''} {esc(e['title'] if not e['ticker'] else 'results')}"
+                         + (f" (±{im:.0%} implied)" if im else ""))
+        for ev in (wa.get("events") or [])[:5]:
+            if ev.get("playbook"):
+                lines.append(f"→ {esc(ev.get('title', ''))}: {esc(ev['playbook'])}")
+        out.append("<b>Week ahead</b>\n" + "\n".join(lines) + f'\n<a href="{APP_URL}/outlook">Outlook</a>')
     cur.execute("SELECT ticker, health, health_why FROM v2_names WHERE level = 'book' ORDER BY ticker")
     book = cur.fetchall()
     if book:
@@ -153,6 +187,22 @@ def digest(conn):
     pend = [r["ticker"] for r in cur.fetchall()]
     if pend:
         out.append("<b>Waiting for your approval</b>\n" + ", ".join(link(t) for t in sorted(set(pend))))
+    # decision journal: decisions reaching 6 or 12 months this week, scored vs the S&P
+    cur.execute("""SELECT d.*, (SELECT close FROM v2_prices WHERE ticker = d.ticker ORDER BY date DESC LIMIT 1) AS now_px,
+                          (SELECT close FROM v2_prices WHERE ticker = 'SPY' ORDER BY date DESC LIMIT 1) AS spy_now
+                   FROM v2_decisions d
+                   WHERE d.decided_at::date BETWEEN CURRENT_DATE - 189 AND CURRENT_DATE - 182
+                      OR d.decided_at::date BETWEEN CURRENT_DATE - 372 AND CURRENT_DATE - 365""")
+    rev = []
+    for d in cur.fetchall():
+        if d["price"] and d["now_px"]:
+            r = float(d["now_px"]) / float(d["price"]) - 1
+            rel = (r - (float(d["spy_now"]) / float(d["spy_price"]) - 1)) if d["spy_price"] and d["spy_now"] else None
+            good = (rel or r) > 0 if d["decision"] == "done" and d["action"] in ("BUY", "ADD") else (rel or r) < 0
+            rev.append(f"{'✅' if good else '❌'} {link(d['ticker'])} {esc(d['action'])} {esc(d['decision'])} "
+                       f"{d['decided_at']:%d %b %Y}: {r:+.0%}" + (f" ({rel:+.0%} vs S&amp;P)" if rel is not None else ""))
+    if rev:
+        out.append("<b>Decision review (6 and 12 months)</b>\n" + "\n".join(rev))
     if counts.get("watchlist", 0) >= 50:
         out.append("⚠️ Watchlist is full. Removal suggestions are on the Watchlist page.")
     cur.execute("SELECT value FROM v2_settings WHERE key = 'data_health'")
@@ -160,7 +210,7 @@ def digest(conn):
     fails = ((h or {}).get("value") or {}).get("failures") or {}
     if fails:
         out.append("⚙️ <i>Data issues on the last run: " + esc(", ".join(f"{k.replace('_', ' ')} {len(v)}" for k, v in fails.items())) + "</i>")
-    out.append(f'<a href="{APP_URL}/watchlist">Watchlist</a> · <a href="{APP_URL}/book">Book</a> · <a href="{APP_URL}/screen">Screen</a>')
+    out.append(f'<a href="{APP_URL}/decide">Decide</a> · <a href="{APP_URL}/watchlist">Watchlist</a> · <a href="{APP_URL}/book">Book</a> · <a href="{APP_URL}/screen">Screen</a>')
     print("Digest sent." if telegram("\n\n".join(out)) else "Digest not delivered.")
 
 

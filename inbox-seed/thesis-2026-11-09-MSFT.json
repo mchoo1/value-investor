@@ -42,7 +42,63 @@
     "type": "manual",
     "text": "Free cash flow falls below $50B a year on a trailing basis"
    }
-  ]
+  ],
+  "tam": {
+   "market": "Cloud infrastructure, productivity and business software, AI copilots/agents, security, gaming",
+   "tam_now_bn": 1500,
+   "source": "Cloud infrastructure (IaaS/PaaS incl. AI) ~$600B annualised in 2026 from hyperscaler run-rates (AWS $184B, Google Cloud ~$123B, Azure); ValueInvestor estimate $1.8T by 2031 (~25% a year) and $3.2T by 2036 (~12% a year after). Enterprise application and productivity software ~$900B (ValueInvestor estimate from Gartner software spend ~$1.2T in 2026).",
+   "why_share": "Azure ~22% of cloud and gaining (48% growth vs AWS 39%); we assume 25% by 2031. Microsoft already takes ~13% of enterprise software spend through Office, Dynamics, security and GitHub; we assume 15% as Copilot lifts ARPU.",
+   "what_must_go_right": "Azure keeps out-growing the market; Copilot/agents reach mass paid adoption; net margin stays ~36%.",
+   "scenarios": [
+    {
+     "years": 5,
+     "segments": [
+      {
+       "name": "Cloud (Azure)",
+       "tam_bn": 1800,
+       "share_pct": 25,
+       "net_margin_pct": 32
+      },
+      {
+       "name": "Software, AI and security",
+       "tam_bn": 1600,
+       "share_pct": 15,
+       "net_margin_pct": 40
+      }
+     ],
+     "other_rev_bn": 0,
+     "other_margin_pct": 0,
+     "exit_pe": 28,
+     "shares_m": 7350,
+     "dr": 9,
+     "note": "Implies revenue ~$690B in 2031 (~15% a year from ~$350B)."
+    },
+    {
+     "years": 10,
+     "segments": [
+      {
+       "name": "Cloud (Azure)",
+       "tam_bn": 3200,
+       "share_pct": 24,
+       "net_margin_pct": 32
+      },
+      {
+       "name": "Software, AI and security",
+       "tam_bn": 2600,
+       "share_pct": 15,
+       "net_margin_pct": 40
+      }
+     ],
+     "other_rev_bn": 0,
+     "other_margin_pct": 0,
+     "exit_pe": 22,
+     "shares_m": 7200,
+     "dr": 9,
+     "note": ""
+    }
+   ],
+   "as_of": "2026-11-09"
+  }
  },
  "sections": {
   "industry_map": "Microsoft spans cloud infrastructure (Azure, #2), productivity software (Microsoft 365, near-monopoly), developer tools (GitHub), business apps (Dynamics), security, gaming (Xbox/Activision) and Windows. AI (Copilot and the OpenAI partnership) runs through all of them.",

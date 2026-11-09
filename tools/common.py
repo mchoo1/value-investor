@@ -5,6 +5,25 @@ import requests
 import psycopg2, psycopg2.extras
 
 TODAY = dt.date.today()
+# Nasdaq industry text -> theme (lower-case substring match). Used by the screen's growth funnel.
+THEME_KEYWORDS = {
+    "AI and energy infrastructure": ["semiconductor", "computer manufacturing", "electric utilities", "power generation",
+                                     "electrical products", "edp services", "computer communications", "prepackaged software",
+                                     "programming data processing", "electronic components"],
+    "Automation and robotics": ["industrial machinery", "industrial specialties", "electronic test", "auto parts"],
+    "Healthcare": ["biotechnology", "medical", "pharmaceutical", "hospital", "health"],
+    "Space and satellites": ["aerospace", "military/government", "telecommunications equipment"],
+    "Digital finance": ["investment bankers", "finance: consumer services", "business services", "finance companies"],
+    "Quantum computing": ["quantum"],
+    "Critical resources": ["metal mining", "precious metals", "mining", "uranium", "steel", "aluminum", "copper"],
+}
+
+
+def theme_of(industry):
+    s = (industry or "").lower()
+    return [t for t, kws in THEME_KEYWORDS.items() if any(k in s for k in kws)]
+
+
 APP_URL = os.environ.get("APP_URL", "https://value-investor-weld.vercel.app")
 
 # Drive folders (ValueInvestor/v2-outbox and v2-inbox); the service account has edit access
@@ -38,6 +57,15 @@ def ensure_schema(cur):
         loaded_at TIMESTAMPTZ DEFAULT now(), result TEXT, PRIMARY KEY (file_id, modified));
       CREATE TABLE IF NOT EXISTS v2_settings (key TEXT PRIMARY KEY, value JSONB, updated_at TIMESTAMPTZ DEFAULT now());
       ALTER TABLE v2_names ADD COLUMN IF NOT EXISTS level_since DATE;
+      ALTER TABLE v2_names ADD COLUMN IF NOT EXISTS growth_score NUMERIC;
+      ALTER TABLE v2_names ADD COLUMN IF NOT EXISTS style TEXT;
+      ALTER TABLE v2_names ADD COLUMN IF NOT EXISTS refresh_due DATE;
+      CREATE TABLE IF NOT EXISTS v2_decisions (id SERIAL PRIMARY KEY, ticker TEXT NOT NULL, decided_at TIMESTAMPTZ DEFAULT now(),
+          action TEXT, decision TEXT, price NUMERIC, shares NUMERIC, note TEXT, alert_id INT, spy_price NUMERIC);
+      CREATE TABLE IF NOT EXISTS v2_calendar (id SERIAL PRIMARY KEY, date DATE NOT NULL, time_et TEXT, kind TEXT, ticker TEXT,
+          title TEXT NOT NULL, detail JSONB, source TEXT, UNIQUE (date, kind, title));
+      ALTER TABLE v2_screen_runs ADD COLUMN IF NOT EXISTS growth_top10 JSONB;
+      ALTER TABLE v2_screen_scores ADD COLUMN IF NOT EXISTS growth_score NUMERIC;
       ALTER TABLE v2_names ADD COLUMN IF NOT EXISTS health TEXT;
       ALTER TABLE v2_names ADD COLUMN IF NOT EXISTS health_why TEXT;
       ALTER TABLE v2_names ADD COLUMN IF NOT EXISTS research_requested BOOLEAN DEFAULT FALSE;

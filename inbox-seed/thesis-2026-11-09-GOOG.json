@@ -43,7 +43,63 @@
     "type": "manual",
     "text": "2027 capex above $300B without Cloud growth staying above 50%"
    }
-  ]
+  ],
+  "tam": {
+   "market": "Search and digital advertising, cloud infrastructure, subscriptions and devices",
+   "tam_now_bn": 1600,
+   "source": "Global digital advertising ~$1.0T in 2026 (Google ~$300B and Meta ~$258B annualised alone), ValueInvestor estimate ~$1.5T by 2031 (~8-9% a year) and ~$2.2T by 2036 (in line with the ~$2.19T-by-2035 forecast reported by Communicate Online). Cloud infrastructure (IaaS/PaaS incl. AI) ~$600B annualised in 2026 from hyperscaler run-rates (AWS $184B, Google Cloud ~$123B, Azure); ValueInvestor estimate $1.8T by 2031 (~25% a year) and $3.2T by 2036 (~12% a year after).",
+   "why_share": "Google takes ~30% of global digital ads today (~$300B of ~$1T) (Services ~$385B annualised incl. subscriptions); we assume 28% then 26% as AI chat takes some share. Google Cloud ~13% of cloud, growing 103%; we assume 15% by 2031. Subscriptions/devices kept as 'other'.",
+   "what_must_go_right": "Search monetisation survives the shift to AI answers; Cloud margins rise to ~25% net; capex intensity falls after 2028.",
+   "scenarios": [
+    {
+     "years": 5,
+     "segments": [
+      {
+       "name": "Advertising",
+       "tam_bn": 1500,
+       "share_pct": 28,
+       "net_margin_pct": 33
+      },
+      {
+       "name": "Cloud",
+       "tam_bn": 1800,
+       "share_pct": 15,
+       "net_margin_pct": 25
+      }
+     ],
+     "other_rev_bn": 90,
+     "other_margin_pct": 20,
+     "exit_pe": 22,
+     "shares_m": 11800,
+     "dr": 9.5,
+     "note": "Ads ~$420B and Cloud ~$270B in 2031."
+    },
+    {
+     "years": 10,
+     "segments": [
+      {
+       "name": "Advertising",
+       "tam_bn": 2200,
+       "share_pct": 26,
+       "net_margin_pct": 32
+      },
+      {
+       "name": "Cloud",
+       "tam_bn": 3200,
+       "share_pct": 15,
+       "net_margin_pct": 27
+      }
+     ],
+     "other_rev_bn": 150,
+     "other_margin_pct": 20,
+     "exit_pe": 18,
+     "shares_m": 11300,
+     "dr": 9.5,
+     "note": "Waymo, TPUs-as-a-product and quantum are excluded (upside)."
+    }
+   ],
+   "as_of": "2026-11-09"
+  }
  },
  "sections": {
   "industry_map": "Alphabet competes in search and search ads (Google, ~90% share), video (YouTube), cloud (Google Cloud, #3), AI models (Gemini, DeepMind), devices and Android, plus Other Bets (Waymo, quantum). Profits are mostly search ads; Cloud is now the growth engine.",

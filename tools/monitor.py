@@ -91,6 +91,132 @@ def entry_of(tk, theses, research):
     return None, None
 
 
+# macro series (Yahoo): S&P, VIX, 3-month / 5-year / 10-year yields, dollar index, oil, gold, high-yield and long Treasuries
+MACRO_SYMS = ["^GSPC", "SPY", "^VIX", "^IRX", "^FVX", "^TNX", "DX-Y.NYB", "CL=F", "GC=F", "HYG", "TLT"]
+LEAD_SCORE, LEAD_DROP = 75, 0.12   # screen names scoring 75+ that fall 12%+ after the screen get a heads-up
+GROWTH_HURDLE = 0.15          # growth buy zone: price where the 5-year TAM case returns 15%+ a year
+
+
+def growth_zone(th):
+    """Price at or below which the thesis's 5-year TAM target returns GROWTH_HURDLE a year. None without a TAM target."""
+    tam = ((th or {}).get("valuation") or {}).get("tam") or {}
+    for sc in tam.get("scenarios") or []:
+        try:
+            if int(sc["years"]) != 5:
+                continue
+            ni = sum(float(g["tam_bn"]) * float(g["share_pct"]) / 100 * float(g["net_margin_pct"]) / 100
+                     for g in sc.get("segments") or [])
+            ni += float(sc.get("other_rev_bn") or 0) * float(sc.get("other_margin_pct") or 0) / 100
+            then = ni * float(sc["exit_pe"]) * 1000 / float(sc["shares_m"])
+            return then / (1 + GROWTH_HURDLE) ** 5, then
+        except (KeyError, TypeError, ValueError, ZeroDivisionError):
+            return None, None
+    return None, None
+
+
+TRIM_HURDLE = 0.05            # growth names: price where the 5-year TAM case returns under 5% a year = priced beyond the case
+
+
+def style_of(n, th):
+    """'value' or 'growth'. Set per name (Book import / stock page); otherwise growth if the thesis has a TAM
+    target and the name scores higher on the growth track."""
+    if n.get("style") in ("value", "growth"):
+        return n["style"]
+    has_tam = bool(((th or {}).get("valuation") or {}).get("tam"))
+    return "growth" if has_tam and (num(n.get("growth_score")) or 0) > (num(n.get("score")) or 0) else "value"
+
+
+def book_zones(n, th, research):
+    """Add and trim levels for a Book name, by style.
+    value : add at the entry target; review at Claude's base value; trim above the high value.
+    growth: add in the growth zone (5-year TAM case returns 15%+ a year); trim only when the price is beyond the
+            5-year case (returns under 5% a year). Growth names are held for years; valuation alone rarely ends them."""
+    style = style_of(n, th)
+    val = (th or {}).get("valuation") or {}
+    if style == "growth":
+        zone, then = growth_zone(th)
+        trim = then / (1 + TRIM_HURDLE) ** 5 if then else None
+        return style, {"add": zone, "review": None, "trim": trim, "then": then}
+    entry, _ = entry_of(n["ticker"], {n["ticker"]: th} if th else {}, research)
+    return style, {"add": entry, "review": num(val.get("iv_base")), "trim": num(val.get("iv_high")), "then": None}
+
+
+SCENARIOS = {   # shocks: S&P %, 10-year yield in percentage points, dollar index %, oil %
+    "Rates up: 10-year +0.5pt": {"spx": 0, "y10": 0.5, "usd": 0, "oil": 0},
+    "Rates down: 10-year -0.5pt": {"spx": 0, "y10": -0.5, "usd": 0, "oil": 0},
+    "Market -10%": {"spx": -0.10, "y10": 0, "usd": 0, "oil": 0},
+    "Risk-off: S&P -10%, 10-year -0.3pt, dollar +3%": {"spx": -0.10, "y10": -0.3, "usd": 0.03, "oil": -0.10},
+    "Dollar +5%": {"spx": 0, "y10": 0, "usd": 0.05, "oil": 0},
+    "Oil +20%": {"spx": 0, "y10": 0, "usd": 0, "oil": 0.20},
+    "Reflation: 10-year +0.5pt, oil +20%, S&P +5%": {"spx": 0.05, "y10": 0.5, "usd": -0.02, "oil": 0.20},
+}
+
+
+def macro_view(cur, closes, names):
+    """Regime readings plus each name's weekly sensitivity (2 years) to the S&P, the 10-year yield, the dollar and oil,
+    and what common macro shocks would do to the Book. Stored in v2_settings['macro']."""
+    import numpy as np
+    wk = lambda s: s.resample("W-FRI").last().dropna()
+    need = {"spx": "^GSPC", "y10": "^TNX", "usd": "DX-Y.NYB", "oil": "CL=F"}
+    if any(v not in closes for v in need.values()):
+        return None
+    X = pd.concat({k: wk(closes[v]) for k, v in need.items()}, axis=1).dropna()
+    dX = pd.DataFrame({"spx": X["spx"].pct_change(), "y10": X["y10"].diff(), "usd": X["usd"].pct_change(),
+                       "oil": X["oil"].pct_change()}).dropna()
+    sens = {}
+    for n in names:
+        c = closes.get(n["ticker"])
+        if c is None:
+            continue
+        y = wk(c).pct_change().dropna()
+        d = dX.join(y.rename("y"), how="inner").dropna()
+        if len(d) < 40:
+            continue
+        A = np.column_stack([np.ones(len(d)), d[["spx", "y10", "usd", "oil"]].values])
+        b, *_ = np.linalg.lstsq(A, d["y"].values, rcond=None)
+        pred = A @ b
+        r2 = 1 - ((d["y"] - pred) ** 2).sum() / ((d["y"] - d["y"].mean()) ** 2).sum()
+        sens[n["ticker"]] = {"beta_spx": float(b[1]), "per_y10_pt": float(b[2]), "per_usd": float(b[3]), "per_oil": float(b[4]),
+                             "r2": float(r2), "level": n["level"], "weeks": len(d)}
+    # Book weights from positions
+    cur.execute("SELECT DISTINCT ON (ticker) ticker, shares FROM v2_positions WHERE exited IS NULL ORDER BY ticker, entered DESC")
+    mv = {r["ticker"]: float(r["shares"] or 0) * float(closes[r["ticker"]].iloc[-1])
+          for r in cur.fetchall() if r["ticker"] in closes and r["shares"]}
+    tot = sum(mv.values()) or 1
+    scen = {}
+    for name, sh in SCENARIOS.items():
+        by = {t: s["beta_spx"] * sh["spx"] + s["per_y10_pt"] * sh["y10"] + s["per_usd"] * sh["usd"] + s["per_oil"] * sh["oil"]
+              for t, s in sens.items()}
+        book = sum(by.get(t, 0) * v for t, v in mv.items()) / tot if mv else None
+        held = sorted([(t, v) for t, v in by.items() if t in mv], key=lambda kv: kv[1])
+        scen[name] = {"book": book, "worst": held[:3], "best": held[-3:][::-1], "by_name": by}
+    last = lambda s, n=0: float(closes[s].iloc[-1 - n]) if s in closes and len(closes[s]) > n else None
+    ma200 = float(closes["^GSPC"].tail(200).mean()) if "^GSPC" in closes else None
+    regime = {
+        "spx": last("^GSPC"), "spx_vs_200d": (last("^GSPC") / ma200 - 1) if ma200 else None,
+        "vix": last("^VIX"), "y10": last("^TNX"), "y10_chg_1m": (last("^TNX") - last("^TNX", 21)) if last("^TNX", 21) else None,
+        "y3m": last("^IRX"), "y5": last("^FVX"), "curve_10y_3m": (last("^TNX") - last("^IRX")) if last("^IRX") else None,
+        "usd": last("DX-Y.NYB"), "usd_chg_1m": (last("DX-Y.NYB") / last("DX-Y.NYB", 21) - 1) if last("DX-Y.NYB", 21) else None,
+        "oil": last("CL=F"), "oil_chg_1m": (last("CL=F") / last("CL=F", 21) - 1) if last("CL=F", 21) else None,
+        "gold": last("GC=F"), "hyg_chg_1m": (last("HYG") / last("HYG", 21) - 1) if last("HYG", 21) else None,
+    }
+    flags = []
+    if regime["curve_10y_3m"] is not None and regime["curve_10y_3m"] < 0:
+        flags.append("Yield curve inverted (10-year below 3-month): historically a recession warning")
+    if regime["hyg_chg_1m"] is not None and regime["hyg_chg_1m"] < -0.02:
+        flags.append("High-yield bonds down 2%+ in a month: credit stress building")
+    if regime["vix"] and regime["vix"] > 25:
+        flags.append("VIX above 25: stressed market")
+    if regime["spx_vs_200d"] is not None and regime["spx_vs_200d"] < 0:
+        flags.append("S&P below its 200-day average: downtrend")
+    if regime["y10_chg_1m"] is not None and abs(regime["y10_chg_1m"]) >= 0.4:
+        flags.append(f"10-year yield {'up' if regime['y10_chg_1m'] > 0 else 'down'} {abs(regime['y10_chg_1m']):.2f}pt in a month")
+    out = {"as_of": str(TODAY), "regime": regime, "flags": flags, "sens": sens, "scenarios": scen}
+    cur.execute("""INSERT INTO v2_settings (key, value, updated_at) VALUES ('macro', %s, now())
+                   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()""", (J(out),))
+    return out
+
+
 # ------------------------------------------------------------------ daily
 def daily(conn):
     cur = conn.cursor()
@@ -101,9 +227,21 @@ def daily(conn):
     created = 0
     rerun_screen = False
 
+    # ---- screen leads: the best Screen names (either track), so a sharp drop is caught before they reach the Watchlist
+    cur.execute("""SELECT s.ticker, s.score, s.growth_score, (s.metrics->'px'->>'price')::numeric AS screen_price, s.run_date
+                   FROM v2_screen_scores s JOIN v2_names n USING (ticker)
+                   WHERE s.run_date = (SELECT MAX(run_date) FROM v2_screen_scores) AND n.level = 'screen'
+                     AND COALESCE(n.status, '') <> 'rejected' AND (s.score >= %s OR s.growth_score >= %s)
+                   ORDER BY GREATEST(COALESCE(s.score, 0), COALESCE(s.growth_score, 0)) DESC LIMIT 60""", (LEAD_SCORE, LEAD_SCORE))
+    leads = [dict(r) for r in cur.fetchall()]
+    cur.execute("""SELECT n.ticker, t.entry_target, t.valuation FROM v2_names n
+                   JOIN LATERAL (SELECT * FROM v2_theses WHERE ticker = n.ticker ORDER BY version DESC LIMIT 1) t ON TRUE
+                   WHERE n.level = 'screen'""")
+    screen_theses = {r["ticker"]: dict(r) for r in cur.fetchall()}
+
     # ---- prices
-    syms = tickers + etfs + ["^GSPC", "^VIX", "^TNX"]
-    df = yf.download(syms, period="1y", interval="1d", group_by="ticker", auto_adjust=True, threads=True, progress=False)
+    syms = sorted(set(tickers + etfs + [l["ticker"] for l in leads] + list(screen_theses) + MACRO_SYMS))
+    df = yf.download(syms, period="2y", interval="1d", group_by="ticker", auto_adjust=True, threads=True, progress=False)
     closes = {}
     for s in syms:
         try:
@@ -113,7 +251,7 @@ def daily(conn):
         except KeyError:
             pass
     health_log["prices_missing"] = [t for t in tickers if t not in closes]
-    for t in tickers:
+    for t in sorted(set(tickers) | {l["ticker"] for l in leads} | set(MACRO_SYMS)):
         c = closes.get(t)
         if c is None:
             continue
@@ -135,6 +273,68 @@ def daily(conn):
             created += alert(cur, "MARKET", "Rates move", "medium",
                              f"US 10-year yield {'up' if bp > 0 else 'down'} {abs(bp):.0f}bp in 5 days to "
                              f"{float(tnx.iloc[-1]):.2f}%", f"tnx-{TODAY}")
+
+    # ---- screen leads on sale, and Screen names with a thesis (passed, rejected or sold) back at their buy level
+    for l in leads:
+        c = closes.get(l["ticker"])
+        if c is None or not l["screen_price"]:
+            continue
+        p, drop = float(c.iloc[-1]), 1 - float(c.iloc[-1]) / float(l["screen_price"])
+        if drop >= LEAD_DROP:
+            track = "growth" if (num(l["growth_score"]) or 0) > (num(l["score"]) or 0) else "value"
+            sc = max(num(l["growth_score"]) or 0, num(l["score"]) or 0)
+            created += alert(cur, l["ticker"], "Screen idea on sale", "medium",
+                             f"{track.title()} score {sc:.0f}; price ${p:,.2f} is {drop:.0%} below the screen price of "
+                             f"{l['run_date']:%d %b}. Not on your Watchlist yet: + Watch or request a deep dive",
+                             f"lead-{l['ticker']}-{week_key()}", action="Consider a deep dive")
+    for tk, t in screen_theses.items():
+        c = closes.get(tk)
+        if c is None:
+            continue
+        p = float(c.iloc[-1])
+        entry = num(t["entry_target"])
+        zone, _ = growth_zone(t)
+        hit = (entry and p <= entry and "entry target") or (zone and p <= zone and "growth zone")
+        if hit:
+            created += alert(cur, tk, "Old idea at buy level", "medium",
+                             f"${p:,.2f} is at or below its {hit} (${(entry if hit == 'entry target' else zone):,.2f}) "
+                             "from an earlier thesis. It is on the Screen, not the Watchlist", f"old-{tk}-{week_key()}",
+                             action="Re-check the thesis")
+
+    # ---- macro regime and sensitivities; warn when a plausible shock would hit the Book hard
+    try:
+        mv_ = macro_view(cur, closes, names)
+        if mv_:
+            for nm, sc in mv_["scenarios"].items():
+                if sc["book"] is not None and sc["book"] <= -0.08 and nm.startswith(("Rates", "Dollar", "Oil")):
+                    created += alert(cur, "MARKET", "Macro exposure", "info",
+                                     f"{nm} would move the Book about {sc['book']:+.0%} on past sensitivities "
+                                     f"(most exposed: {', '.join(t for t, _ in sc['worst'])})", f"macro-{nm[:12]}-{week_key()}")
+    except Exception as e:
+        print("Macro view failed:", e.__class__.__name__, str(e)[:100])
+
+    # ---- calendar (Fed, BEA, BLS, expiries, earnings) and earnings previews for Watchlist and Book names
+    try:
+        from events import refresh as cal_refresh
+        conn.commit()
+        cal_refresh(conn, tickers, log=print)
+    except Exception as e:
+        print("Calendar refresh failed:", e.__class__.__name__)
+        health_log["calendar"] = [e.__class__.__name__]
+    cur.execute("""SELECT c.*, n.level FROM v2_calendar c JOIN v2_names n USING (ticker)
+                   WHERE c.kind = 'earnings' AND c.date BETWEEN CURRENT_DATE AND CURRENT_DATE + 3 AND n.level IN ('watchlist','book')""")
+    for ev in cur.fetchall():
+        tk = ev["ticker"]
+        th = theses.get(tk) or {}
+        pil = ((th.get("sections") or {}).get("pillars") or "")
+        im = (ev["detail"] or {}).get("implied_move")
+        n_ = next((n for n in names if n["ticker"] == tk), {})
+        style, z = book_zones(n_, th, research) if n_ else ("value", {})
+        lvl = (f" Buy level {('growth zone' if style == 'growth' else 'entry')} ${z['add']:,.2f}." if z.get("add") else "")
+        created += alert(cur, tk, "Earnings preview", "medium" if ev["level"] == "book" else "info",
+                         f"Results {ev['date']:%a %d %b}" + (f"; options imply a ±{im:.0%} move" if im else "") + "." + lvl
+                         + (f" Watch the pillars: {str(pil)[:220]}" if pil else ""),
+                         f"preview-{tk}-{ev['date']}", action="Decide before results: add, wait or hedge")
 
     # ---- theme sell-offs
     theme_moves = {}
@@ -254,6 +454,49 @@ def daily(conn):
                                  f"Price ${price:,.2f} is {gap:.1%} above the {src} entry target ${entry:,.2f}",
                                  f"near-{tk}-{week_key()}")
 
+        # Book: add and trim levels by style (value or growth)
+        if n["level"] == "book" and price:
+            style, z = book_zones(n, theses.get(tk), research)
+            paused = tk in kill_hit or tk in news_break or n.get("health") == "red"
+            if z["add"] and price <= z["add"]:
+                why = (f"the 5-year TAM case returns {((z['then'] / price) ** 0.2 - 1):.0%} a year from here"
+                       if style == "growth" and z["then"] else f"at or below the entry target ${z['add']:,.2f}")
+                created += alert(cur, tk, "Add zone" if not paused else "Add zone, thesis flagged", "medium",
+                                 f"{style.title()} holding at ${price:,.2f}: {why}"
+                                 + (" · but the thesis is flagged (kill criterion, breaking news or red health)" if paused else ""),
+                                 f"add-{tk}-{week_key()}", action="Consider adding" if not paused else "Review first")
+            elif z["trim"] and price >= z["trim"]:
+                why = ("beyond the 5-year TAM case (under 5% a year from here)" if style == "growth"
+                       else f"above Claude's high value ${z['trim']:,.2f}")
+                created += alert(cur, tk, "Trim zone", "medium", f"{style.title()} holding at ${price:,.2f}: {why}",
+                                 f"trim-{tk}-{week_key()}", action="Consider trimming")
+            elif style == "value" and z["review"] and price >= z["review"]:
+                created += alert(cur, tk, "Fair value reached", "info",
+                                 f"Price ${price:,.2f} has reached Claude's base value ${z['review']:,.2f}: "
+                                 "the margin of safety is gone; hold only if the value has grown", f"fair-{tk}-{week_key()}")
+
+        # growth buy zone (Watchlist names with a TAM target): separate from the value entry target
+        zone, then = growth_zone(theses.get(tk))
+        if n["level"] == "watchlist" and price and zone and zone > 0:
+            gap = price / zone - 1
+            irr = (then / price) ** (1 / 5) - 1 if then and then > 0 else None
+            paused = tk in kill_hit or tk in news_break or n.get("health") == "red"
+            if gap <= 0 and not paused:
+                key = f"gbuy-{tk}-{week_key()}"
+                new = alert(cur, tk, "Buy signal", "high",
+                            f"Growth zone: price ${price:,.2f} is at or below ${zone:,.2f}, where the 5-year TAM case "
+                            f"returns {irr:.0%} a year (hurdle {GROWTH_HURDLE:.0%})", key, action="Awaiting Claude's fresh check")
+                if new:
+                    cur.execute("UPDATE v2_alerts SET sent_via = 'hold' WHERE dedupe_key = %s", (key,))
+                created += new
+            elif gap <= 0 and paused:
+                created += alert(cur, tk, "Buy signal paused", "medium",
+                                 f"Growth zone reached (${zone:,.2f}) but the thesis is flagged", f"gbuyp-{tk}-{week_key()}")
+            elif gap <= 0.05:
+                created += alert(cur, tk, "Approaching growth zone", "medium",
+                                 f"Price ${price:,.2f} is {gap:.1%} above the growth zone ${zone:,.2f} "
+                                 f"(5-year TAM case would return {irr:.0%} a year from here)", f"gnear-{tk}-{week_key()}")
+
         # filings (EDGAR)
         cik = cik_of.get(tk)
         if cik:
@@ -350,6 +593,9 @@ def filings(cur, tk, cik, book):
             continue
         if form == "4":
             continue
+        if "2.02" in items or form in ("10-Q", "10-K"):
+            cur.execute("UPDATE v2_names SET refresh_due = %s WHERE ticker = %s AND (refresh_due IS NULL OR refresh_due < %s)",
+                        (filed, tk, filed))                     # thesis refresh after results (Claude, overnight)
         sev = "high" if set(items) & HIGH_8K else ("medium" if book or "2.02" in items or "13D" in form else "info")
         made += alert(cur, tk, f"New filing: {form}", sev, kind, f"filing-{acc}", source="sec",
                       action="Claude reads it against the thesis" if book else None)
@@ -399,6 +645,16 @@ def weekly(conn):
 
 
 # ------------------------------------------------------------------ export for Claude's tasks
+TAM_EXAMPLE = {   # growth target: reference only, shown on the stock page; never feeds the entry target or signals
+    "market": "what market(s) the company sells into", "tam_now_bn": 400, "source": "who sizes the market, with date",
+    "why_share": "why this share is reachable (right to win, current share and trend)",
+    "what_must_go_right": "the 2-3 things that must happen",
+    "scenarios": [{"years": 5, "segments": [{"name": "Segment", "tam_bn": 800, "share_pct": 25, "net_margin_pct": 30}],
+                   "other_rev_bn": 0, "other_margin_pct": 0, "exit_pe": 25, "shares_m": 2500, "dr": 10,
+                   "note": "growth rate the TAM assumes, and the source"},
+                  {"years": 10, "segments": [{"name": "Segment", "tam_bn": 1500, "share_pct": 25, "net_margin_pct": 30}],
+                   "other_rev_bn": 0, "other_margin_pct": 0, "exit_pe": 20, "shares_m": 2500, "dr": 10, "note": "..."}]}
+
 INBOX_FORMAT = {
     "where": f"Save one JSON file per task run into Drive folder ValueInvestor/v2-inbox (id {DRIVE_INBOX}). "
              "Name it <type>-<YYYY-MM-DD>-<short>.json. Never edit or delete other files.",
@@ -408,12 +664,26 @@ INBOX_FORMAT = {
                "conviction": 72, "verdict": "BUY|WATCH|PASS", "entry_target": 150.0,
                "valuation": {"iv_low": 140, "iv_base": 200, "iv_high": 260,
                              "inputs": {"fcf_ps": 7.5, "g1": 8, "g2": 5, "tg": 2.5, "dr": 9.5},
-                             "kill": [{"type": "price_below|analyst_mean_below|manual", "value": 120.0, "text": "..."}]},
+                             "kill": [{"type": "price_below|analyst_mean_below|manual", "value": 120.0, "text": "..."}],
+                             "tam": TAM_EXAMPLE},
                "sections": {k: "text" for k in ["industry_map", "size_growth", "structure", "demand_supply",
                                                  "industry_risks", "outlook", "winners", "business", "right_to_win",
                                                  "moat", "tam_competitors", "management", "financials",
                                                  "company_risks", "variant_view", "valuation", "pillars",
                                                  "catalysts_flow", "premortem"]}},
+    "tam": {"type": "tam", "items": [{"ticker": "AMAT", "tam": TAM_EXAMPLE}]},
+    "refresh": {"type": "refresh", "items": [{"ticker": "AMAT", "conviction": 70, "verdict": "BUY|WATCH|PASS", "entry_target": 150.0,
+                                              "valuation": {"iv_low": 140, "iv_base": 200, "iv_high": 260,
+                                                            "inputs": {"fcf_ps": 7.5, "g1": 8, "g2": 5, "tg": 2.5, "dr": 9},
+                                                            "kill": [], "tam": TAM_EXAMPLE},
+                                              "pillars": [{"pillar": "...", "status": "intact|watch|breached", "note": "result vs the KPI"}],
+                                              "summary": "two or three lines: what the results said and what changed",
+                                              "full_reunderwrite": False}]},
+    "week_ahead": {"type": "week_ahead", "summary": "3-5 lines: what matters this week and why",
+                   "events": [{"date": "2026-11-18", "title": "...", "why": "...", "names": ["NVDA"],
+                               "playbook": "what to do before/after (e.g. wait to add until after results)"}],
+                   "calendar": [{"date": "2026-11-20", "time_et": "10:00", "kind": "policy|macro|election|company",
+                                 "title": "...", "detail": {"why": "...", "source": "url"}}]},
     "news_tags": {"type": "news_tags", "items": [{"id": 123, "tag": "no change|strengthens|weakens|breaks",
                                                    "note": "one line on why"}]},
     "filing_tags": {"type": "filing_tags", "items": [{"id": 45, "tag": "no change|strengthens|weakens|breaks",
@@ -455,24 +725,46 @@ def export(conn):
                                       "nd_ebitda", "tests_passed", "tests_available")},
                              "px": {k: ((met.get(t["ticker"]) or {}).get("px") or {}).get(k) for k in
                                     ("price", "drawdown", "ret_3m", "high_52w")}} for t in top]}
+    if run:
+        gtop = run.get("growth_top10") or []
+        cur.execute("SELECT ticker, metrics FROM v2_screen_scores WHERE run_date = %s AND ticker = ANY(%s)",
+                    (run["run_date"], [t["ticker"] for t in gtop]))
+        gmet = {r["ticker"]: r["metrics"] or {} for r in cur.fetchall()}
+        cur.execute("SELECT ticker, reason_card IS NOT NULL AS has_card FROM v2_names WHERE ticker = ANY(%s)",
+                    ([t["ticker"] for t in gtop],))
+        gcards = {r["ticker"]: r["has_card"] for r in cur.fetchall()}
+        screen["growth_top10"] = [{**t, "has_reason_card": gcards.get(t["ticker"], False),
+                                   "name": gmet.get(t["ticker"], {}).get("name"),
+                                   "industry": gmet.get(t["ticker"], {}).get("industry"),
+                                   "growth": {k: (gmet.get(t["ticker"], {}).get("growth") or {}).get(k) for k in
+                                              ("g_now", "accel", "cagr", "rule_of_40", "themes", "peer_growth",
+                                               "peer_accel", "smart_money", "rs_6m")},
+                                   "fin": {k: (gmet.get(t["ticker"], {}).get("fin") or {}).get(k) for k in
+                                           ("gross_margin", "op_margin", "roc_latest", "ev_rev", "pe", "fcf_margin")},
+                                   "px": {k: (gmet.get(t["ticker"], {}).get("px") or {}).get(k) for k in
+                                          ("price", "drawdown", "ret_6m")}} for t in gtop]
     promoted = [t["ticker"] for t in (screen or {}).get("top10", []) if t.get("promote")]
+    g_promoted = [t["ticker"] for t in (screen or {}).get("growth_top10", []) if t.get("promote")]
     cur.execute("""SELECT n.ticker, n.name, n.sector, n.industry,
                      CASE WHEN n.status = 'deep_dive_requested' THEN 1
-                          WHEN n.ticker = ANY(%s) THEN 2 ELSE 3 END AS priority,
+                          WHEN n.ticker = ANY(%s) OR n.ticker = ANY(%s) THEN 2 ELSE 3 END AS priority,
+                     CASE WHEN n.ticker = ANY(%s) THEN 'growth' ELSE 'value' END AS track,
                      CASE WHEN n.status = 'deep_dive_requested' THEN 'requested by Ming'
-                          WHEN n.ticker = ANY(%s) THEN 'cleared this week''s deep-dive bar'
+                          WHEN n.ticker = ANY(%s) THEN 'cleared this week''s growth deep-dive bar'
+                          WHEN n.ticker = ANY(%s) THEN 'cleared this week''s value deep-dive bar'
                           ELSE 'legacy candidate (CORE/HIGH) to re-underwrite' END AS why
                    FROM v2_names n
                    WHERE n.status = 'deep_dive_requested'
-                      OR ((n.ticker = ANY(%s) OR n.status = 'candidate')
+                      OR ((n.ticker = ANY(%s) OR n.ticker = ANY(%s) OR n.status = 'candidate')
                           AND NOT EXISTS (SELECT 1 FROM v2_theses t WHERE t.ticker = n.ticker))
-                   ORDER BY priority, n.ticker""", (promoted, promoted, promoted))
+                   ORDER BY priority, n.ticker""",
+                (promoted, g_promoted, g_promoted, g_promoted, promoted, promoted, g_promoted))
     dd = [dict(r) for r in cur.fetchall()]
     cur.execute("SELECT DISTINCT ON (ticker) ticker, data FROM v2_research WHERE ticker = ANY(%s) ORDER BY ticker, as_of DESC",
                 ([d["ticker"] for d in dd],))
     rs = {r["ticker"]: r["data"] for r in cur.fetchall()}
     for i, d in enumerate(dd):
-        r = (rs.get(d["ticker"]) or {}) if i < 6 else {}       # full research for the next 6 only, to keep the file small
+        r = (rs.get(d["ticker"]) or {}) if i < 8 else {}       # full research for the next 8 only, to keep the file small
         d["research"] = {k: r.get(k) for k in ("valuation", "moat", "risk", "red_flags", "peers", "analysts", "history",
                                                 "business", "insiders", "ownership")} if r else None
 
@@ -499,10 +791,29 @@ def export(conn):
     pending = [dict(r) for r in cur.fetchall()]
     cur.execute("SELECT DISTINCT ON (theme) theme, as_of, kind FROM v2_industry_outlooks ORDER BY theme, as_of DESC")
     outlooks = [dict(r) for r in cur.fetchall()]
+    # thesis refresh after results: Watchlist and Book names with a thesis older than their latest results
+    cur.execute("""SELECT n.ticker, n.level, n.style, n.refresh_due, t.version, t.created_at, t.conviction, t.verdict,
+                          t.entry_target, t.valuation, t.sections->'pillars' AS pillars, t.sections->'variant_view' AS variant_view
+                   FROM v2_names n JOIN LATERAL (SELECT * FROM v2_theses WHERE ticker = n.ticker ORDER BY version DESC LIMIT 1) t ON TRUE
+                   WHERE n.level IN ('watchlist','book') AND n.refresh_due IS NOT NULL AND t.created_at::date <= n.refresh_due
+                   ORDER BY (n.level = 'book') DESC, n.refresh_due LIMIT 6""")
+    refresh = []
+    for r in cur.fetchall():
+        r = dict(r)
+        cur.execute("SELECT form, kind, filed, url FROM v2_events WHERE ticker = %s AND filed >= %s AND form <> '4' ORDER BY filed",
+                    (r["ticker"], r["refresh_due"] - dt.timedelta(days=3)))
+        r["filings"] = [dict(f) for f in cur.fetchall()]
+        refresh.append(r)
+    cur.execute("SELECT date, time_et, kind, ticker, title, detail FROM v2_calendar WHERE date BETWEEN CURRENT_DATE AND CURRENT_DATE + 21 "
+                "ORDER BY date, time_et")
+    calendar = [dict(r) for r in cur.fetchall()]
+    cur.execute("SELECT value FROM v2_settings WHERE key = 'macro'")
+    macro = (cur.fetchone() or {}).get("value")
     state = {"generated": dt.datetime.now(dt.timezone.utc).isoformat(), "app_url": APP_URL, "inbox_folder_id": DRIVE_INBOX,
              "inbox_format": INBOX_FORMAT, "themes": list(THEMES), "screen": screen, "deep_dive_queue": dd,
              "watchlist_and_book": [summary(n) for n in names], "untagged_news": news, "new_book_filings": filings_,
-             "pending_buy_checks": pending, "latest_outlooks": outlooks}
+             "pending_buy_checks": pending, "latest_outlooks": outlooks, "refresh_queue": refresh,
+             "calendar_next_21d": calendar, "macro": macro}
     text = json.dumps(state, default=str, indent=1)
     out = Path(__file__).parent.parent / "outbox"
     out.mkdir(exist_ok=True)
