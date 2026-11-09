@@ -1,6 +1,7 @@
 legacy/
-tools/
+tools/.cache/
+tools/breakdown.py
+tools/count_rows.py
 outbox/
 .github/
 *.md
-inbox-seed/

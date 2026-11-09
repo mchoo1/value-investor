@@ -79,6 +79,67 @@ def ensure_schema():
              action TEXT, decision TEXT, price NUMERIC, shares NUMERIC, note TEXT, alert_id INT, spy_price NUMERIC);
          ALTER TABLE v2_names ADD COLUMN IF NOT EXISTS growth_score NUMERIC;""")
     _schema_ok = True
+    try:
+        sync(drive=False)                               # files checked in with the app (inbox-seed) load on first use
+    except Exception as e:
+        print("Seed sync failed:", e.__class__.__name__, str(e)[:120])
+
+
+# ------------------------------------------------------------------ sync: the app loads Claude's results itself too
+import sys as _sys
+from pathlib import Path as _Path
+_TOOLS = _Path(__file__).parent / "tools"
+_sys.path.insert(0, str(_TOOLS))
+SEED_DIR = _Path(__file__).parent / "inbox-seed"
+
+
+def sync(drive=True):
+    """Load new files from inbox-seed (bundled) and, if the app has Drive credentials, the Drive inbox. Same loader and
+    same once-only log as the 2-hourly GitHub job, so running both never double-loads."""
+    import importlib
+    inbox = importlib.import_module("inbox")
+    res = {"seed": inbox.main(str(SEED_DIR), log=lambda *_: None) if SEED_DIR.is_dir() else {"loaded": 0, "files": []}}
+    if drive:
+        res["drive"] = inbox.main(None, log=lambda *_: None)
+    return res
+
+
+@app.post("/sync")
+def sync_now():
+    try:
+        r = sync(drive=True)
+        n = r["seed"]["loaded"] + (r.get("drive") or {}).get("loaded", 0)
+        note = (r.get("drive") or {}).get("note")
+        flash(f"Synced: {n} new file(s) loaded." + (" Drive inbox not reachable from the app (add GOOGLE_SERVICE_ACCOUNT_JSON "
+                                                    "to Vercel to enable); the 2-hourly job still loads it." if note else ""))
+    except Exception as e:
+        flash(f"Sync failed: {e.__class__.__name__}: {str(e)[:160]}")
+    return back(url_for("decide"))
+
+
+@app.post("/brief/send")
+def brief_send():
+    if not os.environ.get("TELEGRAM_BOT_TOKEN"):
+        flash("Telegram is not set up on the app: add TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID to Vercel's environment variables. "
+              "The daily 07:07 brief from GitHub is unaffected.")
+        return back(url_for("decide"))
+    import importlib
+    from common import telegram as _tg_send
+    brief = importlib.import_module("brief")
+    with db() as conn, conn.cursor() as c:
+        ok = _tg_send(brief.build(c))
+    flash("Summary sent to Telegram." if ok else "Telegram did not accept the message.")
+    return back(url_for("decide"))
+
+
+def sync_status():
+    try:
+        last = q1("SELECT MAX(loaded_at) AS t FROM v2_inbox_log")
+        dh = q1("SELECT updated_at FROM v2_settings WHERE key = 'macro'")
+        scr = q1("SELECT MAX(run_date) AS d FROM v2_screen_runs")
+        return {"inbox": last and last["t"], "daily": dh and dh["updated_at"], "screen": scr and scr["d"]}
+    except psycopg2.Error:
+        return {}
 
 
 # ------------------------------------------------------------------ password
@@ -1418,6 +1479,12 @@ DECIDE_TPL = r"""
 .wbar .b{height:12px;border-radius:4px;background:var(--accent)}.wbar .b.over{background:var(--bad)}
 @media (max-width:800px){.dec .card{grid-template-columns:1fr}}</style>
 <h1>Decide</h1>
+<div class="row" style="justify-content:space-between;margin:-2px 0 8px"><span class="muted" style="font-size:12px">
+Last loaded from Claude: {{ st.inbox|d if st.inbox else 'never' }} · daily check: {{ st.daily|d if st.daily else 'not yet' }} · screen: {{ st.screen|d if st.screen else 'not yet' }}</span>
+<span class="row"><form class="inline" method="post" action="{{ url_for('sync_now') }}"><button>Sync now</button></form>
+<form class="inline" method="post" action="{{ url_for('brief_send') }}"><button>Send summary to Telegram</button></form></span></div>
+<details class="card" style="margin-bottom:14px" open><summary><b>At a glance</b> <span class="muted">(same as the Telegram brief)</span></summary>
+<div style="margin-top:8px;line-height:1.6">{{ glance|safe }}</div></details>
 <p class="sub">Everything that needs a decision, most urgent first. Each item shows why, the numbers that matter, Claude's check and a suggested size. Done or Skip records it in the decision journal.</p>
 {% if pf.warn %}<div class="flash">⚠ Portfolio limits: {{ pf.warn|join(' · ') }}</div>{% endif %}
 <div class="dec">
@@ -1516,7 +1583,14 @@ def decide():
         j["ret"] = (p1 / p0 - 1) if p0 and p1 else None
         s0, s1 = num(j.get("spy_price")), jpx.get("SPY")
         j["rel"] = (j["ret"] - (s1 / s0 - 1)) if j["ret"] is not None and s0 and s1 else None
-    return page("decide", "Decide", DECIDE_TPL, items=items, pf=pf, journal=journal, limits=LIMITS, sizing=SIZING)
+    try:
+        import importlib
+        with db() as conn, conn.cursor() as c:
+            glance = importlib.import_module("brief").build(c).split("\n\n", 1)[-1].replace("\n", "<br>")
+    except Exception as e:
+        glance = f"<span class='muted'>Summary unavailable ({e.__class__.__name__}).</span>"
+    return page("decide", "Decide", DECIDE_TPL, items=items, pf=pf, journal=journal, limits=LIMITS, sizing=SIZING,
+                glance=Markup(glance), st=sync_status())
 
 
 @app.post("/decide/record")

@@ -1,7 +1,7 @@
 """Telegram messages.
 
   python tools\\notify.py alerts    red alerts at once; up to 5 medium alerts a day; the rest wait for the digest
-  python tools\\notify.py daily     same as alerts, plus a data-health line if a feed failed
+  python tools\\notify.py brief     daily brief: overnight alerts + one-screen summary of everything (also: daily)
   python tools\\notify.py screen    Saturday screen summary
   python tools\\notify.py digest    Sunday weekly digest
 Set TELEGRAM_DRY=1 to print instead of sending.
@@ -28,6 +28,24 @@ def link(t):
 
 def line(a):
     return f"{ICON.get(a['severity'], '')} {link(a['ticker'])} · <b>{esc(a['kind'])}</b>: {esc(a['detail'])}"
+
+
+def lines(alerts_):
+    """One line per alert, but alerts with the same kind and detail (e.g. a theme sell-off hitting six names) share a line."""
+    groups, order = {}, []
+    collapse = {"New thesis ready": "approve in the app", "New filing: 8-K": "Claude reads them against the thesis",
+                "New filing: 10-Q": "quarterly reports filed", "New filing: 10-K": "annual reports filed"}
+    for a in alerts_:
+        k = (a["severity"], a["kind"], collapse.get(a["kind"], a["detail"]))
+        if k not in groups:
+            groups[k] = []
+            order.append(k)
+        groups[k].append(a["ticker"])
+    out = []
+    for sev, kind, detail in order:
+        ts = list(dict.fromkeys(groups[(sev, kind, detail)]))
+        out.append(f"{ICON.get(sev, '')} {', '.join(link(t) for t in ts)} · <b>{esc(kind)}</b>: {esc(detail)}")
+    return "\n".join(out)
 
 
 def mark(cur, ids, via):
@@ -59,9 +77,9 @@ def alerts(conn, with_health=False):
     now_, later = medium[:room], medium[room:]
     parts = []
     if high:
-        parts.append("<b>Needs attention</b>\n" + "\n".join(line(a) for a in high))
+        parts.append("<b>Needs attention</b>\n" + lines(high))
     if now_:
-        parts.append("<b>Worth a look</b>\n" + "\n".join(line(a) for a in now_))
+        parts.append("<b>Worth a look</b>\n" + lines(now_))
     if later:
         parts.append(f"<i>{len(later)} more alert(s) held for Sunday's digest.</i>")
     if with_health:
@@ -80,6 +98,33 @@ def alerts(conn, with_health=False):
     mark(cur, [a["id"] for a in later + info], "digest")
     conn.commit()
     print(f"Alerts: {len(high)} high and {len(now_)} medium sent; {len(later) + len(info)} held for the digest.")
+
+
+def brief(conn):
+    """Daily 07:07 brief: overnight alerts first, then the one-screen summary of everything (tools/brief.py)."""
+    from brief import build
+    cur = conn.cursor()
+    cur.execute("""SELECT * FROM v2_alerts WHERE NOT sent AND sent_via IS NULL AND COALESCE(source, '') <> 'legacy'
+                   ORDER BY CASE severity WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, fired_at""")
+    rows = cur.fetchall()
+    urgent = [a for a in rows if a["severity"] in ("high", "medium")]
+    shown, rest = urgent[:20], urgent[20:] + [a for a in rows if a["severity"] == "info"]
+    head = ""
+    if shown:
+        head = "<b>Overnight alerts</b>\n" + lines(shown) + (
+            f"\n<i>+{len(rest)} more in the app</i>" if rest else "") + "\n\n"
+    cur.execute("SELECT value FROM v2_settings WHERE key = 'data_health'")
+    h = cur.fetchone()
+    fails = ((h or {}).get("value") or {}).get("failures") or {}
+    tail = ("\n\n⚙️ <i>Data issues today: " + esc(", ".join(f"{k.replace('_', ' ')} {len(v)}" for k, v in fails.items()))
+            + "</i>") if fails else ""
+    if telegram(head + build(cur) + tail):
+        mark(cur, [a["id"] for a in shown], "telegram")
+        mark(cur, [a["id"] for a in rest], "digest")
+        conn.commit()
+        print(f"Brief sent ({len(shown)} alerts in it).")
+    else:
+        print("Brief not delivered; alerts stay queued.")
 
 
 def screen(conn):
@@ -219,8 +264,10 @@ if __name__ == "__main__":
     c = conn.cursor()
     ensure_schema(c)
     conn.commit()
-    if MODE in ("alerts", "daily"):
-        alerts(conn, with_health=MODE == "daily")
+    if MODE == "alerts":
+        alerts(conn)
+    elif MODE in ("daily", "brief"):
+        brief(conn)
     elif MODE == "screen":
         screen(conn)
     elif MODE == "digest":

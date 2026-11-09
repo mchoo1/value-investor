@@ -10,9 +10,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 from common import db, J, alert, ensure_schema, drive_list, drive_read, DRIVE_INBOX, TODAY
 
-ap = argparse.ArgumentParser()
-ap.add_argument("--dir")
-args = ap.parse_args()
 
 WATCH_CAP = 50
 SECTION_KEYS = {"industry_map", "size_growth", "structure", "demand_supply", "industry_risks", "outlook", "winners",
@@ -230,11 +227,14 @@ def load(cur, name, d):
     raise ValueError(f"unknown type {kind!r}")
 
 
-def main():
-    conn = db()
+def main(dir_=None, conn=None, log=print):
+    """Load new files from a local folder (dir_) or the Drive inbox. Also used by the app's Sync button."""
+    own = conn is None
+    conn = conn or db()
     cur = conn.cursor()
     ensure_schema(cur)
     conn.commit()
+    args = argparse.Namespace(dir=dir_)
     if args.dir:
         import hashlib  # keyed by file name and content, so a checked-in folder loads once however often it is checked out
         files = [{"id": "dir:" + p.name, "name": p.name, "modifiedTime": hashlib.sha1(p.read_bytes()).hexdigest()[:16], "path": p}
@@ -242,10 +242,10 @@ def main():
     else:
         files = drive_list(DRIVE_INBOX)
         if files is None:
-            print("Inbox: no Drive credentials (GOOGLE_SERVICE_ACCOUNT_JSON); nothing loaded.")
-            return
+            log("Inbox: no Drive credentials (GOOGLE_SERVICE_ACCOUNT_JSON); nothing loaded.")
+            return {"loaded": 0, "files": [], "note": "no Drive credentials"}
         files = [f for f in files if f["name"].lower().endswith(".json")]
-    done = 0
+    done, loaded = 0, []
     for f in files:
         cur.execute("SELECT 1 FROM v2_inbox_log WHERE file_id = %s AND modified = %s", (f["id"], f["modifiedTime"]))
         if cur.fetchone():
@@ -263,9 +263,15 @@ def main():
                     (f["id"], f["modifiedTime"], f["name"], kind, result))
         conn.commit()
         done += 1
-        print(f"  {f['name']}: {result}")
-    print(f"Inbox: {done} new file(s) loaded, {len(files) - done} already done.")
-    conn.close()
+        loaded.append(f"{f['name']}: {result}")
+        log(f"  {f['name']}: {result}")
+    log(f"Inbox: {done} new file(s) loaded, {len(files) - done} already done.")
+    if own:
+        conn.close()
+    return {"loaded": done, "files": loaded}
 
 
-main()
+if __name__ == "__main__":
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--dir")
+    main(ap.parse_args().dir)
