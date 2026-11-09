@@ -32,6 +32,9 @@ def load_thesis(cur, d):
         n = known(cur, t)
     sections = {k: v for k, v in (d.get("sections") or {}).items() if k in SECTION_KEYS and v}
     missing = sorted(SECTION_KEYS - set(sections))
+    es = d.get("exec_summary") or (d.get("sections") or {}).get("exec_summary")
+    if isinstance(es, dict):
+        sections["exec_summary"] = es
     cur.execute("SELECT COALESCE(MAX(version), 0) + 1 AS v FROM v2_theses WHERE ticker = %s", (t,))
     ver = cur.fetchone()["v"]
     cur.execute("""INSERT INTO v2_theses (ticker, version, author, approval, sections, valuation, conviction, verdict, entry_target)
@@ -131,9 +134,12 @@ def load(cur, name, d):
             conv = it.get("conviction", last["conviction"])
             verdict = it.get("verdict") or last["verdict"]
             entry = it.get("entry_target", last["entry_target"])
+            secs = dict(last["sections"] or {})
+            if isinstance(it.get("exec_summary"), dict):
+                secs["exec_summary"] = it["exec_summary"]
             cur.execute("""INSERT INTO v2_theses (ticker, version, author, approval, sections, valuation, conviction, verdict, entry_target)
                            VALUES (%s, %s, 'claude-refresh', 'pending', %s, %s, %s, %s, %s)""",
-                        (t, last["version"] + 1, J(last["sections"]), J(val), conv, verdict, entry))
+                        (t, last["version"] + 1, J(secs), J(val), conv, verdict, entry))
             cur.execute("UPDATE v2_names SET refresh_due = NULL, updated_at = now() WHERE ticker = %s", (t,))
             changed = verdict != last["verdict"] or bool(breached)
             if it.get("full_reunderwrite") or breached:
@@ -164,6 +170,16 @@ def load(cur, name, d):
             except Exception:
                 continue
         return f"Week ahead saved; {n} calendar items"
+    if kind == "exec_summary":            # add or refresh the executive summary on the latest thesis (no new version)
+        n = 0
+        for it in d.get("items", []):
+            t = (it.get("ticker") or "").upper()
+            if t and isinstance(it.get("exec_summary"), dict):
+                cur.execute("""UPDATE v2_theses SET sections = COALESCE(sections, '{}'::jsonb) || jsonb_build_object('exec_summary', %s::jsonb)
+                               WHERE ticker = %s AND version = (SELECT MAX(version) FROM v2_theses WHERE ticker = %s)""",
+                            (J(it["exec_summary"]), t, t))
+                n += cur.rowcount
+        return f"{n} executive summaries"
     if kind == "tam":                     # add or refresh the TAM target on the latest thesis (no new version)
         n = 0
         for it in d.get("items", []):

@@ -323,6 +323,41 @@ tr.style.display=tr.textContent.toLowerCase().indexOf(t)>-1?'':'none'})})});
 </script></body></html>"""
 
 
+# ------------------------------------------------------------------ investment report (executive summary)
+REPORT_TPL = r"""
+<div class="rep{{ ' compact' if compact }}">
+<div class="rep-h"><span class="call {{ es.recommendation }}">{{ es.recommendation }}</span>
+<div><div class="one">{{ es.one_line }}</div>
+<div class="muted" style="font-size:12px">{{ (es.style or '')|title }} holding{% if es.horizon %} · horizon {{ es.horizon }}{% endif %}{% if es.position %} · {{ es.position }}{% endif %}{% if asof %} · as of {{ asof }}{% endif %}</div></div></div>
+<div class="rep-g">
+<div><h4>How it makes money</h4><table class="mm">{% for m in es.how_it_makes_money or [] %}<tr><td><b>{{ m.segment }}</b>{% if m.note %}<br><span class="muted">{{ m.note }}</span>{% endif %}</td><td class="r" style="white-space:nowrap">{{ m.share }}</td></tr>{% endfor %}</table></div>
+<div><h4>Why {{ {'BUY':'buy','ADD':'add','HOLD':'hold','TRIM':'trim','CUT':'cut','WAIT':'wait','PASS':'pass'}.get(es.recommendation, 'this call') }}</h4><ol>{% for w in es.why or [] %}<li>{{ w }}</li>{% endfor %}</ol>
+<h4>Key risks and what to watch</h4><ul>{% for r in es.key_risks or [] %}<li><b>{{ r.risk }}</b><br><span class="muted">Watch: {{ r.watch }}</span></li>{% endfor %}</ul></div>
+</div>
+{% set p = es.plan or {} %}<div class="plan"><b>Plan:</b> {{ p.action }}
+<div class="lv">{% if p.add_below %}<span>Add below <b>${{ '{:,.2f}'.format(p.add_below) }}</b></span>{% endif %}{% if p.trim_above %}<span>Trim above <b>${{ '{:,.2f}'.format(p.trim_above) }}</b></span>{% endif %}{% if price %}<span>Now <b>${{ '{:,.2f}'.format(price) }}</b></span>{% endif %}</div>
+{% if p.cut_if %}<div><b>Cut if:</b> {{ p.cut_if }}</div>{% endif %}</div>
+{% if compact %}<a href="{{ url_for('name', ticker=ticker) }}#report">Full report →</a>{% endif %}
+</div>"""
+REPORT_CSS = """<style>.rep{border:1px solid var(--line);border-radius:10px;padding:12px 14px;background:var(--panel)}
+.rep-h{display:flex;gap:12px;align-items:flex-start}.rep .one{font-size:15px;font-weight:600;line-height:1.4}
+.call{font-weight:800;font-size:13px;padding:6px 10px;border-radius:8px;background:var(--panel2);min-width:62px;text-align:center}
+.call.BUY,.call.ADD{background:rgba(46,160,67,.18);color:var(--good)}.call.TRIM,.call.CUT{background:rgba(248,81,73,.15);color:var(--bad)}
+.call.HOLD,.call.WAIT{background:rgba(88,166,255,.15);color:var(--accent)}.call.PASS{color:var(--mute)}
+.rep-g{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:10px}.rep h4{margin:6px 0;font-size:13px}
+.rep ol,.rep ul{margin:0;padding-left:18px}.rep li{margin:3px 0}.mm{border:none;background:none}.mm td{padding:5px 6px;font-size:13px}
+.plan{margin-top:10px;padding:8px 10px;border-radius:8px;background:var(--panel2);font-size:13px}.plan .lv{display:flex;gap:16px;flex-wrap:wrap;margin:4px 0}
+.rep.compact{padding:10px;font-size:13px}.rep.compact .one{font-size:14px}
+@media (max-width:800px){.rep-g{grid-template-columns:1fr}}
+@media print{header,form,button,.subnav,.no-print{display:none!important}body{background:#fff;color:#000}.rep,.card{border-color:#ccc;background:#fff}}</style>"""
+
+
+def report(ticker, es, price=None, compact=False, asof=None):
+    if not es:
+        return Markup('<p class="empty">No executive summary yet: Claude adds it with the next deep dive or results refresh.</p>')
+    return Markup(render_template_string(REPORT_TPL, es=es, ticker=ticker, price=price, compact=compact, asof=asof))
+
+
 def page(tab, title, tpl, **ctx):
     body = render_template_string(tpl, **ctx)
     return render_template_string(LAYOUT, tab=tab, title=title, body=Markup(body))
@@ -335,7 +370,7 @@ def funnel_chips(f):
     return Markup("".join(f'<span class="chip acc">{label}</span>' for k, label in FUNNELS if f.get(k)))
 
 
-app.jinja_env.globals.update(funnel_chips=funnel_chips, FUNNELS=FUNNELS, TAG_CLASS=TAG_CLASS,
+app.jinja_env.globals.update(report=report, REPORT_CSS=Markup(REPORT_CSS), funnel_chips=funnel_chips, FUNNELS=FUNNELS, TAG_CLASS=TAG_CLASS,
                              VALUE_FUNNELS=VALUE_FUNNELS, GROWTH_FUNNELS=GROWTH_FUNNELS)
 
 
@@ -947,19 +982,21 @@ def watchlist():
 
 # ------------------------------------------------------------------ Book
 BOOK_TPL = r"""
+{{ REPORT_CSS }}
 <h1>Book</h1>
 <p class="sub">{{ rows|length }} name{{ "" if rows|length == 1 else "s" }} owned (target about {{ target }}) · monitored daily: company releases, price, themes, analysts, kill criteria.</p>
 <p class="muted" style="font-size:12px;margin-top:-8px"><b>Value</b> holdings: add at the entry target, review at Claude's base value, trim above the high value; held 2-4 years.
 <b>Growth</b> holdings: add where the 5-year market-size case returns 15%+ a year, trim only when the price is beyond that case (under 5% a year); held 5-10 years and ended mainly by a broken thesis, not by valuation.</p>
 {% if rows|length > target %}<div class="flash">The Book holds {{ rows|length }} names, above your target of {{ target }}.</div>{% endif %}
 <div class="tablewrap"><table><thead><tr><th>Health</th><th>Ticker</th><th class="r">Price</th><th class="r">Cost</th>
-<th class="r">P&amp;L</th><th>Style</th><th>Now</th><th class="r">Add at</th><th class="r">Trim at</th><th class="r">Claude base value</th><th class="r">Analyst mean</th>
+<th class="r">P&amp;L</th><th>Claude's call</th><th>Style</th><th>Now</th><th class="r">Add at</th><th class="r">Trim at</th><th class="r">Claude base value</th><th class="r">Analyst mean</th>
 <th class="r">Open alerts</th><th></th></tr></thead><tbody>
-{% for r in rows %}<tr>
+{% for r in rows %}{% set es = r.es %}<tr>
 <td title="{{ r.health_why or '' }}"><span class="dot {{ r.health or '' }}"></span>{{ r.health or '—' }}{% if r.health_why %}<br><span class="muted" style="font-size:11px">{{ r.health_why }}</span>{% endif %}</td>
 <td><a href="{{ url_for('name', ticker=r.ticker) }}"><b>{{ r.ticker }}</b></a><br><span class="muted">{{ r.name or '' }}</span></td>
 <td class="r">{{ r.price|money }}</td><td class="r">{{ r.cost|money }}</td>
 <td class="r {{ 'good' if r.pnl and r.pnl > 0 else ('bad' if r.pnl and r.pnl < 0) }}">{{ r.pnl|pct(true) }}</td>
+<td>{% if es %}<span class="call {{ es.recommendation }}" style="padding:2px 8px;font-size:12px">{{ es.recommendation }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
 <td><span class="chip {{ 'acc' if r.style == 'growth' else '' }}" title="Hold for {{ r.hold }}">{{ r.style }}</span>{% if r.style_how == 'auto' %}<br><span class="muted" style="font-size:11px">auto</span>{% endif %}</td>
 <td>{% if r.state == 'add' %}<span class="chip good">Add zone</span>{% elif r.state == 'trim' %}<span class="chip warn">Trim zone</span>{% elif r.state == 'fair' %}<span class="chip warn">At fair value</span>{% else %}<span class="chip">Hold</span>{% endif %}
 {% if r.tam_irr is not none %}<br><span class="muted" style="font-size:11px">5y case {{ r.tam_irr|pct }}/yr</span>{% endif %}</td>
@@ -968,7 +1005,9 @@ BOOK_TPL = r"""
 <td class="r">{{ (r.analyst or {}).get('mean')|money }}</td><td class="r">{{ r.alerts or '' }}</td>
 <td><form class="inline" method="post" action="{{ url_for('move', ticker=r.ticker) }}"><input type="hidden" name="to" value="watchlist">
 <button title="Sold, but still like the business">Back to Watchlist</button></form></td>
-</tr>{% else %}<tr><td colspan="13" class="empty">Nothing in the Book yet. Move a Watchlist name here when you buy it.</td></tr>{% endfor %}
+</tr>
+<tr><td colspan="14" style="padding:0 10px 10px;border-top:none"><details><summary style="font-size:12px">{% if es %}{{ es.one_line[:150] }}{% if es.one_line|length > 150 %}…{% endif %}{% else %}Investment summary{% endif %}</summary>
+<div style="margin-top:6px">{{ report(r.ticker, es, r.price, True) }}</div></details></td></tr>{% else %}<tr><td colspan="14" class="empty">Nothing in the Book yet. Move a Watchlist name here when you buy it.</td></tr>{% endfor %}
 </tbody></table></div>
 
 <h2>Alerts</h2>
@@ -1042,6 +1081,8 @@ def book():
         r["pnl"] = (r["price"] / r["cost"] - 1) if r["price"] and r["cost"] else None
         r["p_iv"] = (r["price"] / r["iv_base"]) if r["price"] and r["iv_base"] else None
         r.update(book_zones(r))
+        th = q1("SELECT sections FROM v2_theses WHERE ticker = %s ORDER BY version DESC LIMIT 1", (r["ticker"],)) or {}
+        r["es"] = (th.get("sections") or {}).get("exec_summary")
     alerts = q("SELECT a.* FROM v2_alerts a JOIN v2_names n USING (ticker) WHERE n.level IN ('book','watchlist') "
                "ORDER BY a.addressed, a.fired_at DESC LIMIT 100")
     return page("book", "Book", BOOK_TPL, rows=rows, alerts=alerts, target=BOOK_TARGET)
@@ -1063,6 +1104,10 @@ NAME_TPL = r"""
 {% if n.level != 'screen' %}<form class="inline" method="post" action="{{ url_for('move', ticker=n.ticker) }}"><input type="hidden" name="to" value="screen">
 <input name="reason" placeholder="Reason for rejecting" required> <button>Reject</button></form>{% endif %}
 </div></div>
+{{ REPORT_CSS }}
+<div id="report" style="margin-bottom:14px"><div class="row" style="justify-content:space-between"><h2 style="margin:6px 0">Investment report · executive summary</h2>
+<button class="no-print" onclick="window.print()">Print / save PDF</button></div>
+{{ report(n.ticker, ((thesis or {}).get('sections') or {}).get('exec_summary'), price, False, (thesis or {}).get('created_at')|d) }}</div>
 
 <div class="grid g4">
 <div class="card tile"><div class="k">Price</div><div class="v">{{ price|money }}</div></div>
@@ -1412,6 +1457,7 @@ def ack(alert_id):
 # ------------------------------------------------------------------ Decide: one list of everything that needs a decision
 SIZING = {"value": {"starter": 0.03, "full": 0.05}, "growth": {"starter": 0.02, "full": 0.06}}
 LIMITS = {"name": 0.10, "theme": 0.35, "style": 0.80}
+ORDER_OF = {"EXIT?": 0, "BUY": 1, "ADD": 2, "TRIM": 2, "REVIEW": 3}
 ACTIONS = {  # alert kind -> (action, order)
     "Buy signal confirmed": ("BUY", 1), "Buy signal": ("BUY", 1), "Old idea at buy level": ("RE-CHECK", 6),
     "Add zone": ("ADD", 2), "Add zone, thesis flagged": ("REVIEW", 3), "Trim zone": ("TRIM", 2),
@@ -1478,6 +1524,7 @@ DECIDE_TPL = r"""
 .wbar{display:grid;grid-template-columns:200px 1fr 50px;gap:8px;align-items:center;font-size:13px;margin:3px 0}
 .wbar .b{height:12px;border-radius:4px;background:var(--accent)}.wbar .b.over{background:var(--bad)}
 @media (max-width:800px){.dec .card{grid-template-columns:1fr}}</style>
+{{ REPORT_CSS }}
 <h1>Decide</h1>
 <div class="row" style="justify-content:space-between;margin:-2px 0 8px"><span class="muted" style="font-size:12px">
 Last loaded from Claude: {{ st.inbox|d if st.inbox else 'never' }} · daily check: {{ st.daily|d if st.daily else 'not yet' }} · screen: {{ st.screen|d if st.screen else 'not yet' }}</span>
@@ -1499,6 +1546,8 @@ Last loaded from Claude: {{ st.inbox|d if st.inbox else 'never' }} · daily chec
 {% if d.size %}<div style="font-size:12px;margin-top:6px"><b>Suggested size:</b> {% if d.size.amount %}${{ '{:,.0f}'.format(d.size.amount) }}{% if d.size.shares %} (~{{ d.size.shares }} shares){% endif %}{% elif d.size.add_w <= 0 %}none{% else %}add positions to see amounts{% endif %}
 <span class="muted">· {{ d.size.why }}</span></div>{% endif %}
 {% if d.trim_note %}<div style="font-size:12px;margin-top:6px"><b>Trim guide:</b> {{ d.trim_note }}</div>{% endif %}
+<details style="margin-top:8px" {{ 'open' if loop.index <= 3 }}><summary><b>Investment summary</b>{% if d.es %} · Claude: <span class="call {{ d.es.recommendation }}" style="padding:1px 6px;font-size:11px">{{ d.es.recommendation }}</span>{% endif %}</summary>
+<div style="margin-top:6px">{{ report(d.ticker, d.es, d.price, True) }}</div></details>
 </div>
 <form method="post" action="{{ url_for('decide_record') }}"><input type="hidden" name="alert_id" value="{{ d.id or '' }}"><input type="hidden" name="ticker" value="{{ d.ticker }}"><input type="hidden" name="action" value="{{ d.action }}"><input type="hidden" name="price" value="{{ d.price or '' }}">
 <div class="row"><input name="shares" placeholder="Shares (if traded)" style="width:130px"><input name="note" placeholder="Why (for the journal)" style="flex:1;min-width:150px"></div>
@@ -1575,6 +1624,26 @@ def decide():
                       "price": ppx.get(p["ticker"]), "style": sty,
                       "buy_at": five[0]["zone"] if sty == "growth" and five else num(th.get("entry_target")),
                       "iv_base": num(val.get("iv_base")), "conviction": num(p["conviction"])})
+    for d in items:
+        th = q1("SELECT sections FROM v2_theses WHERE ticker = %s ORDER BY version DESC LIMIT 1", (d["ticker"],)) or {}
+        d["es"] = (th.get("sections") or {}).get("exec_summary")
+    # holdings where Claude's call is ADD / TRIM / CUT but no alert fired yet still need a decision
+    have = {i["ticker"] for i in items if i["action"] in ("BUY", "ADD", "TRIM", "EXIT?")}
+    for r in q("""SELECT DISTINCT ON (t.ticker) t.ticker, t.sections, t.created_at, t.conviction, t.valuation, n.name, n.level, n.style FROM v2_theses t
+                  JOIN v2_names n USING (ticker) WHERE n.level IN ('book','watchlist') ORDER BY t.ticker, t.version DESC"""):
+        es = (r["sections"] or {}).get("exec_summary") or {}
+        call = es.get("recommendation")
+        if call in ("ADD", "BUY", "TRIM", "CUT") and r["ticker"] not in have:
+            act = {"CUT": "EXIT?", "BUY": "BUY"}.get(call, call)
+            pr = latest_prices([r["ticker"]]).get(r["ticker"])
+            d = {"ticker": r["ticker"], "name": r["name"], "level": r["level"], "style": r["style"] or es.get("style"),
+                 "action": act, "order": ORDER_OF.get(act, 5), "when": r["created_at"], "kind": "Claude's call",
+                 "detail": (es.get("plan") or {}).get("action") or es.get("one_line"), "price": pr, "es": es,
+                 "buy_at": (es.get("plan") or {}).get("add_below"), "iv_base": num((r["valuation"] or {}).get("iv_base")),
+                 "conviction": num(r["conviction"])}
+            if act in ("ADD", "BUY"):
+                d["size"] = size_for(r["ticker"], d["style"] or "value", d["conviction"], pf, pr)
+            items.append(d)
     items.sort(key=lambda d: (d["order"], -(d["when"].timestamp() if hasattr(d["when"], "timestamp") else 0)))
     journal = q("SELECT * FROM v2_decisions ORDER BY decided_at DESC LIMIT 60")
     jpx = latest_prices(list({j["ticker"] for j in journal}) + ["SPY"])

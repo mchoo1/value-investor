@@ -655,6 +655,16 @@ TAM_EXAMPLE = {   # growth target: reference only, shown on the stock page; neve
                   {"years": 10, "segments": [{"name": "Segment", "tam_bn": 1500, "share_pct": 25, "net_margin_pct": 30}],
                    "other_rev_bn": 0, "other_margin_pct": 0, "exit_pe": 20, "shares_m": 2500, "dr": 10, "note": "..."}]}
 
+EXEC_EXAMPLE = {   # executive summary: shown first on the stock page, the Decide page, the Book and in Telegram
+    "recommendation": "BUY|WAIT|PASS for Watchlist names; ADD|HOLD|TRIM|CUT for Book names",
+    "style": "value|growth", "horizon": "e.g. 5-10 years",
+    "one_line": "the whole case and the call in one or two sentences, with the key number",
+    "how_it_makes_money": [{"segment": "what it sells and to whom", "share": "~x% of revenue / profit", "note": "latest figure and growth"}],
+    "why": ["3 reasons for the call, each with a number"],
+    "key_risks": [{"risk": "...", "watch": "the KPI or event and its breach level"}],
+    "plan": {"action": "exactly what to do (and how much, if Ming holds it)", "add_below": 0.0, "trim_above": 0.0, "cut_if": "..."},
+    "position": "shares, cost, weight if held"}
+
 INBOX_FORMAT = {
     "where": f"Save one JSON file per task run into Drive folder ValueInvestor/v2-inbox (id {DRIVE_INBOX}). "
              "Name it <type>-<YYYY-MM-DD>-<short>.json. Never edit or delete other files.",
@@ -666,19 +676,21 @@ INBOX_FORMAT = {
                              "inputs": {"fcf_ps": 7.5, "g1": 8, "g2": 5, "tg": 2.5, "dr": 9.5},
                              "kill": [{"type": "price_below|analyst_mean_below|manual", "value": 120.0, "text": "..."}],
                              "tam": TAM_EXAMPLE},
+               "exec_summary": EXEC_EXAMPLE,
                "sections": {k: "text" for k in ["industry_map", "size_growth", "structure", "demand_supply",
                                                  "industry_risks", "outlook", "winners", "business", "right_to_win",
                                                  "moat", "tam_competitors", "management", "financials",
                                                  "company_risks", "variant_view", "valuation", "pillars",
                                                  "catalysts_flow", "premortem"]}},
     "tam": {"type": "tam", "items": [{"ticker": "AMAT", "tam": TAM_EXAMPLE}]},
+    "exec_summary": {"type": "exec_summary", "items": [{"ticker": "AMAT", "exec_summary": EXEC_EXAMPLE}]},
     "refresh": {"type": "refresh", "items": [{"ticker": "AMAT", "conviction": 70, "verdict": "BUY|WATCH|PASS", "entry_target": 150.0,
                                               "valuation": {"iv_low": 140, "iv_base": 200, "iv_high": 260,
                                                             "inputs": {"fcf_ps": 7.5, "g1": 8, "g2": 5, "tg": 2.5, "dr": 9},
                                                             "kill": [], "tam": TAM_EXAMPLE},
                                               "pillars": [{"pillar": "...", "status": "intact|watch|breached", "note": "result vs the KPI"}],
                                               "summary": "two or three lines: what the results said and what changed",
-                                              "full_reunderwrite": False}]},
+                                              "full_reunderwrite": False, "exec_summary": EXEC_EXAMPLE}]},
     "week_ahead": {"type": "week_ahead", "summary": "3-5 lines: what matters this week and why",
                    "events": [{"date": "2026-11-18", "title": "...", "why": "...", "names": ["NVDA"],
                                "playbook": "what to do before/after (e.g. wait to add until after results)"}],

@@ -1,0 +1,115 @@
+{"type": "exec_summary", "as_of": "2026-11-09", "items": [
+{"ticker": "NOW", "exec_summary": {
+ "recommendation": "ADD", "style": "growth", "horizon": "5-10 years",
+ "one_line": "A sticky enterprise workflow platform priced as if AI will shrink it; at $102 the 5-year market-size case returns about 20% a year, and your position is only 1% of the portfolio.",
+ "how_it_makes_money": [
+  {"segment": "Subscriptions (IT service and operations, HR, customer service, security workflows, AI agents)", "share": "~97% of revenue", "note": "$3.99B in Q3 2026, +21%; renewal rate ~98%; priced per seat plus growing AI consumption (Now Assist, AI ACV target $1.7B)"},
+  {"segment": "Professional services", "share": "~3%", "note": "Implementation; low margin, supports adoption"},
+  {"segment": "Profit engine", "share": "", "note": "Free cash flow margin ~30%+; heavy stock-based pay is the main cost to owners"}],
+ "why": ["Price is below the growth zone ($127): the 5-year TAM case (9% of a ~$400B workflow market, 25% net margin, 30x) returns ~20% a year", "Workflow data and permissions make it the system that AI agents act through, not the one they replace (agent consumption up 13x)", "Renewals ~98% and 30% FCF margins fund AI investment without debt stress"],
+ "key_risks": [{"risk": "AI agents from Microsoft or Salesforce replace ServiceNow seats", "watch": "Subscription growth: breach below 15% for two quarters (now 21%)"}, {"risk": "Growth keeps slowing", "watch": "cRPO growth (Q4 guide 18.5%)"}, {"risk": "Acquisitions dilute and destroy value", "watch": "Share count and goodwill (76% of equity)"}],
+ "plan": {"action": "Add about 3% of the portfolio (~$4,500, ~44 shares) to reach 4%", "add_below": 126.64, "trim_above": 199.58, "cut_if": "Subscription growth below 15% for two quarters, or renewal rate below 97%"},
+ "position": "10 shares at $87 (+17%), 1% of the portfolio"}},
+{"ticker": "SOFI", "exec_summary": {
+ "recommendation": "HOLD", "style": "growth", "horizon": "5-10 years",
+ "one_line": "A fast-growing digital bank (members +35%, tangible book +25%); the price is in its growth zone, but at 5% of the portfolio you already hold more than its conviction (55) supports.",
+ "how_it_makes_money": [
+  {"segment": "Lending (personal, student, home loans)", "share": "~55% of revenue", "note": "Net interest margin on loans funded by $51B of cheap deposits; originations $16.9B in Q3 (+71%)"},
+  {"segment": "Loan platform business", "share": "~15%", "note": "Fees for originating loans sold to partners ($3.8B in Q3)"},
+  {"segment": "Financial services (SoFi Money, Invest, Relay, cards)", "share": "~20%", "note": "Fee and interchange income; cross-sell (1.56 products per member)"},
+  {"segment": "Technology platform (Galileo, Technisys)", "share": "~10%", "note": "Processing for other fintechs and banks"}],
+ "why": ["5-year TAM case returns ~18% a year at $16.2 (3% of a ~$470B US consumer banking pool)", "Bank charter gives cheap funding most fintechs lack; CET1 16.9%", "Earnings compounding: 2026 guide EPS ~$0.61, net income ~$840M"],
+ "key_risks": [{"risk": "Consumer credit losses rise in a slowdown", "watch": "Personal-loan charge-offs above 4% (all-in ~3.4% now)"}, {"risk": "Dilution from equity raises", "watch": "Share count growth above 5% a year"}, {"risk": "Tighter regulation under a Democrat Congress from 2027", "watch": "CFPB and capital-rule actions"}],
+ "plan": {"action": "Hold; add only if conviction rises to 60+ after Q4 results (late Jan 2027)", "add_below": 18.28, "trim_above": 28.81, "cut_if": "Charge-offs above 4%, CET1 below 12%, or member growth below 20%"},
+ "position": "450 shares at $15.40 (+5%), 5% of the portfolio"}},
+{"ticker": "MSFT", "exec_summary": {
+ "recommendation": "HOLD", "style": "growth", "horizon": "5-10 years",
+ "one_line": "The highest-quality AI platform you own, compounding near 15% a year; fairly priced at $531 and already 18% of the portfolio, so hold and do not add.",
+ "how_it_makes_money": [
+  {"segment": "Intelligent Cloud (Azure, server products)", "share": "~40% of revenue", "note": "Azure +48% in the Sept 2026 quarter; Microsoft Cloud $63.9B a quarter"},
+  {"segment": "Productivity and Business Processes (Microsoft 365, Copilot, LinkedIn, Dynamics)", "share": "~33%", "note": "Seat subscriptions with Copilot upsell; highest margins"},
+  {"segment": "More Personal Computing (Windows, Xbox/Activision, search ads)", "share": "~27%", "note": "Slower growth, cash generative"},
+  {"segment": "Profit engine", "share": "", "note": "Operating margin ~47%; capex ~$175B this fiscal year is cutting free cash flow (-27% y/y)"}],
+ "why": ["Azure is capacity-constrained with 40%+ growth; enterprise AI runs on Microsoft identity, Office and Azure", "Operating margin near 47% and ROIC ~30% make it the least risky AI compounder", "5-year TAM case returns ~11% a year: solid, not cheap"],
+ "key_risks": [{"risk": "AI capex earns poor returns", "watch": "Azure growth below 30% while capex rises"}, {"risk": "OpenAI relationship changes", "watch": "Contract terms and Azure commitments"}, {"risk": "Concentration in your portfolio", "watch": "18% weight vs the 10% limit"}],
+ "plan": {"action": "Hold; consider trimming toward 10-12% only to fund NOW or to reduce AI-theme concentration", "add_below": 454.56, "trim_above": 716.37, "cut_if": "Azure growth below 30% for two quarters or FCF below $50B a year"},
+ "position": "50 shares at $385.60 (+38%), 18% of the portfolio"}},
+{"ticker": "AMZN", "exec_summary": {
+ "recommendation": "HOLD", "style": "growth", "horizon": "5-10 years",
+ "one_line": "AWS has re-accelerated to 39% growth and drives most of the profit; the stock is fairly priced at $259 (5-year case ~12% a year) and already 14% of the portfolio.",
+ "how_it_makes_money": [
+  {"segment": "AWS (cloud infrastructure and AI)", "share": "~23% of revenue, ~60% of operating profit", "note": "$46B in Q3 2026 (+39%), $17.8B operating income"},
+  {"segment": "Advertising", "share": "~9%", "note": "~$70B a year, high margin, inside the retail segments"},
+  {"segment": "Online stores, third-party seller services, Prime", "share": "~68%", "note": "North America op margin 7.7%; scale and logistics feed ads and AWS"}],
+ "why": ["AWS growth accelerating at ~39% margins shows the AI capacity is being used", "Free cash flow should rebound sharply once capex peaks (2027): today it is -$42B trailing", "Ads and robotics-led retail margins are under-appreciated profit levers"],
+ "key_risks": [{"risk": "AI capex ($220B in 2026) earns poor returns", "watch": "AWS operating margin below 30%"}, {"risk": "AWS loses AI share to Azure and Google Cloud", "watch": "AWS growth below 20% for two quarters"}, {"risk": "Regulation and politics (FTC case, data-centre rules)", "watch": "Court rulings; state moratoria"}],
+ "plan": {"action": "Hold; no adds while above 10% of the portfolio", "add_below": 225.29, "trim_above": 355.04, "cut_if": "AWS growth below 20% with capex still rising, or FCF still negative after 2027"},
+ "position": "80 shares at $230 (+13%), 14% of the portfolio"}},
+{"ticker": "GOOG", "exec_summary": {
+ "recommendation": "HOLD", "style": "growth", "horizon": "5-10 years",
+ "one_line": "The cheapest megacap for the most complete AI stack (models, chips, cloud, distribution), but at $284 the 5-year case returns only ~8% a year, so hold and add on weakness.",
+ "how_it_makes_money": [
+  {"segment": "Search and other ads", "share": "~50% of revenue, most of the profit", "note": "~$63B in Q3 2026 (missed estimates of ~$65B)"},
+  {"segment": "YouTube ads", "share": "~9%", "note": "$11.2B in Q3"},
+  {"segment": "Google Cloud", "share": "~24%", "note": "$30.7B in Q3 (+103%), margins rising"},
+  {"segment": "Subscriptions, platforms and devices", "share": "~10%", "note": "YouTube Premium, Google One, Play, Pixel"}],
+ "why": ["Search query growth is the strongest in five years despite AI chat", "Cloud doubling shows its $195-205B capex is earning returns", "~24x earnings, lowest of the megacaps; Waymo and quantum are free options"],
+ "key_risks": [{"risk": "AI chat erodes search ad pricing", "watch": "Search revenue declines for two quarters"}, {"risk": "Antitrust remedies force a break-up of distribution", "watch": "Court rulings and appeals"}, {"risk": "2027 capex above $300B with weaker returns", "watch": "Cloud growth below 40%"}],
+ "plan": {"action": "Hold; add below the value entry of $266 (closer than the growth zone of $208)", "add_below": 266.0, "trim_above": 327.37, "cut_if": "Search revenue declines two quarters in a row or a structural divestiture is ordered"},
+ "position": "40 shares at $300 (-5%), 8% of the portfolio"}},
+{"ticker": "META", "exec_summary": {
+ "recommendation": "HOLD", "style": "growth", "horizon": "5-10 years",
+ "one_line": "An AI-powered ad machine growing 26% at ~20x underlying earnings; the price is 11% above its growth zone and 2027 capex is the swing factor, so hold and add on a dip.",
+ "how_it_makes_money": [
+  {"segment": "Family of Apps advertising (Facebook, Instagram, WhatsApp, Messenger, Threads)", "share": "~98% of revenue", "note": "$64.6B in Q3 2026 (+26%): ad impressions +10%, price per ad +14%; 3.64B daily users"},
+  {"segment": "Reality Labs (glasses, VR)", "share": "~2%", "note": "Loses ~$18-19B a year (narrowing to ~$15B in 2027)"}],
+ "why": ["AI ranking keeps lifting ad prices: the engine compounds faster than the ad market", "~20x ex-charge earnings power (~$30 a share) is cheap for 25%+ growth", "Messaging and AI assistants are early second growth engines"],
+ "key_risks": [{"risk": "2027 capex guide pushes free cash flow negative", "watch": "Q4 results (late Jan 2027)"}, {"risk": "Legal and youth-safety settlements beyond the $18.6B already agreed", "watch": "New suits and rulings"}, {"risk": "Engagement shifts to AI assistants or TikTok", "watch": "Daily users (+3%)"}],
+ "plan": {"action": "Hold; add below the growth zone. Prices are before the 19 Jan 2027 Class C share dividend: halve all levels after that date", "add_below": 551.27, "trim_above": 868.77, "cut_if": "Revenue growth below 15% for two quarters while capex rises"},
+ "position": "Shares and cost not yet entered in the app"}},
+{"ticker": "HOOD", "exec_summary": {
+ "recommendation": "TRIM", "style": "growth", "horizon": "5-10 years for a core position",
+ "one_line": "A strong asset gatherer, but at $81 it trades above Claude's value ($61), it moves about 3x the market, and at 35% of your portfolio it is your biggest risk: cut it back toward 10%.",
+ "how_it_makes_money": [
+  {"segment": "Transaction revenue (options, equities, crypto, prediction markets)", "share": "~61% of revenue", "note": "$867M in Q3 2026: options +31%, equities +41%, crypto -55%, event contracts ~6x"},
+  {"segment": "Net interest (cash sweep, margin lending, securities lending)", "share": "~29%", "note": "$415M, falls as rates fall (-9%)"},
+  {"segment": "Gold subscriptions and other", "share": "~10%", "note": "5.2M Gold subscribers (+34%)"}],
+ "why": ["Reason to own: platform assets $396B (+19%) and $71B a year of net deposits make it a real share-taker", "Reason to trim: 35% weight vs a 10% limit, beta ~3.2, and the 5-year case returns only ~13% a year from here", "Earnings are still driven by cyclical speculation (options, crypto, event contracts)"],
+ "key_risks": [{"risk": "Retail trading and crypto volumes collapse together", "watch": "Transaction revenue and crypto notional"}, {"risk": "Prediction-market or payment-for-order-flow regulation (new Congress 2027)", "watch": "CFTC and Congressional action"}, {"risk": "Rate cuts shrink interest income", "watch": "Net interest revenue"}],
+ "plan": {"action": "Trim about two-thirds (~420 of 640 shares) to bring it near 10% of the portfolio; keep ~220 shares as a core holding", "add_below": 74.35, "trim_above": 117.18, "cut_if": "Net deposits below $30B a year, funded customers falling, or adverse event-contract regulation"},
+ "position": "640 shares at $80.53 (flat), 35% of the portfolio"}},
+{"ticker": "BE", "exec_summary": {
+ "recommendation": "TRIM", "style": "growth", "horizon": "Re-check at Q4 results (Feb 2027)",
+ "one_line": "Real hyper-growth in on-site data-centre power, but the price ($173) already assumes Bloom wins far more than a third of a ~$35B market; the 5-year case returns about -4% a year from here.",
+ "how_it_makes_money": [
+  {"segment": "Product sales (solid-oxide fuel-cell power servers)", "share": "~86% of revenue", "note": "$1.07B of Q3's $1.24B (+138%); customers Oracle (up to 2.8 GW), Brookfield, AEP, NTT DATA"},
+  {"segment": "Service, installation and electricity", "share": "~14%", "note": "Recurring maintenance and power-purchase contracts"},
+  {"segment": "Profit engine", "share": "", "note": "18% operating margin in Q3, but free cash flow still negative (-$181M) and ~8.5% a year dilution"}],
+ "why": ["Reason to trim: price is 33% above Claude's base value and far above the TAM case", "Post-midterm data-centre policy risk (97% of revenue is US)", "Beta ~3: the stock already fell 16% on 6 Nov and will swing hard either way"],
+ "key_risks": [{"risk": "Data-centre moratoria or AI capex cuts stall orders", "watch": "2027 revenue guide below 30% growth"}, {"risk": "Gas turbines catch up and undercut on cost", "watch": "Order wins vs GE Vernova and Caterpillar"}, {"risk": "Another dilutive raise", "watch": "Converts or equity above 5% of shares"}],
+ "plan": {"action": "Trim half (30 of 60 shares); sell the rest if the 2027 guide implies growth below 30%", "add_below": 71.37, "trim_above": 112.48, "cut_if": "2027 growth guide below 30%, Oracle/Brookfield programmes delayed, or a large new raise"},
+ "position": "60 shares at $182.50 (-5%), 7% of the portfolio"}},
+{"ticker": "ORCL", "exec_summary": {
+ "recommendation": "HOLD", "style": "value", "horizon": "Re-check at Q2 FY27 results (mid-Dec 2026)",
+ "one_line": "Oracle is a debt-funded bet that OpenAI and others pay for $664B of contracted AI capacity; at $116 it is 27% below Claude's value but far above the $72 entry, so hold the small position and do not average down.",
+ "how_it_makes_money": [
+  {"segment": "Cloud infrastructure (OCI: renting GPU capacity)", "share": "~38% of revenue", "note": "$7.4B in fiscal Q1 2027 (+121%); about half the backlog is OpenAI"},
+  {"segment": "Cloud applications (Fusion ERP, NetSuite, health records)", "share": "~22%", "note": "$4.2B (+10%), sticky subscriptions"},
+  {"segment": "Software licences and support (database)", "share": "~28%", "note": "$5.5B (-3%), highly profitable, funds the build-out"},
+  {"segment": "Services and hardware", "share": "~12%", "note": ""}],
+ "why": ["Reason to keep: if the contracts are honoured, OCI becomes a top-4 cloud and earnings power is well above today's price", "Reason not to add: debt incl. leases $169B, rating BBB- (one notch above junk), ~86M new shares issued in Nov 2026", "Free cash flow is negative until the second half of fiscal 2028"],
+ "key_risks": [{"risk": "OpenAI cannot pay or renegotiates", "watch": "OpenAI funding rounds and contract news"}, {"risk": "Downgrade to junk raises funding costs", "watch": "S&P/Moody's reviews"}, {"risk": "Data-centre delays (e.g. Texas moratorium)", "watch": "OCI revenue vs guide"}],
+ "plan": {"action": "Hold (4% weight); no averaging down until the price reaches $72 or the financing risk clears", "add_below": 72.0, "trim_above": 235.0, "cut_if": "Rating cut to junk, OpenAI reduces commitments, or further equity issuance"},
+ "position": "50 shares at $176.60 (-34%), 4% of the portfolio"}},
+{"ticker": "SMCI", "exec_summary": {
+ "recommendation": "TRIM", "style": "value", "horizon": "Decide by Q2 FY27 results (early Feb 2027)",
+ "one_line": "Looks very cheap (~4x earnings) but profits are not turning into cash and governance history is poor; at 10% of the portfolio with a beta of ~3, cut it in half and exit if cash flow stays negative.",
+ "how_it_makes_money": [
+  {"segment": "AI server and rack-scale systems (Nvidia/AMD GPU servers, liquid cooling)", "share": "~95% of revenue", "note": "$19.9B in fiscal Q1 2027; FY27 guide $72-82B; gross margin 12.7%"},
+  {"segment": "Subsystems, accessories and services", "share": "~5%", "note": ""},
+  {"segment": "Profit engine", "share": "", "note": "Net income $1.59B in the quarter, but operating cash flow -$434M as inventory ($15.1B) and receivables ($9.7B) ballooned"}],
+ "why": ["Reason to trim: earnings quality is weak and the low P/E reflects distrust, not a bargain", "History of late filings, an SEC settlement and an auditor resignation (2024)", "A low-margin assembler competing with Dell and Taiwanese ODMs"],
+ "key_risks": [{"risk": "AI capex pause leaves $15B of inventory to write down", "watch": "Hyperscaler capex guides"}, {"risk": "Accounting or governance setback", "watch": "On-time 10-Q, auditor stability"}, {"risk": "Margin squeeze", "watch": "Gross margin below 10%"}],
+ "plan": {"action": "Trim half (250 of 500 shares) now; sell the rest if operating cash flow is negative again in Q2 FY27", "add_below": 20.0, "trim_above": 65.0, "cut_if": "Operating cash flow negative for another quarter, any restatement or late filing, or gross margin below 10%"},
+ "position": "500 shares at $28.30 (+2%), 10% of the portfolio"}}
+]}

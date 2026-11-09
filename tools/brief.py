@@ -72,6 +72,17 @@ def build(cur, html=True):
         link = f' <a href="{APP_URL}/decide">Decide</a>' if html else ""
         out.append(b(f"To decide ({len(dec)})") + link + "\n" + "\n".join(lines) + tail)
 
+    # ---- Claude's call on every holding (from each thesis's executive summary)
+    cur.execute("""SELECT DISTINCT ON (t.ticker) t.ticker, t.sections->'exec_summary'->>'recommendation' AS call
+                   FROM v2_theses t JOIN v2_names n USING (ticker) WHERE n.level = 'book' ORDER BY t.ticker, t.version DESC""")
+    calls = {}
+    for r in cur.fetchall():
+        if r["call"]:
+            calls.setdefault(r["call"], []).append(r["ticker"])
+    if calls:
+        out.append(b("Claude's calls on your Book") + "\n" + " · ".join(
+            f"{c} {', '.join(a(t) for t in calls[c])}" for c in ("CUT", "TRIM", "ADD", "HOLD") if c in calls))
+
     # ---- Book health
     cur.execute("SELECT ticker, health, health_why FROM v2_names WHERE level = 'book' AND health IN ('red','amber') ORDER BY health DESC, ticker")
     hl = cur.fetchall()
