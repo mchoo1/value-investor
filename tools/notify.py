@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from common import db, ensure_schema, telegram, esc, APP_URL, TODAY
+from common import db, ensure_schema, telegram, email, esc, APP_URL, TODAY
 
 import re
 MODE = sys.argv[1] if len(sys.argv) > 1 else "alerts"
@@ -118,7 +118,9 @@ def brief(conn):
     fails = ((h or {}).get("value") or {}).get("failures") or {}
     tail = ("\n\n⚙️ <i>Data issues today: " + esc(", ".join(f"{k.replace('_', ' ')} {len(v)}" for k, v in fails.items()))
             + "</i>") if fails else ""
-    if telegram(head + build(cur) + tail):
+    text = head + build(cur) + tail
+    email(f"ValueInvestor daily brief · {TODAY:%a %d %b}", text)
+    if telegram(text):
         mark(cur, [a["id"] for a in shown], "telegram")
         mark(cur, [a["id"] for a in rest], "digest")
         conn.commit()
@@ -169,6 +171,7 @@ def screen(conn):
            + (f"\nBuffett indicator {b['ratio_est']:.0%} of GDP · {b['zone']}" if b else "")
            + f"\n\nReason and growth cards arrive Sunday morning, deep dives (2 value + 2 growth) Monday morning."
            + f'\n<a href="{APP_URL}/screen">Value screen</a> · <a href="{APP_URL}/screen?track=growth">Growth screen</a>')
+    email(f"ValueInvestor weekly screen · {run['run_date']:%d %b}", msg)
     print("Screen summary sent." if telegram(msg) else "Screen summary not delivered.")
 
 
@@ -256,6 +259,7 @@ def digest(conn):
     if fails:
         out.append("⚙️ <i>Data issues on the last run: " + esc(", ".join(f"{k.replace('_', ' ')} {len(v)}" for k, v in fails.items())) + "</i>")
     out.append(f'<a href="{APP_URL}/decide">Decide</a> · <a href="{APP_URL}/watchlist">Watchlist</a> · <a href="{APP_URL}/book">Book</a> · <a href="{APP_URL}/screen">Screen</a>')
+    email(f"ValueInvestor weekly digest · {TODAY:%d %b %Y}", "\n\n".join(out))
     print("Digest sent." if telegram("\n\n".join(out)) else "Digest not delivered.")
 
 

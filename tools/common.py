@@ -27,8 +27,8 @@ def theme_of(industry):
 APP_URL = os.environ.get("APP_URL", "https://value-investor-weld.vercel.app")
 
 # Drive folders (ValueInvestor/v2-outbox and v2-inbox); the service account has edit access
-DRIVE_STATE_FILE = os.environ.get("DRIVE_STATE_FILE", "1ayGcP8pbqi_dys9ELCJUVz7-Nt3pTqH2")
-DRIVE_INBOX = os.environ.get("DRIVE_INBOX", "1qBWYh4QaIyv07CtOCM3bx8iwxeQuV4WL")
+DRIVE_STATE_FILE = os.environ.get("DRIVE_STATE_FILE", "1vdIGlO80SyhEJ5zWS3H2uU3UL1yuOLSP")
+DRIVE_INBOX = os.environ.get("DRIVE_INBOX", "1fbkkd_NXjVz6q2wEcECgCdS9a6e66qNV")
 
 # Seven core themes -> basket ETFs used for theme sell-off alerts
 THEMES = {
@@ -129,6 +129,29 @@ def telegram(text):
             return False
         time.sleep(0.4)
     return True
+
+
+def email(subject, html_text):
+    """Send the same message by email (Gmail SMTP with an app password). Set EMAIL_USER, EMAIL_APP_PASSWORD and
+    optionally EMAIL_TO (defaults to EMAIL_USER). Without them, does nothing. Never raises."""
+    user, pw = os.environ.get("EMAIL_USER"), os.environ.get("EMAIL_APP_PASSWORD")
+    if not user or not pw or os.environ.get("TELEGRAM_DRY"):
+        return False
+    import smtplib, re as _re
+    from email.mime.text import MIMEText
+    to = os.environ.get("EMAIL_TO") or user
+    body = ('<div style="font:14px/1.6 -apple-system,Segoe UI,Roboto,Arial,sans-serif;max-width:640px;color:#1f2328">'
+            + html_text.replace("\n", "<br>") + "</div>")
+    msg = MIMEText(body, "html", "utf-8")
+    msg["Subject"], msg["From"], msg["To"] = subject, user, to
+    try:
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30) as smtp:
+            smtp.login(user, pw.replace(" ", ""))
+            smtp.sendmail(user, [to], msg.as_string())
+        return True
+    except Exception as e:
+        print("Email not sent:", e.__class__.__name__, str(e)[:120])
+        return False
 
 
 def esc(s):
