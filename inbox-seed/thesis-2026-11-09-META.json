@@ -1,0 +1,68 @@
+{
+ "type": "thesis",
+ "ticker": "META",
+ "add_to_watchlist": false,
+ "themes": [
+  "AI and energy infrastructure"
+ ],
+ "conviction": 70,
+ "verdict": "WATCH",
+ "entry_target": 589.0,
+ "valuation": {
+  "iv_low": 480,
+  "iv_base": 785,
+  "iv_high": 1050,
+  "inputs": {
+   "fcf_ps": 30,
+   "g1": 11,
+   "g2": 8,
+   "tg": 3,
+   "dr": 9.5
+  },
+  "kill": [
+   {
+    "type": "price_below",
+    "value": 450,
+    "text": "Price below $450 (pre-split basis; halve this level after the 19 Jan 2027 Class C dividend)"
+   },
+   {
+    "type": "analyst_mean_below",
+    "value": 650,
+    "text": "Street mean target below $650 (pre-split basis; halve after 19 Jan 2027)"
+   },
+   {
+    "type": "manual",
+    "text": "Revenue growth below 15% for two quarters while capex keeps rising"
+   },
+   {
+    "type": "manual",
+    "text": "Further legal settlements above $10B or a ruling forcing divestiture of Instagram/WhatsApp"
+   },
+   {
+    "type": "manual",
+    "text": "2027 capex guide implies negative full-year free cash flow"
+   }
+  ]
+ },
+ "sections": {
+  "industry_map": "Meta owns Facebook, Instagram, WhatsApp, Messenger and Threads (3.64B daily users), sells ads across them, and spends on AI (Meta Superintelligence Labs, Llama/Muse) and Reality Labs (glasses, VR).",
+  "size_growth": "Digital ads ~$750B growing ~10%; Meta is growing far faster: Q3 2026 revenue $64.6B (+26%), ad impressions +10%, price per ad +14% (Meta Q3 release, 21 Oct 2026). Ads are cyclical with consumer spend.",
+  "structure": "Social ads duopoly with Google in the US plus TikTok; strong network effects; regulation (privacy, child safety) is the main barrier and risk.",
+  "demand_supply": "Advertiser demand strong as AI targeting improves returns; Meta's own compute need is the bottleneck. 2026 capex $135-145B; 2027 will be higher (no number yet).",
+  "industry_risks": "(1) Legal and regulatory - high probability, medium impact: an August 2026 settlement with 52 state attorneys general costs up to ~$18.6B ($9.9B charged in Q3); warning: new suits. (2) AI capex overbuild - medium/high. (3) Ad cycle downturn - low-medium/medium. (4) TikTok resurgence - low/medium.",
+  "outlook": "Near: revenue growth mid-20s%, FCF near zero as capex ramps (Q3 FCF -$2.1B), no buybacks in 2026. Mid: AI-driven ad gains and messaging monetisation (WhatsApp) keep growth high-teens. Long: AI assistants and glasses as a new platform are options.",
+  "winners": "Engagement scale, ad-ranking AI, compute capacity, ability to self-fund, regulatory management.",
+  "business": "Family of Apps produces all profit; Reality Labs loses $18-19B in 2026 (narrowing to ~$15B in 2027). Q3 operating income $13B (20% margin) including the $9.9B legal charge; excluding it ~$22.9B (35%), EPS $7.40.",
+  "right_to_win": "No other company has 3.6B daily users plus a frontier-scale AI effort and a direct-response ad engine; better AI ranking turns straight into higher ad prices.",
+  "moat": "Wide: network effects and data scale. Trend: stable; AI improves monetisation, regulation chips at the edges.",
+  "tam_competitors": "~20%+ of global digital ads. Competitors: Google, TikTok, Amazon ads, AppLovin. Runway: WhatsApp business messaging, AI agents for businesses, Threads ads.",
+  "management": "Founder-CEO Mark Zuckerberg controls voting; bold capital allocator (Reality Labs, AI) with a record of both waste and huge wins. Headcount down 15% year on year. Buybacks paused in 2026 to fund capex; dividend continues. A non-voting Class C share dividend on 19 Jan 2027 will halve the Class A price (works like a 2-for-1 split).",
+  "financials": "Revenue $86B (2020) to $201B (2025), operating margin 25-42%, ROIC 19-34%. FCF $46B in 2025, falling in 2026 ($11B for nine months). Long-term debt up to $80.9B from $58.7B; cash $82.5B. EPS 2025 $23.49; nine-month 2026 EPS $20.44.",
+  "company_risks": "(1) Capex payback - KPI: revenue growth vs expense growth (expenses +68% in Q3 including the charge). (2) Legal - KPI: settlements. (3) Engagement - KPI: daily users (+3%). (4) Reality Labs burn - KPI: losses above $20B.",
+  "variant_view": "The market sees Meta as an AI spender with legal overhangs; we believe its ad engine is compounding at 25%+ with AI-driven price gains, so ex-charge earnings power (~$30/share) makes it cheaper than it looks at ~20x.",
+  "valuation": "Our value (owner earnings $30/share, 11% then 8%, 9.5% discount): low $480, base $785, high $1,050; price $610 implies ~16% growth vs 18% history. Street mean $850 (57 analysts). Peers: ~20x ex-charge EPS vs GOOGL ~24x. Required margin of safety 25% gives entry $589, 3% below today. All figures are pre-Class C dividend; halve them after 19 Jan 2027. Ming does not have a recorded position yet; add shares and cost in the app.",
+  "pillars": "(1) Revenue growth above 18% - breach: below 15% for two quarters. (2) Ex-charge operating margin above 35% - breach below 30%. (3) Capex returns visible as ad price gains - breach: price per ad flat while capex rises. (4) No structural break-up - breach: ruling forcing divestiture.",
+  "catalysts_flow": "Q4 results (late Jan 2027) with 2027 capex and expense guide; Class C dividend 19 Jan 2027; Muse/AI assistant monetisation updates. Sellers: funds trimming on capex and legal news (stock fell ~7-9% after Q3). Buyers: GARP funds at ~20x.",
+  "premortem": "(1) 2027 capex guide shocks and FCF goes negative for years. (2) A youth-safety ruling or settlement wave far larger than $18.6B. (3) AI assistants shift attention away from feeds."
+ }
+}

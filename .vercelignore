@@ -3,3 +3,4 @@ tools/
 outbox/
 .github/
 *.md
+inbox-seed/

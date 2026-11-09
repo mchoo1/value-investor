@@ -1,8 +1,7 @@
-name: "Sunday headlines (08:07 SGT) and digest (18:07 SGT)"
+name: "Sunday digest (18:07 SGT)"
 on:
   workflow_dispatch:
   schedule:
-    - cron: "7 0 * * 0"   # 08:07 SGT Sunday: headlines
     - cron: "7 10 * * 0"   # 18:07 SGT Sunday: digest
 
 concurrency:
@@ -29,9 +28,5 @@ jobs:
       - run: pip install -r requirements-jobs.txt
       - name: Load Claude's results
         run: python tools/inbox.py
-      - name: Weekly headlines for Claude to tag
-        if: github.event.schedule != '7 10 * * 0'
-        run: python tools/monitor.py weekly && python tools/monitor.py export
       - name: Weekly digest
-        if: github.event.schedule == '7 10 * * 0'
         run: python tools/notify.py digest

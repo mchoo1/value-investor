@@ -1,0 +1,7 @@
+{"type":"book","replace":true,"items":[
+{"ticker":"AMZN","shares":80,"cost":230.00},{"ticker":"BE","shares":60,"cost":182.50},
+{"ticker":"GOOG","shares":40,"cost":300.00},{"ticker":"HOOD","shares":640,"cost":80.53},
+{"ticker":"META"},
+{"ticker":"MSFT","shares":50,"cost":385.60},{"ticker":"NOW","shares":10,"cost":87.00},
+{"ticker":"ORCL","shares":50,"cost":176.60},{"ticker":"SMCI","shares":500,"cost":28.30},
+{"ticker":"SOFI","shares":450,"cost":15.40}]}

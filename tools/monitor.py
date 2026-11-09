@@ -265,7 +265,7 @@ def daily(conn):
 
     # ---- buy signals not re-checked by Claude within 20 hours: release them anyway
     cur.execute("""UPDATE v2_alerts SET sent_via = NULL, detail = detail || ' (not yet re-checked by Claude)'
-                   WHERE sent_via = 'hold' AND NOT sent AND fired_at < now() - interval '20 hours'""")
+                   WHERE sent_via = 'hold' AND NOT sent AND fired_at < now() - interval '26 hours'""")
 
     # ---- health
     for n in names:

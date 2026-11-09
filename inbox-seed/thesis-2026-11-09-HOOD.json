@@ -1,0 +1,68 @@
+{
+ "type": "thesis",
+ "ticker": "HOOD",
+ "add_to_watchlist": false,
+ "themes": [
+  "Digital finance"
+ ],
+ "conviction": 52,
+ "verdict": "WATCH",
+ "entry_target": 30.0,
+ "valuation": {
+  "iv_low": 35,
+  "iv_base": 61,
+  "iv_high": 95,
+  "inputs": {
+   "fcf_ps": 2.4,
+   "g1": 18,
+   "g2": 10,
+   "tg": 3,
+   "dr": 12
+  },
+  "kill": [
+   {
+    "type": "price_below",
+    "value": 55,
+    "text": "Price below $55: re-test growth and regulatory assumptions"
+   },
+   {
+    "type": "analyst_mean_below",
+    "value": 95,
+    "text": "Street mean target below $95 (now ~$129)"
+   },
+   {
+    "type": "manual",
+    "text": "Net deposits below $30B on a trailing 12-month basis (now $71B)"
+   },
+   {
+    "type": "manual",
+    "text": "Regulatory action against prediction markets (event contracts are now ~12% of revenue)"
+   },
+   {
+    "type": "manual",
+    "text": "Funded customers decline for two quarters"
+   }
+  ]
+ },
+ "sections": {
+  "industry_map": "Robinhood is a retail brokerage and financial app: stock and options trading, crypto (plus Bitstamp exchange), prediction markets (event contracts), Gold subscription, cash sweep, credit card, retirement and banking.",
+  "size_growth": "US retail brokerage and wealth is a multi-trillion-dollar asset pool shifting to younger, digital investors. Q3 2026 revenue $1.42B (+12%) with options +31%, equities +41%, crypto -55%, event contracts +6x (Robinhood Q3 release, Oct 2026). Highly cyclical with retail trading and crypto prices; net interest income falls as rates fall.",
+  "structure": "Competitors: Schwab, Fidelity, Interactive Brokers, Coinbase, Webull, Kalshi/Polymarket. Low switching costs; brand and product velocity matter.",
+  "demand_supply": "Strong asset inflows: platform assets $396B (+19%), net deposits $15.7B in Q3 and $71B over 12 months, plus more than $13B in October including $6B from the Dell family's Trump Accounts contribution. Crypto volumes falling sharply (notional -38%).",
+  "industry_risks": "(1) Retail trading downturn - medium/high; warning: options and equity volumes. (2) Crypto bear market - high now/medium; warning: crypto revenue. (3) Regulation of prediction markets and payment for order flow, especially with a Democrat Congress from 2027 - medium/high. (4) Falling rates cut net interest revenue (-9%) - high/medium.",
+  "outlook": "Near: earnings flat to down year on year (Q3 EPS -16%) as crypto halves. Mid: diversification (prediction markets, banking, retirement, international) supports 15-20% growth. Long: could become a full-service financial platform for the next generation.",
+  "winners": "Product velocity, low cost, brand with young investors, regulatory breadth, asset gathering.",
+  "business": "Transaction revenue $867M, net interest $415M, other $142M; Gold subscribers 5.2M (+34%); funded customers 28.7M (+7%); ARPU $200. Adjusted EBITDA $808M; adjusted EPS $0.60.",
+  "right_to_win": "Fastest product innovator in US retail finance with a cost base far below incumbents and the strongest brand among under-40s.",
+  "moat": "Narrow and emerging: brand and scale, but low switching costs. Trend: improving as assets and subscriptions grow.",
+  "tam_competitors": "~3% of US retail brokerage assets vs Schwab's ~$10T. Competitors: Schwab, Fidelity, IBKR, Coinbase, Kalshi.",
+  "management": "Co-founder CEO Vlad Tenev; CFO Jason Warnick retiring, succession done. Buybacks $1.3B since Q3 2024 at ~$48 average. Insiders heavy net sellers ($178M over 6 months). Expense discipline good (2026 opex guide trimmed).",
+  "financials": "Revenue grew ~36% a year 2020-2025 (on the screen data basis); turned profitable 2024. Engine shows share count growth of 16.9% a year, inflated by IPO-era conversions; recent buybacks offset dilution. Cash $5.8B.",
+  "company_risks": "(1) Crypto and trading volumes - KPI: transaction revenue. (2) Regulatory - KPI: actions on event contracts or PFOF. (3) Net interest sensitivity - KPI: NII. (4) Concentration in retail speculation - KPI: options share of revenue.",
+  "variant_view": "The market values Robinhood as a fast-growing fintech platform at ~34x earnings; we see a high-quality asset gatherer, but earnings are still driven by cyclical speculation (options, crypto, prediction markets), so the price already discounts a lot of growth.",
+  "valuation": "Our value (owner earnings $2.4/share, 18% then 10%, 12% discount): low $35, base $61, high $95; price $81 is 33% above base. Street mean $129 (30 analysts). Peers: IBKR ~25x, SCHW ~18x. Required margin of safety 50% (early, cyclical) gives entry $30. Ming's cost $80.53 (flat): hold only as a smaller position; do not add.",
+  "pillars": "(1) Net deposits above $50B a year - breach below $30B. (2) Gold subscribers growing above 20% - breach below 10%. (3) Revenue growth above 15% - breach below 5%. (4) No adverse prediction-market regulation - breach: CFTC/Congress restrictions.",
+  "catalysts_flow": "Q4 2026 results (Feb 2027); crypto price trend; prediction-market regulation in the new Congress. Sellers: crypto-linked funds as crypto falls. Buyers: fintech growth funds on asset growth.",
+  "premortem": "(1) Crypto and options volumes collapse together. (2) Congress or the CFTC curbs event contracts. (3) Rate cuts shrink interest income faster than growth offsets."
+ }
+}

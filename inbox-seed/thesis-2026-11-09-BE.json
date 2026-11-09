@@ -1,0 +1,68 @@
+{
+ "type": "thesis",
+ "ticker": "BE",
+ "add_to_watchlist": false,
+ "themes": [
+  "AI and energy infrastructure"
+ ],
+ "conviction": 48,
+ "verdict": "PASS",
+ "entry_target": 65.0,
+ "valuation": {
+  "iv_low": 70,
+  "iv_base": 130,
+  "iv_high": 190,
+  "inputs": {
+   "fcf_ps": 3.2,
+   "g1": 32,
+   "g2": 12,
+   "tg": 3,
+   "dr": 13
+  },
+  "kill": [
+   {
+    "type": "price_below",
+    "value": 120,
+    "text": "Price below $120: thesis on data-centre on-site power under stress; re-review"
+   },
+   {
+    "type": "analyst_mean_below",
+    "value": 220,
+    "text": "Street mean target below $220 (now ~$284)"
+   },
+   {
+    "type": "manual",
+    "text": "2027 revenue guide implies growth below 40% or backlog shrinks"
+   },
+   {
+    "type": "manual",
+    "text": "Oracle/Brookfield/NTT programmes delayed or cancelled"
+   },
+   {
+    "type": "manual",
+    "text": "New equity or convertible issuance above 5% of shares"
+   }
+  ]
+ },
+ "sections": {
+  "industry_map": "Bloom makes solid-oxide fuel cells that generate electricity on site from natural gas (or hydrogen), sold to data centres, utilities (AEP), and industrial users, and financed via partners such as Brookfield.",
+  "size_growth": "On-site power for data centres is a new, fast-growing market because grid connections take 3-7 years. Bloom guides 2026 revenue $4.4-4.6B (+~122%); Q3 2026 revenue $1.24B (+138%), operating margin 18% (company results via renewable-energy-industry.com, 23 Oct 2026). Highly cyclical with AI capex and gas prices.",
+  "structure": "Competes with gas turbines and reciprocating engines (GE Vernova, Caterpillar, W\u00e4rtsil\u00e4), batteries plus grid, and future small nuclear. Bloom wins on speed to power (months, not years).",
+  "demand_supply": "Demand: Oracle framework up to 2.8 GW (1.2 GW firm), Brookfield $25B financing, NTT DATA 900 MW from 2027. Supply: Bloom is expanding factory capacity; constraint is manufacturing ramp and gas supply. Call: shortage of fast power through 2027-28.",
+  "industry_risks": "(1) Data-centre approvals slow after the Democrat midterm sweep (3 Nov 2026) and a promised Texas moratorium - medium/high; warning: state rules. 97% of Q3 revenue was US. (2) AI capex slowdown - medium/high. (3) Natural gas price spikes - medium/medium. (4) Competition from turbines as their supply catches up - medium/medium by 2028.",
+  "outlook": "Near: very strong 2026 numbers but post-election selling (-16% on 6 Nov). Mid: consensus EPS rising to ~$8.24 by 2028. Long: depends on whether on-site fuel cells become a standard data-centre power layer or a bridge until grid capacity arrives.",
+  "winners": "Speed to power, cost per MWh vs grid, financing partners, factory scale, fuel flexibility.",
+  "business": "Product revenue $1.07B of Q3's $1.24B; adjusted EBITDA $300M; net income $250M; but free cash flow -$181M as working capital builds. Interest cover only 1.4x and dilution ~8.5% a year historically (ValueInvestor research).",
+  "right_to_win": "Bloom is the only fuel-cell maker with proven multi-hundred-MW deliveries and bankable financing partners, and it can deliver power in months.",
+  "moat": "Narrow at best: technology and installed base, but turbines and engines compete on price. Trend: improving with scale.",
+  "tam_competitors": "Small share of total power equipment but leading share of on-site data-centre fuel cells. Competitors: GE Vernova, Siemens Energy, Caterpillar, FuelCell Energy.",
+  "management": "Founder-CEO KR Sridhar (since 2001). History of losses until 2024; now profitable. Insiders net sellers ($46M over 6 months). Funding via convertibles has diluted holders.",
+  "financials": "Revenue $794M (2020) to $2.0B (2025) and ~$4.5B in 2026; operating margin from -22% (2022) to +18% (Q3 2026). FCF negative most years. Share count rising ~8.5% a year.",
+  "company_risks": "(1) Customer concentration (Oracle, Brookfield) - KPI: top-customer share. (2) Cash conversion - KPI: FCF. (3) Dilution - KPI: share count. (4) Policy - KPI: US data-centre approvals.",
+  "variant_view": "The market treats Bloom as an AI-power winner worth ~34x forward earnings; we agree the business has turned, but the price already assumes several years of hyper-growth with negative cash flow and policy risk, so we do not add and would trim into strength.",
+  "valuation": "Our value (owner earnings $3.2/share, 32% then 12%, 13% discount): low $70, base $130, high $190; price $173 is 33% above base. Street mean $284 (26 analysts), based on 2028 EPS of ~$8.24. Required margin of safety 50% (high-growth, early) gives entry $65. Ming's cost $182.50 (-5%). Verdict PASS means do not add; consider trimming rather than a full sale given the strong operating momentum.",
+  "pillars": "(1) 2027 revenue growth above 40% - breach below 30%. (2) Operating margin above 15% - breach below 10%. (3) FCF positive in 2027 - breach: negative. (4) Diversification beyond Oracle/US - breach: one customer above 40% of revenue.",
+  "catalysts_flow": "Q4 2026 results and 2027 guide (Feb 2027); NTT shipments from 2027; state data-centre policy moves. Sellers: momentum funds after the election. Buyers: energy-transition and AI-power funds on dips.",
+  "premortem": "(1) Data-centre moratoria and AI capex cuts stall orders in 2027. (2) Turbine supply catches up and undercuts Bloom on cost. (3) Cash burn forces another dilutive raise."
+ }
+}

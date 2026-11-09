@@ -1,0 +1,68 @@
+{
+ "type": "thesis",
+ "ticker": "SOFI",
+ "add_to_watchlist": false,
+ "themes": [
+  "Digital finance"
+ ],
+ "conviction": 55,
+ "verdict": "WATCH",
+ "entry_target": 12.0,
+ "valuation": {
+  "iv_low": 12,
+  "iv_base": 24,
+  "iv_high": 34,
+  "inputs": {
+   "fcf_ps": 0.75,
+   "g1": 22,
+   "g2": 12,
+   "tg": 3,
+   "dr": 12
+  },
+  "kill": [
+   {
+    "type": "price_below",
+    "value": 11,
+    "text": "Price below $11: near tangible book x1.5; re-test credit and growth"
+   },
+   {
+    "type": "analyst_mean_below",
+    "value": 15,
+    "text": "Street mean target below $15 (now ~$21)"
+   },
+   {
+    "type": "manual",
+    "text": "Personal loan net charge-offs above 4% (all-in about 3.4% now)"
+   },
+   {
+    "type": "manual",
+    "text": "CET1 ratio below 12% (now 16.9%)"
+   },
+   {
+    "type": "manual",
+    "text": "Member growth below 20% for two quarters (now 35%)"
+   }
+  ]
+ },
+ "sections": {
+  "industry_map": "SoFi is a national bank and fintech: personal, student and home loans; deposits and checking; investing and crypto; a loan platform business that originates loans for third parties; and Galileo/Technisys technology serving other fintechs and banks.",
+  "size_growth": "US consumer lending and digital banking are very large markets; SoFi is taking share. Q3 2026 adjusted net revenue $1.37B (+44%), members 17.1M (+35%), deposits $51.3B (SoFi Q3 8-K, Oct 2026). Cyclical with credit and rates.",
+  "structure": "Competes with large banks (JPMorgan, Capital One), fintechs (Chime, Nubank-like models, Upstart, LendingClub) and brokers. Bank charter gives cheap deposit funding.",
+  "demand_supply": "Loan demand strong: originations $16.9B (+71%), including $3.8B for third parties. Funding plentiful from deposits. Credit is the swing factor.",
+  "industry_risks": "(1) Consumer credit downturn - medium/high; warning: charge-offs and delinquencies. (2) Rate path - medium/medium; warning: net interest margin. (3) Regulation (CFPB, capital rules) under a Democrat Congress - medium/medium. (4) Crypto volatility - medium/low (net crypto revenue only $1.6M).",
+  "outlook": "Near: 2026 guide adjusted revenue ~$5.04B (+40%), net income ~$840M, EPS ~$0.61. Mid: operating leverage and fee businesses lift returns; 2030 goal of 100M products. Long: a top-10 US consumer bank by customers.",
+  "winners": "Low-cost deposits, cross-sell (products per member 1.56), credit underwriting, brand with young professionals, technology platform.",
+  "business": "Adjusted EBITDA $470M (34% margin); net income $241M; tangible book value $7.48/share (+25%); CET1 16.9%. Personal loan charge-offs 2.26% reported, ~3.4% including loan sales.",
+  "right_to_win": "One app that bundles lending, banking and investing for high-income young professionals, funded by a bank charter that most fintechs lack.",
+  "moat": "Narrow and emerging: charter plus cross-sell scale. Trend: improving.",
+  "tam_competitors": "Small share of US deposits (~$51B vs ~$2.5T at JPMorgan). Competitors: Capital One, Chime, LendingClub, Upstart, Robinhood.",
+  "management": "CEO Anthony Noto (since 2018, ex-Twitter CFO, Goldman). Has delivered on guidance; history of dilutive raises. Insider buying small ($0.5M) vs selling $3.2M.",
+  "financials": "The engine's revenue history is distorted by bank XBRL tags; reported adjusted net revenue rose from ~$2.1B (2023) to ~$5.0B guided for 2026. Profitable since 2024. Share count rising ~24% a year historically (raises and conversions); leverage and 'FCF' flags are normal for a lender funding loan growth.",
+  "company_risks": "(1) Credit - KPI: personal loan charge-offs. (2) Capital - KPI: CET1. (3) Dilution - KPI: share count. (4) Loan platform dependence - KPI: third-party volume.",
+  "variant_view": "The market sees SoFi as a richly priced fintech at ~27x earnings; we think the bank is compounding tangible book at 25% and members at 35%, so earnings can grow fast enough to justify a higher value, but credit risk and dilution keep us at a modest position.",
+  "valuation": "Our value (owner earnings $0.75/share, 22% then 12%, 12% discount): low $12, base $24, high $34; price $16.2 is 33% below base. P/TBV ~2.2x. Street mean $20.8 (23 analysts). Required margin of safety 50% (high-growth, early) gives entry $12. Ming's cost $15.40 (+6%): hold.",
+  "pillars": "(1) Member growth above 25% - breach below 20%. (2) Charge-offs under 4% - breach above. (3) Tangible book growth above 15% - breach below 10%. (4) No large dilutive raise - breach: equity raise above 5%.",
+  "catalysts_flow": "Q4 2026 results and 2027 guide (late Jan 2027); credit data monthly. Sellers: short sellers (17% of float) betting on credit. Buyers: growth funds if 2027 EPS guide beats.",
+  "premortem": "(1) Recession pushes charge-offs above 6%. (2) Another equity raise dilutes holders. (3) Regulatory changes hit loan-platform economics."
+ }
+}

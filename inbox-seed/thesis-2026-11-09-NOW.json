@@ -1,0 +1,68 @@
+{
+ "type": "thesis",
+ "ticker": "NOW",
+ "add_to_watchlist": false,
+ "themes": [
+  "Automation and robotics"
+ ],
+ "conviction": 60,
+ "verdict": "WATCH",
+ "entry_target": 76.0,
+ "valuation": {
+  "iv_low": 65,
+  "iv_base": 117,
+  "iv_high": 170,
+  "inputs": {
+   "fcf_ps": 3.4,
+   "g1": 16,
+   "g2": 10,
+   "tg": 3,
+   "dr": 9.5
+  },
+  "kill": [
+   {
+    "type": "price_below",
+    "value": 70,
+    "text": "Price below $70: re-test whether AI agents are eroding the workflow franchise"
+   },
+   {
+    "type": "analyst_mean_below",
+    "value": 120,
+    "text": "Street mean target below $120 (now ~$156)"
+   },
+   {
+    "type": "manual",
+    "text": "Subscription revenue growth below 15% for two quarters (Q3 2026: 21%)"
+   },
+   {
+    "type": "manual",
+    "text": "Renewal rate below 97% or visible seat losses at large customers"
+   },
+   {
+    "type": "manual",
+    "text": "Another large acquisition that adds more than 5% to the share count"
+   }
+  ]
+ },
+ "sections": {
+  "industry_map": "ServiceNow sells a workflow platform for IT service management, IT operations, HR, customer service and security operations, increasingly with AI agents (Now Assist). It competes with Salesforce, Microsoft, Atlassian, Workday and AI-native start-ups.",
+  "size_growth": "Enterprise workflow and ITSM software ~$100B+ market growing ~10-12%; ServiceNow subscription revenue $3.99B in Q3 2026 (+21%) (aiweekly coverage of Q3, 29 Oct 2026). Low cyclicality but sensitive to IT budget reallocation toward AI infrastructure.",
+  "structure": "ServiceNow dominates large-enterprise ITSM (~40%+ share) with high switching costs; the debate is whether AI agents commoditise seat-based workflow software.",
+  "demand_supply": "Demand for AI agents rising: AI ACV target raised to $1.7B (+70% year to date), agentic consumption up 13x. But Q4 cRPO guide of 18.5% signals deceleration, and management flagged accounting adjustments and deployment-support costs on large deals.",
+  "industry_risks": "(1) AI disruption of seat-based SaaS - medium/high; warning: net new ACV and seat counts. (2) IT budgets shifting to AI capex - medium/medium; warning: cRPO growth. (3) Post-midterm federal spending changes (US federal is a large vertical) - low-medium/medium.",
+  "outlook": "Near: subscription growth slowing toward ~18-19%; stock down ~35%+ this year. Mid: if agents are priced on consumption, growth can re-accelerate. Long: the system-of-action for enterprise AI or a slowly shrinking seat franchise.",
+  "winners": "Owning the workflow data and permissions layer, consumption pricing for agents, trust with CIOs, high retention.",
+  "business": "Subscription is ~97% of revenue; renewal rate historically ~98%. Free cash flow margin ~30%+, but stock-based compensation is heavy. A 5-for-1 stock split took effect in late 2025 (prices here are post-split).",
+  "right_to_win": "ServiceNow already sits on top of enterprises' IT and HR processes, so AI agents that act on those processes need its platform and data.",
+  "moat": "Wide historically (switching costs). Trend: under question as AI agents could bypass seats; keep at narrow-to-wide until growth stabilises.",
+  "tam_competitors": "Leader in ITSM; competitors Salesforce Agentforce, Microsoft Copilot Studio, Atlassian, Zendesk, plus AI start-ups. Runway: CRM and security workflows, AI consumption revenue.",
+  "management": "CEO Bill McDermott (since 2019, ex-SAP) is a strong seller; capital allocation has turned acquisitive (goodwill now 76% of equity per ValueInvestor research) and the company announced another layoff round after the slide. Insider selling small ($3.7M over 6 months).",
+  "financials": "Revenue $4.5B (2020) to $13.3B (2025), GAAP operating margin 4% to 14%, FCF $1.4B to $4.6B. ROIC ~15%. Net debt 2.0x EBITDA flagged (acquisition debt). Diluted share increase in the data is distorted by the 5:1 split.",
+  "company_risks": "(1) Growth deceleration - KPI: cRPO growth (guide 18.5%). (2) Pricing model transition - KPI: AI ACV vs seat ACV. (3) Acquisition integration - KPI: goodwill impairments. (4) SBC dilution - KPI: share count.",
+  "variant_view": "The market now prices ServiceNow as a SaaS name disrupted by AI; we think its workflow data layer makes it a beneficiary of agents, but proof is needed, so the stock is fairly valued rather than a bargain.",
+  "valuation": "Our value (owner earnings after stock compensation $3.4/share, 16% then 10%, 9.5% discount): low $65, base $117, high $170; price $102 implies ~14% growth. Street mean $156 (46 analysts). Peers: ~26x forward EPS vs CRM ~20x, ADBE ~16x. Required margin of safety 35% (quality under question) gives entry $76; Ming's cost $87 (+17%).",
+  "pillars": "(1) Subscription growth above 17% - breach below 15%. (2) AI ACV keeps compounding - breach: target cut. (3) FCF margin above 30% - breach below 25%. (4) Renewal rate ~98% - breach below 97%.",
+  "catalysts_flow": "Q4 2026 results (late Jan 2027) with 2027 guide; Knowledge 2027 (May). Sellers: growth funds rotating out of application software. Buyers: GARP funds if AI ACV accelerates.",
+  "premortem": "(1) AI agents from Microsoft/Salesforce replace ServiceNow seats. (2) Growth slips to low teens and the multiple compresses further. (3) A large acquisition destroys value."
+ }
+}

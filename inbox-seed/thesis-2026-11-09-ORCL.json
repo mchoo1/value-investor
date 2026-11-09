@@ -1,0 +1,68 @@
+{
+ "type": "thesis",
+ "ticker": "ORCL",
+ "add_to_watchlist": false,
+ "themes": [
+  "AI and energy infrastructure"
+ ],
+ "conviction": 52,
+ "verdict": "WATCH",
+ "entry_target": 72.0,
+ "valuation": {
+  "iv_low": 80,
+  "iv_base": 160,
+  "iv_high": 235,
+  "inputs": {
+   "fcf_ps": 6.5,
+   "g1": 18,
+   "g2": 9,
+   "tg": 3,
+   "dr": 12
+  },
+  "kill": [
+   {
+    "type": "price_below",
+    "value": 85,
+    "text": "Price below $85: the market is pricing a financing or OpenAI failure; full re-review"
+   },
+   {
+    "type": "analyst_mean_below",
+    "value": 170,
+    "text": "Street mean target below $170 (now ~$236)"
+   },
+   {
+    "type": "manual",
+    "text": "Credit rating cut below investment grade (S&P now BBB-)"
+   },
+   {
+    "type": "manual",
+    "text": "OpenAI (about half of RPO) delays, cuts or renegotiates its Oracle commitments"
+   },
+   {
+    "type": "manual",
+    "text": "Further equity issuance beyond the cap set at the 28 Oct 2026 Investor Day"
+   }
+  ]
+ },
+ "sections": {
+  "industry_map": "Oracle sells databases and licences, cloud applications (Fusion ERP, NetSuite, health records from Cerner) and, increasingly, AI cloud infrastructure (OCI) - renting GPU capacity to OpenAI, Meta, xAI and others.",
+  "size_growth": "AI infrastructure rental is the fastest-growing segment of IT: OCI revenue $7.4B in fiscal Q1 2027 (+121%) (Oracle Q1 release, 10 Sep 2026). Database and apps grow low single digits to ~10%. AI infrastructure is highly capital-intensive and cyclical; Oracle is rate-sensitive because it funds capex with debt and equity.",
+  "structure": "OCI competes with AWS, Azure, Google and neoclouds (CoreWeave, Nebius). Customer concentration is extreme: roughly half of the $664B backlog is OpenAI (S&P). Database business is a durable oligopoly.",
+  "demand_supply": "Contracted demand is huge (RPO $664B, +$209B year on year) but Oracle must build the capacity first: fiscal 2026 capex $55.7B, S&P sees $90-95B in fiscal 2027. Bottlenecks: power, GPUs, financing. Call: demand on paper exceeds what Oracle can finance without dilution.",
+  "industry_risks": "(1) Counterparty risk - OpenAI's ability to pay depends on its own fundraising; medium probability, very high impact; warning: OpenAI funding rounds and compute renegotiations. (2) Post-midterm politics (Democrat sweep 3 Nov 2026) hitting data-centre approvals - medium/high; warning: state moratoria (Texas, where Abilene sits). (3) Credit - S&P cut to BBB- in July 2026; another notch is junk. (4) GPU obsolescence before contracts pay back.",
+  "outlook": "Near: revenue +30-34% next quarter, FCF negative (-$5B in Q1), more financing. Mid: Oracle guides FCF positive in the second half of fiscal 2028; revenue at least $90B in fiscal 2027. Long: if contracts are honoured, OCI becomes a top-4 cloud with $150B+ revenue by fiscal 2030.",
+  "winners": "Cheap financing, low cost per GPU-hour, diversified customers, power secured, database integration (AI on enterprise data).",
+  "business": "Fiscal Q1 2027 revenue $19.3B (+30%): cloud $11.6B (IaaS $7.4B +121%, SaaS $4.2B +10%), software licences $5.5B (-3%), services $1.4B, hardware $0.8B. Non-GAAP EPS $1.92 (+30%).",
+  "right_to_win": "Oracle builds GPU clusters faster and cheaper than most rivals (fast networking, bare metal) and won the largest AI training contracts; its database installed base gives a path to enterprise AI.",
+  "moat": "Wide in database and ERP (switching costs); none yet proven in AI infrastructure, which is a capital-intensive rental business. Trend: mix shifting toward the weaker-moat business.",
+  "tam_competitors": "Small share (~3-4%) of cloud infrastructure but the largest single AI training backlog. Competitors: AWS, Azure, Google, CoreWeave.",
+  "management": "Larry Ellison (Chairman/CTO, ~40% owner) drives strategy; co-CEOs Clay Magouyrk and Mike Sicilia since Sept 2025. Capital allocation has become aggressive: debt including leases $169.1B at 31 Aug 2026, $20B ATM equity sale in Q1, and another $20B stock and bond sale in early Nov 2026 at $116/share that used up the Investor Day equity cap. Insider buying of $3.5M recently (one buyer).",
+  "financials": "Revenue $40.5B (FY21) to $67.4B (FY26); operating margin ~30%. FCF fell from $13.8B (FY21) and $11.8B (FY24) to -$23.7B (FY26) on capex. Goodwill is 93% of equity (Cerner and earlier deals). Non-GAAP EPS guide FY27 $8.10.",
+  "company_risks": "(1) Financing - KPI: credit rating and spreads. (2) OpenAI concentration - KPI: share of RPO from one customer. (3) Execution of data-centre build - KPI: OCI revenue vs guide. (4) Dilution - KPI: share count growth (86M new shares in Nov 2026).",
+  "variant_view": "The market believes Oracle's backlog is a debt-funded bet on OpenAI that may never pay; we think the backlog is real but the financing burden means equity holders will be diluted, so fair value is well below the 2025 peak and the stock only becomes attractive with a large margin of safety.",
+  "valuation": "Our value (owner earnings $6.5/share, 18% then 9%, 12% discount for leverage): low $80, base $160, high $235; price $116 is a 27% discount to base. Required margin of safety 45% (levered, turnaround-like) plus 10 points for the OpenAI concentration that could permanently impair value = 55%, so entry $72. Street mean $236 (40 analysts) credits the backlog more fully. ~14x forward EPS vs a 5-year average of 21x. Ming's cost $176.60 (-34%): the decision is hold or cut, not add.",
+  "pillars": "(1) OCI revenue keeps growing above 80% - breach below 50%. (2) OpenAI pays and stays current - breach: renegotiation. (3) Investment-grade rating holds - breach: junk. (4) FCF turns positive in 2H FY28 as guided - breach: guide pushed out.",
+  "catalysts_flow": "Fiscal Q2 2027 results (mid-Dec 2026); OpenAI funding news; S&P/Moody's reviews. Sellers: AI-capex and credit-risk funds, post-midterm de-risking. Next buyers: value funds once FCF trough is visible.",
+  "premortem": "(1) OpenAI cannot raise enough money and cuts its Oracle commitments, leaving Oracle with debt-funded idle GPUs. (2) Downgrade to junk raises funding costs and forces more dilution. (3) Data-centre moratoria delay revenue while interest costs run."
+ }
+}

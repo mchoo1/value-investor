@@ -35,8 +35,18 @@ def mark(cur, ids, via):
         cur.execute("UPDATE v2_alerts SET sent = TRUE, sent_via = %s, sent_at = now() WHERE id = ANY(%s)", (via, ids))
 
 
+def quiet_now():
+    """No alert pings between 23:00 and 07:00 Singapore time; alerts stay queued for the 07:07 run."""
+    import datetime as dt
+    h = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=8)).hour
+    return h >= 23 or h < 7
+
+
 def alerts(conn, with_health=False):
     cur = conn.cursor()
+    if quiet_now() and "--force" not in sys.argv:
+        print("Quiet hours (23:00-07:00 SGT): alerts stay queued.")
+        return
     cur.execute("""SELECT * FROM v2_alerts WHERE NOT sent AND sent_via IS NULL AND COALESCE(source, '') <> 'legacy'
                    ORDER BY CASE severity WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, fired_at""")
     rows = cur.fetchall()
@@ -95,7 +105,7 @@ def screen(conn):
            f"{st.get('any_funnel', '?')} hit a funnel → {st.get('cleared_bar', 0)} cleared the deep-dive bar ✅\n\n"
            + "\n".join(rows)
            + (f"\n\nBuffett indicator {b['ratio_est']:.0%} of GDP · {b['zone']}" if b else "")
-           + f"\n\nReason cards follow at 10:00, deep dives at 14:00.\n<a href=\"{APP_URL}/screen\">Open the Screen</a>")
+           + f"\n\nReason cards arrive Sunday morning, deep dives Monday morning.\n<a href=\"{APP_URL}/screen\">Open the Screen</a>")
     print("Screen summary sent." if telegram(msg) else "Screen summary not delivered.")
 
 

@@ -1,8 +1,8 @@
-name: "Daily monitor (Mon-Fri 07:07 SGT)"
+name: "Daily monitor (Tue-Sat 07:07 SGT, after each US close)"
 on:
   workflow_dispatch:
   schedule:
-    - cron: "7 23 * * 0-4"   # 07:07 SGT Mon-Fri
+    - cron: "7 23 * * 1-5"   # 07:07 SGT Tue-Sat
 
 concurrency:
   group: valueinvestor
@@ -28,6 +28,8 @@ jobs:
       - run: pip install -r requirements-jobs.txt
       - name: Load Claude's results
         run: python tools/inbox.py
+      - name: Load checked-in files (inbox-seed, each loaded once)
+        run: python tools/inbox.py --dir inbox-seed
       - name: Check prices, filings, analysts, buy signals and themes
         id: monitor
         run: python tools/monitor.py daily

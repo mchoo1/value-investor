@@ -28,5 +28,7 @@ jobs:
       - run: pip install -r requirements-jobs.txt
       - name: Load Claude's results
         run: python tools/inbox.py
+      - name: Load checked-in files (inbox-seed, each loaded once)
+        run: python tools/inbox.py --dir inbox-seed
       - name: Send Telegram alerts
         run: python tools/notify.py alerts

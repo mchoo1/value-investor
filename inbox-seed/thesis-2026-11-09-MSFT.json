@@ -1,0 +1,68 @@
+{
+ "type": "thesis",
+ "ticker": "MSFT",
+ "add_to_watchlist": false,
+ "themes": [
+  "AI and energy infrastructure"
+ ],
+ "conviction": 72,
+ "verdict": "WATCH",
+ "entry_target": 450.0,
+ "valuation": {
+  "iv_low": 400,
+  "iv_base": 600,
+  "iv_high": 820,
+  "inputs": {
+   "fcf_ps": 18,
+   "g1": 14,
+   "g2": 9,
+   "tg": 3,
+   "dr": 9
+  },
+  "kill": [
+   {
+    "type": "price_below",
+    "value": 400,
+    "text": "Price below $400 (our low value): re-test Azure growth and capex returns"
+   },
+   {
+    "type": "analyst_mean_below",
+    "value": 520,
+    "text": "Street mean target below $520 (now ~$636)"
+   },
+   {
+    "type": "manual",
+    "text": "Azure growth below 30% for two quarters while capex keeps rising"
+   },
+   {
+    "type": "manual",
+    "text": "OpenAI relationship breaks down in a way that removes Azure exclusivity or large committed revenue"
+   },
+   {
+    "type": "manual",
+    "text": "Free cash flow falls below $50B a year on a trailing basis"
+   }
+  ]
+ },
+ "sections": {
+  "industry_map": "Microsoft spans cloud infrastructure (Azure, #2), productivity software (Microsoft 365, near-monopoly), developer tools (GitHub), business apps (Dynamics), security, gaming (Xbox/Activision) and Windows. AI (Copilot and the OpenAI partnership) runs through all of them.",
+  "size_growth": "Enterprise software and cloud together exceed $1T of spend, growing ~12-15% with AI adding to cloud. Azure grew 48% in fiscal Q1 2027 (quarter to Sept 2026) and Microsoft Cloud revenue reached $63.9B (+30%) (Microsoft results, 28 Oct 2026). Low cyclicality; enterprise budgets are sticky. Rate sensitivity mainly through valuation.",
+  "structure": "Office productivity is a near-monopoly; cloud is a three-way oligopoly. Barriers: installed base, enterprise agreements, identity (Entra) and security integration. Buyer power is low for small customers, higher for the largest enterprises.",
+  "demand_supply": "Azure is capacity-constrained on AI; capex hit $39.4B in the quarter and Microsoft guides about $175B for the year. Bottlenecks: power, GPUs and data-centre shells. Call: tight supply through 2027; watch for glut risk if enterprise AI use plateaus.",
+  "industry_risks": "(1) AI capex overbuild - medium probability, high impact; warning: capex rising while Azure growth slows. (2) Post-midterm policy on data-centre power or AI regulation - medium/medium; warning: state moratoria and federal bills. (3) EU/US antitrust on bundling (Teams, Copilot) - medium/low-medium; warning: EU Commission actions. (4) OpenAI dependence - low-medium/medium; warning: contract renegotiations.",
+  "outlook": "Near: Azure growth 40%+ continues, margins pressured by depreciation. Mid: Copilot seat monetisation and agentic AI lift M365 ARPU; capex intensity eases. Long: Microsoft becomes the default enterprise AI platform with recurring revenue above $500B.",
+  "winners": "Enterprise distribution, owned AI models plus OpenAI access, data-centre capacity, security and identity, balance-sheet strength to fund capex without stress.",
+  "business": "Fiscal Q1 2027 revenue $92.3B (+19%). Three segments: Productivity and Business Processes (M365, LinkedIn, Dynamics), Intelligent Cloud (Azure, server products), More Personal Computing (Windows, Xbox, search). Free cash flow $18.6B in the quarter, down 27% year on year because of capex.",
+  "right_to_win": "Every large enterprise already runs Microsoft identity, Office and often Azure; adding Copilot and agents is an upsell, not a new sale. Its OpenAI stake and model rights give it frontier AI without bearing all the research cost.",
+  "moat": "Wide: switching costs (M365, Windows, Azure), network effects (Teams, GitHub), and scale. Trend: stable to widening as AI deepens lock-in.",
+  "tam_competitors": "Azure ~22% of cloud infrastructure and gaining (48% growth vs AWS 39%). Competitors: AWS, Google Cloud, Oracle, Salesforce, ServiceNow, Google Workspace. Runway: enterprise AI agents and Copilot seats are early.",
+  "management": "CEO Satya Nadella (since 2014) is among the best capital allocators in large-cap tech: cloud pivot, LinkedIn, GitHub, OpenAI. Deep bench (CFO Amy Hood). Insider selling is routine ($86M over 6 months). Dividend plus buybacks; capex now dominates allocation.",
+  "financials": "Revenue $168B (FY21) to $332B (FY26), operating margin 42% to 47%, ROIC ~26-32%. FCF $56B to $67-74B: flat since FY24 as capex absorbed growth; FCF was 66% of net income over 3 years (engine red flag). EPS $8.05 (FY21) to $17.95 (FY26).",
+  "company_risks": "(1) Capex payback - KPI: Microsoft Cloud gross margin and Azure growth. (2) Copilot adoption slower than hoped - KPI: paid seats disclosed. (3) OpenAI terms - KPI: Azure commitments and revenue share disclosures. (4) Gross margin falling (70% to 68%) - KPI: total gross margin below 65%.",
+  "variant_view": "The market believes Microsoft is fully priced after a best-in-decades quarter; we agree it is not cheap at $531, but believe the market underestimates how long Azure can grow above 35% given capacity constraints, so the stock compounds near its earnings growth with lower risk than other AI names.",
+  "valuation": "Our value (owner earnings $18/share, 14% then 9%, 9% discount): low $400, base $600, high $820; price $531 implies ~11% FCF growth, below Azure-led growth. Street mean $636 (54 analysts). Peers: ~29x forward EPS vs AMZN ~30x, GOOGL ~24x. The engine's $285 base uses depressed FCF and is not used. Required margin of safety 25% gives an entry target of $450 for adding; Ming's cost $385.60 (+39%).",
+  "pillars": "(1) Azure grows above 35% - breach below 30%. (2) Operating margin above 42% - breach below 40%. (3) Copilot/agents become a disclosed multi-billion revenue line by FY28 - breach: no disclosure or seat stagnation. (4) FCF recovers above $80B by FY28 - breach: below $60B.",
+  "catalysts_flow": "Fiscal Q2 2027 results (late Jan 2027); Build/Ignite AI agent launches; OpenAI restructuring milestones. Sellers: AI-capex sceptics after the midterms. Buyers: quality compounder funds on any dip.",
+  "premortem": "(1) AI spend overbuilt and capex becomes stranded. (2) OpenAI rift removes a key growth engine. (3) Regulation forces unbundling of Copilot/Teams and caps pricing."
+ }
+}

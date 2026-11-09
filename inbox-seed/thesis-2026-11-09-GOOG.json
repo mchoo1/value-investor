@@ -1,0 +1,69 @@
+{
+ "type": "thesis",
+ "ticker": "GOOG",
+ "add_to_watchlist": false,
+ "themes": [
+  "AI and energy infrastructure",
+  "Quantum computing"
+ ],
+ "conviction": 72,
+ "verdict": "WATCH",
+ "entry_target": 266.0,
+ "valuation": {
+  "iv_low": 250,
+  "iv_base": 355,
+  "iv_high": 500,
+  "inputs": {
+   "fcf_ps": 12,
+   "g1": 13,
+   "g2": 9,
+   "tg": 3,
+   "dr": 9.5
+  },
+  "kill": [
+   {
+    "type": "price_below",
+    "value": 230,
+    "text": "Price below $230: re-test search share and capex returns"
+   },
+   {
+    "type": "analyst_mean_below",
+    "value": 330,
+    "text": "Street mean target below $330 (now ~$403)"
+   },
+   {
+    "type": "manual",
+    "text": "Search and other revenue declines year on year for two quarters (AI substitution)"
+   },
+   {
+    "type": "manual",
+    "text": "Court-ordered structural remedy (Chrome/Android or ad-tech divestiture) that removes distribution"
+   },
+   {
+    "type": "manual",
+    "text": "2027 capex above $300B without Cloud growth staying above 50%"
+   }
+  ]
+ },
+ "sections": {
+  "industry_map": "Alphabet competes in search and search ads (Google, ~90% share), video (YouTube), cloud (Google Cloud, #3), AI models (Gemini, DeepMind), devices and Android, plus Other Bets (Waymo, quantum). Profits are mostly search ads; Cloud is now the growth engine.",
+  "size_growth": "Global digital ads ~$750B growing ~10%; cloud ~$400B+ growing 25-35%. Q3 2026 revenue $127.6B (+25%) with Google Cloud $30.7B (+103%) (Alphabet Q3 release, 28 Oct 2026). Ads are moderately cyclical; cloud tied to AI capex.",
+  "structure": "Search is a near-monopoly under antitrust scrutiny; AI chat (ChatGPT, Meta AI) is the new competitive front. Cloud is an oligopoly. Barriers: data, distribution (Android, Chrome, Safari default), TPU silicon, talent.",
+  "demand_supply": "AI demand far exceeds compute supply: Gemini APIs process ~32 billion tokens a minute (4x year on year) and the Gemini app has 1 billion users. Capex was $51.4B in Q3, guided $195-205B for 2026 and above $300B for 2027. Bottlenecks: power and TPUs/GPUs. Call: shortage through 2027.",
+  "industry_risks": "(1) AI substitution of search queries - medium/high; warning: Search revenue growth vs estimates (Q3 missed: ~$63B vs ~$65B). (2) Antitrust remedies (search and ad tech cases) - medium/high; warning: court rulings and appeals. (3) Capex overbuild - medium/high; warning: Cloud margin. (4) Post-midterm regulation of AI/data centres - medium/medium.",
+  "outlook": "Near: Cloud keeps triple-digit-ish growth on backlog conversion; search grows mid-teens; FCF squeezed by capex. Mid: Gemini monetisation inside search (AI Mode ads) and Cloud margins support EPS growth of 12-15%. Long: TPUs, Waymo and quantum are real options worth $100B+ each if they work.",
+  "winners": "Full-stack AI (models, TPUs, cloud, distribution), lowest cost per token, owned consumer surfaces with billions of users, ability to fund capex internally.",
+  "business": "Q3 2026: Google Services ~$96B (search ~$63B, YouTube ads ~$11.2B), Google Cloud $30.7B, operating income ~$41B. EPS $2.12 was hit by an ~$8.7B loss on equity securities. Search query growth was the highest in five years per management.",
+  "right_to_win": "Google is the only company that owns frontier models, custom AI chips, a top-3 cloud and multiple billion-user products, so it can deliver AI at lower cost and distribute it instantly.",
+  "moat": "Wide: scale and data in search, network effects in YouTube and Android, cost advantage from TPUs. Trend: search moat under pressure from AI chat but holding (query growth up); cloud moat widening.",
+  "tam_competitors": "Search share ~89-90%; cloud share ~13% and gaining fast (103% growth vs Azure 48%, AWS 39%). Competitors: Microsoft/OpenAI, Meta, Amazon, Apple, ByteDance.",
+  "management": "CEO Sundar Pichai (since 2015); CFO Anat Ashkenazi has pushed cost discipline. Founders Page and Brin control voting. Buybacks ~$60-70B a year plus a dividend (since 2024). Insider selling is routine ($3.5M over 6 months). Capital allocation now tilted to capex.",
+  "financials": "Revenue $182.5B (2020) to $402.8B (2025), operating margin 23% to 32%, ROIC 23-28%. FCF $73B in 2025 but was squeezed by capex in 2026 (Q3 cash burn ~$9B per press coverage). EPS 2025 $10.81.",
+  "company_risks": "(1) Search revenue erosion - KPI: Search growth vs consensus. (2) Remedy rulings - KPI: court outcomes on default deals and ad tech. (3) Capex payback - KPI: Cloud operating margin and backlog. (4) Talent loss in AI - KPI: key departures.",
+  "variant_view": "The market believes AI chat erodes search and Alphabet overspends on capex; we believe search is proving resilient (record query growth) while Cloud doubling shows the capex is earning returns, so Alphabet is the cheapest megacap on earnings for the most complete AI stack.",
+  "valuation": "Our value (owner earnings $12/share, 13% then 9%, 9.5% discount): low $250, base $355, high $500; price $284 implies ~9% FCF growth, below its 17% history. Street mean $403 (15 analysts). Peers: ~24x forward EPS vs MSFT ~29x, META ~22x. Required margin of safety 25% gives entry $266, close to today's price; Ming's cost $300.",
+  "pillars": "(1) Search revenue keeps growing - breach: two quarters of decline. (2) Cloud growth above 50% with rising margin - breach below 40%. (3) No structural divestiture - breach: ordered spin-off of Chrome/Android or ad tech. (4) FCF positive annually - breach: negative full year.",
+  "catalysts_flow": "Q4 2026 results (early Feb 2027) with capex guide; search remedies appeal decisions; Waymo expansion and possible funding/IPO. Sellers: capex sceptics and funds worried about search disruption. Buyers: value-tilted growth funds at ~20x earnings.",
+  "premortem": "(1) Users shift to chat assistants and ad prices fall faster than AI ads replace them. (2) Courts force a breakup of distribution. (3) $300B+ capex earns low returns and FCF stays negative for years."
+ }
+}

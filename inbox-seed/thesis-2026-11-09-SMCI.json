@@ -1,0 +1,68 @@
+{
+ "type": "thesis",
+ "ticker": "SMCI",
+ "add_to_watchlist": false,
+ "themes": [
+  "AI and energy infrastructure"
+ ],
+ "conviction": 42,
+ "verdict": "PASS",
+ "entry_target": 20.0,
+ "valuation": {
+  "iv_low": 25,
+  "iv_base": 45,
+  "iv_high": 65,
+  "inputs": {
+   "fcf_ps": 4.0,
+   "g1": 8,
+   "g2": 4,
+   "tg": 2,
+   "dr": 14
+  },
+  "kill": [
+   {
+    "type": "price_below",
+    "value": 22,
+    "text": "Price below $22: sell discipline - thesis of cheap AI-server earnings has failed"
+   },
+   {
+    "type": "analyst_mean_below",
+    "value": 32,
+    "text": "Street mean target below $32 (now ~$43)"
+   },
+   {
+    "type": "manual",
+    "text": "Any restatement, auditor change, late filing or new DOJ/SEC action"
+   },
+   {
+    "type": "manual",
+    "text": "Gross margin below 10% for two quarters (Q1 FY27: 12.7%)"
+   },
+   {
+    "type": "manual",
+    "text": "Operating cash flow negative for four straight quarters"
+   }
+  ]
+ },
+ "sections": {
+  "industry_map": "Super Micro designs and assembles servers and rack-scale systems (GPU servers, liquid cooling, 'DCBBS' data-centre building blocks) for AI data centres, cloud providers and enterprises, mainly using Nvidia and AMD chips.",
+  "size_growth": "AI server market is growing 50%+ a year with hyperscaler capex. Super Micro's fiscal Q1 2027 sales were $19.9B (vs $5.0B a year earlier) and it guides fiscal 2027 sales of $72-82B (Super Micro 8-K, Nov 2026). Very cyclical: tied to GPU launch cycles and AI capex.",
+  "structure": "Commodity-like assembly with low margins; competitors Dell, HPE, Lenovo and Taiwanese ODMs (Foxconn, Quanta, Wiwynn). Nvidia controls supply allocation. Buyer power is high (few large customers).",
+  "demand_supply": "Demand very strong now; supply depends on Nvidia allocation. Bottlenecks: GPUs, power and liquid-cooling capacity. Call: strong through 2027, then exposed to any AI capex pause.",
+  "industry_risks": "(1) AI capex slowdown - medium/very high; warning: hyperscaler capex guides. (2) Margin squeeze from ODMs and Dell - high/high; warning: gross margin. (3) Export controls on China and Middle East - medium/medium. (4) Post-midterm data-centre policy - medium/medium.",
+  "outlook": "Near: revenue ~$20B a quarter, gross margin ~12-13%. Mid: margins depend on liquid cooling and DCBBS mix. Long: likely remains a low-margin assembler unless software/services grow.",
+  "winners": "Speed to market on new GPU platforms, liquid cooling, cost, Nvidia allocation, working-capital financing.",
+  "business": "Net income $1.59B and non-GAAP EPS $1.81 in Q1 FY27, but operating cash flow was -$434M; inventory $15.1B and receivables $9.7B rose sharply. Cash $6.9B vs bank debt and converts $8.6B. Figures were preliminary and unreviewed by the auditor at release.",
+  "right_to_win": "Super Micro is often first to ship new GPU platforms in volume and leads in direct liquid cooling.",
+  "moat": "None to narrow: engineering speed is real but replicable; the engine's 'Wide' reading is a scoring artefact from high recent ROIC. Trend: stable to weakening as Dell and ODMs scale.",
+  "tam_competitors": "~10-15% of AI servers. Competitors: Dell, HPE, Lenovo, Foxconn, Quanta.",
+  "management": "Founder-CEO Charles Liang. Governance history is the key risk: 2018 delisting for late filings, 2020 SEC settlement on accounting, 2024 auditor (EY) resignation and short-seller allegations, later cleared by a special committee and a new auditor. Insider sales $15M recently.",
+  "financials": "Revenue $3.6B (FY21) to ~$22B (FY25) and far higher in FY27; gross margin fell from ~14% to ~11-13%. FCF negative in most recent years (-$7.0B in FY26 on the engine data) as working capital ballooned. Share count up ~6.8% a year. Short interest 14% of float.",
+  "company_risks": "(1) Earnings quality - KPI: operating cash flow vs net income. (2) Receivables/inventory build - KPI: days outstanding. (3) Governance - KPI: filings on time, auditor stability. (4) Customer concentration - KPI: top customer share.",
+  "variant_view": "The market prices SMCI at ~4x forward earnings because it does not trust the earnings; we agree the discount is mostly deserved - profits are not turning into cash and governance risk is real - so the low P/E is a value trap risk rather than a bargain.",
+  "valuation": "Our value (owner earnings $4.0/share haircut for cash conversion, 8% then 4%, 14% discount): low $25, base $45, high $65; price $28.8 is 36% below base. Required margin of safety 45% (cyclical) plus 10 points for governance/permanent-impairment risk = 55%, so entry $20. Street mean $43 (15 analysts). Ming's cost $28.30 (+1.5%). Verdict PASS: do not add; it is the most likely candidate to exit if cash flow does not turn positive.",
+  "pillars": "(1) Operating cash flow turns positive by Q3 FY27 - breach: negative for four straight quarters. (2) Gross margin above 11% - breach below 10%. (3) Clean, on-time filings - breach: any delay or restatement. (4) Revenue in the $72-82B guide range - breach: guide cut.",
+  "catalysts_flow": "Q2 FY27 results (early Feb 2027); 10-Q filing on time; Nvidia next-generation (Rubin) ramp. Sellers: governance-sensitive funds; shorts at 14% of float. Buyers: deep value and momentum traders on beats.",
+  "premortem": "(1) AI capex pause leaves SMCI with $15B of inventory to write down. (2) Accounting or governance issue resurfaces. (3) Dell and ODMs take share and margins fall below 10%."
+ }
+}

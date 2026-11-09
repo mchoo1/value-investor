@@ -1,7 +1,7 @@
 """Load results from Claude's scheduled tasks (Drive folder ValueInvestor/v2-inbox) into the database.
 
   python tools\\inbox.py              read new files from Drive
-  python tools\\inbox.py --dir PATH   read *.json from a local folder (testing)
+  python tools\\inbox.py --dir PATH   read *.json from a local folder (e.g. inbox-seed/, loaded once per file)
 Each file is loaded once (tracked by file id and modified time). Files are never edited or deleted.
 """
 import sys, json, argparse
@@ -65,8 +65,46 @@ def load_thesis(cur, d):
     return f"{t} v{ver}{' (' + str(len(missing)) + ' sections missing)' if missing else ''}"
 
 
+def load_book(cur, d):
+    """Your holdings: {"type": "book", "replace": true, "items": [{"ticker", "shares", "cost"}]}.
+    Each name moves to the Book with its position. With replace, Book names not listed are marked sold (back to Watchlist)."""
+    held = []
+    for it in d.get("items", []):
+        t = (it.get("ticker") or "").upper()
+        if not t:
+            continue
+        n = known(cur, t)
+        if not n:
+            cur.execute("INSERT INTO v2_names (ticker, level, status, first_seen) VALUES (%s,'screen','new',%s)", (t, TODAY))
+            n = known(cur, t)
+        cur.execute("SELECT 1 FROM v2_theses WHERE ticker = %s", (t,))
+        has_thesis = cur.fetchone() is not None
+        if n["level"] != "book":
+            cur.execute("INSERT INTO v2_comments (ticker, section, body) VALUES (%s, 'move', %s)",
+                        (t, f"Moved {n['level']} → book (holdings import)"))
+        cur.execute("""UPDATE v2_names SET level = 'book', level_since = COALESCE(CASE WHEN level = 'book' THEN level_since END, CURRENT_DATE),
+                       status = %s, research_requested = TRUE, updated_at = now() WHERE ticker = %s""",
+                    ("holding" if has_thesis else "deep_dive_requested", t))
+        if it.get("shares"):
+            cur.execute("UPDATE v2_positions SET exited = %s WHERE ticker = %s AND exited IS NULL", (TODAY, t))
+            cur.execute("INSERT INTO v2_positions (ticker, entered, shares, cost, notes) VALUES (%s,%s,%s,%s,'holdings import')",
+                        (t, TODAY, it["shares"], it.get("cost")))
+        held.append(t)
+    sold = []
+    if d.get("replace") and held:
+        cur.execute("SELECT ticker FROM v2_names WHERE level = 'book' AND NOT (ticker = ANY(%s))", (held,))
+        sold = [r["ticker"] for r in cur.fetchall()]
+        for t in sold:
+            cur.execute("UPDATE v2_names SET level = 'watchlist', status = 'exited', level_since = CURRENT_DATE WHERE ticker = %s", (t,))
+            cur.execute("UPDATE v2_positions SET exited = %s WHERE ticker = %s AND exited IS NULL", (TODAY, t))
+            cur.execute("INSERT INTO v2_comments (ticker, section, body) VALUES (%s, 'move', 'Moved book → watchlist (not in holdings import)')", (t,))
+    return f"Book: {len(held)} held ({', '.join(held)})" + (f"; {len(sold)} marked sold ({', '.join(sold)})" if sold else "")
+
+
 def load(cur, name, d):
     kind = d.get("type")
+    if kind == "book":
+        return load_book(cur, d)
     if kind == "reason_cards":
         n = 0
         for it in d.get("items", []):
@@ -126,8 +164,9 @@ def main():
     ensure_schema(cur)
     conn.commit()
     if args.dir:
-        files = [{"id": str(p), "name": p.name, "modifiedTime": str(p.stat().st_mtime), "path": p}
-                 for p in sorted(Path(args.dir).glob("*.json"))]
+        import hashlib  # keyed by file name and content, so a checked-in folder loads once however often it is checked out
+        files = [{"id": "dir:" + p.name, "name": p.name, "modifiedTime": hashlib.sha1(p.read_bytes()).hexdigest()[:16], "path": p}
+                 for p in sorted(Path(args.dir).glob("*.json"))] if Path(args.dir).is_dir() else []
     else:
         files = drive_list(DRIVE_INBOX)
         if files is None:

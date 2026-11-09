@@ -1,0 +1,69 @@
+{
+ "type": "thesis",
+ "ticker": "AMZN",
+ "add_to_watchlist": false,
+ "themes": [
+  "AI and energy infrastructure",
+  "Automation and robotics"
+ ],
+ "conviction": 68,
+ "verdict": "WATCH",
+ "entry_target": 210.0,
+ "valuation": {
+  "iv_low": 190,
+  "iv_base": 280,
+  "iv_high": 400,
+  "inputs": {
+   "fcf_ps": 8.5,
+   "g1": 15,
+   "g2": 10,
+   "tg": 3,
+   "dr": 9.5
+  },
+  "kill": [
+   {
+    "type": "price_below",
+    "value": 185,
+    "text": "Price below $185 (below our low value): re-underwrite the AWS margin and capex assumptions"
+   },
+   {
+    "type": "analyst_mean_below",
+    "value": 260,
+    "text": "Street mean target below $260 (now ~$327): the AWS growth story is being marked down"
+   },
+   {
+    "type": "manual",
+    "text": "AWS growth falls below 20% for two quarters while capex stays above $200B a year"
+   },
+   {
+    "type": "manual",
+    "text": "AWS operating margin below 30% for two quarters (Q3 2026: $17.8B on $46B = 39%)"
+   },
+   {
+    "type": "manual",
+    "text": "Trailing free cash flow still negative after 2027 with no capex step-down guided"
+   }
+  ]
+ },
+ "sections": {
+  "industry_map": "Three businesses in one: cloud infrastructure (AWS, #1 vs Azure and Google Cloud), e-commerce and logistics (North America and International), and digital advertising (#3 in US digital ads behind Google and Meta). Profit sits mostly in AWS and ads; retail is the scale engine that feeds them.",
+  "size_growth": "Cloud infrastructure is a ~$400B+ market growing 25-35% a year on AI training and inference; AWS alone runs at $184B annualised, up 39% in Q3 2026 (Q3 release, 30 Oct 2026). US e-commerce grows high single digits; retail media grows ~20%. Cyclicality: retail is consumer-cyclical, AWS is tied to enterprise IT and AI capex. Rate sensitivity is moderate via valuation and the capex financing load.",
+  "structure": "Cloud is a three-player oligopoly (AWS, Azure, Google Cloud ~65% combined) with high switching costs and huge scale barriers; Oracle and neoclouds (CoreWeave) compete for AI capacity. Retail faces Walmart, Temu/Shein and TikTok Shop on price but no one matches Prime's logistics density.",
+  "demand_supply": "Demand for AI compute exceeds supply: AWS says capacity, not demand, is the constraint, and it is adding power and Trainium capacity. Amazon will spend about $220B of capex in 2026. Bottlenecks are power interconnection, GPUs and transformers. Call: shortage through 2027, risk of a glut in 2028+ if AI monetisation lags the build-out.",
+  "industry_risks": "(1) AI capex overbuild - probability medium, impact high; early warning: hyperscaler capex guides rising while cloud growth decelerates. (2) Post-midterm politics (Democrat sweep, 3 Nov 2026) slowing data-centre permitting or taxing power use - medium/medium; warning: state moratoria (Texas governor-elect has promised one). (3) FTC antitrust case on marketplace practices - medium/medium; warning: trial rulings. (4) Tariffs on Chinese-made goods - medium/low-medium; warning: 3P seller fee changes.",
+  "outlook": "Near (0-12m): AWS growth stays 30%+ as new capacity comes online; free cash flow stays negative (trailing -$42.4B) while capex peaks. Mid (1-3y): capex/revenue normalises, FCF recovers to $100B+ if AWS margins hold near 35-40%. Long (3-10y): AWS plus ads plus robotics-driven retail margins could lift group operating margin from ~11% to high teens.",
+  "winners": "Scale of capacity and power secured; own silicon (Trainium/Graviton) to cut cost per token; enterprise trust and the broadest service catalogue; logistics density and Prime membership; ability to fund capex from operating cash flow without diluting.",
+  "business": "Revenue $201.9B in Q3 2026 (+12%): North America $112.9B (op income $8.7B), International $43.1B ($1.6B), AWS $46B ($17.8B). Advertising and subscriptions sit inside the retail segments. AWS is ~23% of revenue but roughly 60% of operating income.",
+  "right_to_win": "AWS has the largest installed base of enterprise workloads, which makes it the default home for AI inference on that data. In retail, Prime plus same-day logistics creates a cost and speed edge competitors cannot replicate without similar density.",
+  "moat": "Wide: switching costs and scale in AWS, network effects (buyers and 3P sellers) and cost advantage in retail, data advantage in ads. Trend: stable to widening in retail/ads; under test in AWS as Azure (48% growth) and Google Cloud (103% growth) grow faster on AI.",
+  "tam_competitors": "AWS share of cloud infrastructure ~29-30% (Microsoft ~22%, Google ~13%); share is slipping slowly as rivals grow faster on AI. US e-commerce share ~38% versus Walmart ~7%. Runway: AI inference and enterprise migration still early; retail share gains continue in grocery and pharmacy.",
+  "management": "CEO Andy Jassy (since 2021, built AWS) has cut costs (headcount reduction, regionalised logistics) and prioritised AI capacity. AWS CEO Matt Garman since 2024. Founder Jeff Bezos still owns ~8% and sells steadily; insider activity is routine selling ($386M net sales in the last 6 months, ValueInvestor research, 2026-11-09). No dividend, small buybacks; capital allocation is all-in on capex, which is the main debate.",
+  "financials": "Revenue grew from $386B (2020) to $717B (2025); operating margin rose from 2.4% (2022) to 11.2% (2025). ROIC recovered from 5.8% (2022) to ~16-20%. Free cash flow peaked at $139.5B in 2025 (ValueInvestor research history basis) but trailing 12-month FCF is now -$42.4B because of capex. EPS 2025 $7.17; Q3 2026 EPS $1.89 (missed $1.96 consensus).",
+  "company_risks": "(1) Capex returns disappoint - KPI: AWS operating margin (now ~39%) and AWS growth vs capex growth. (2) Losing AI share to Azure/Google - KPI: AWS growth gap vs peers (now 9-64 points behind). (3) Regulatory (FTC) - KPI: case milestones. (4) Retail margin squeeze from low-price rivals - KPI: North America operating margin (now 7.7%).",
+  "variant_view": "The market believes Amazon is burning cash on AI with AWS losing share to faster-growing rivals; we believe AWS's re-acceleration to 39% shows the capacity is being absorbed at ~39% margins, so once capex peaks in 2027 free cash flow rebounds sharply and today's price undervalues normalised earnings power of roughly $8.5+ a share.",
+  "valuation": "Our value (owner-earnings DCF, $8.5/share normalised, 15% then 10% growth, 9.5% discount): low $190, base $280, high $400; at $259 the price implies ~13% growth for five years, a fair-to-slightly-cheap bar. Street mean $327 (59 analysts, range $230-405): they credit faster FCF recovery than we do. Peer multiples: ~30x 2026 EPS vs Microsoft ~29x and Alphabet ~24x. The engine's model base of $161 is held down by today's negative FCF and is not used. Required margin of safety 25% (wide-moat compounder) gives an entry target of $210; Ming's cost is $230.",
+  "pillars": "(1) AWS keeps growing above 25% - breach: two quarters below 20%. (2) AWS margin stays above 30% through the capex peak - breach: below 30%. (3) Capex peaks in 2027 and FCF turns positive by 2027 year-end - breach: 2027 guide above 2026's $220B with no step-down. (4) Retail margin keeps rising - breach: North America margin below 6%.",
+  "catalysts_flow": "Dated: Q4 2026 results (early Feb 2027) with 2027 capex guide; AWS re:Invent (Dec 2026) Trainium 3 updates. Sellers now: macro funds cutting AI-capex exposure after the midterms and FCF-focused holders. Next natural buyers: quality-growth funds once FCF turns.",
+  "premortem": "(1) AI demand slows in 2027-28 and Amazon is left with underused capacity and depreciation, crushing AWS margins. (2) Azure and Google win the AI platform layer and AWS becomes a commodity host. (3) Political backlash on data-centre power use raises costs and delays capacity."
+ }
+}

@@ -1,8 +1,9 @@
-name: "Saturday screen and research (08:07 SGT)"
+name: "Saturday screen, research and headlines (06:07 SGT), summary (08:07 SGT)"
 on:
   workflow_dispatch:
   schedule:
-    - cron: "7 0 * * 6"   # 08:07 SGT Saturday
+    - cron: "7 22 * * 5"   # 06:07 SGT Saturday: screen, research, headlines
+    - cron: "7 0 * * 6"   # 08:07 SGT Saturday: Telegram summary
 
 concurrency:
   group: valueinvestor
@@ -27,10 +28,17 @@ jobs:
           cache-dependency-path: requirements-jobs.txt
       - run: pip install -r requirements-jobs.txt
       - name: Weekly screen
+        if: github.event.schedule != '7 0 * * 6'
         run: python tools/screen.py
       - name: Research (Watchlist, Book, candidates, requests, top 10)
+        if: github.event.schedule != '7 0 * * 6'
         run: python tools/research.py
+      - name: Weekly headlines for Claude to tag
+        if: github.event.schedule != '7 0 * * 6'
+        run: python tools/monitor.py weekly
       - name: Hand data to Claude's tasks
+        if: github.event.schedule != '7 0 * * 6'
         run: python tools/monitor.py export
       - name: Telegram screen summary
+        if: github.event.schedule == '7 0 * * 6'
         run: python tools/notify.py screen
