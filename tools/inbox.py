@@ -170,6 +170,30 @@ def load(cur, name, d):
             except Exception:
                 continue
         return f"Week ahead saved; {n} calendar items"
+    if kind == "newsletter_tags":         # Claude's read of the investing newsletters in agentchoo1990@gmail.com
+        n, flagged = 0, []
+        for it in d.get("items", []):
+            k = (it.get("kind") or "stock").lower()
+            t = (it.get("ticker") or "").upper() or None
+            if k == "stock" and not t:
+                continue
+            stance = (it.get("stance") or "neutral").lower()
+            cur.execute("""INSERT INTO v2_newsletter_mentions (date, source, subject, kind, ticker, topic, stance, point, thesis_relevant, hype)
+                           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                           ON CONFLICT (date, source, kind, ticker, topic) DO UPDATE SET stance = EXCLUDED.stance, point = EXCLUDED.point,
+                             thesis_relevant = EXCLUDED.thesis_relevant, hype = EXCLUDED.hype""",
+                        (it.get("date") or str(TODAY), (it.get("source") or "?")[:80], (it.get("subject") or "")[:200], k, t,
+                         (it.get("topic") or "")[:120], stance, (it.get("point") or "")[:400],
+                         bool(it.get("thesis_relevant")), bool(it.get("hype"))))
+            n += 1
+            lvl = (known(cur, t) or {}).get("level") if t else None
+            if t and lvl in ("watchlist", "book") and it.get("thesis_relevant") and stance in ("negative", "positive"):
+                alert(cur, t, "Newsletter flag", "medium" if (stance == "negative" and lvl == "book") else "info",
+                      f"{it.get('source')}: {(it.get('point') or '')[:240]}", f"nl-{t}-{it.get('source')}-{it.get('date') or TODAY}",
+                      source="claude", action="Check against the thesis pillars" if stance == "negative" else "Note for the thesis")
+                flagged.append(t)
+        return f"{n} newsletter tags from {len({i.get('source') for i in d.get('items', [])})} sources" + (
+            f"; flagged {', '.join(sorted(set(flagged)))}" if flagged else "")
     if kind == "exec_summary":            # add or refresh the executive summary on the latest thesis (no new version)
         n = 0
         for it in d.get("items", []):

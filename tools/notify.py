@@ -145,7 +145,8 @@ def screen(conn):
     label = {"quant_value": "value", "fallen_quality": "fallen quality", "sharp_drop": "sharp drop",
              "fast_growth": "fast growth", "accelerating": "accelerating", "smart_money": "smart money",
              "share_taker": "share taker", "momentum_leader": "momentum",
-             "estimates_rising": "estimates up", "insider_buying": "insiders buying", "activist": "activist 13D"}
+             "estimates_rising": "estimates up", "insider_buying": "insiders buying", "activist": "activist 13D",
+             "newsletter_buzz": "newsletter buzz"}
 
     def rows(lst, growth=False):
         out = []

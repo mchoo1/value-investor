@@ -696,6 +696,11 @@ INBOX_FORMAT = {
                                "playbook": "what to do before/after (e.g. wait to add until after results)"}],
                    "calendar": [{"date": "2026-11-20", "time_et": "10:00", "kind": "policy|macro|election|company",
                                  "title": "...", "detail": {"why": "...", "source": "url"}}]},
+    "newsletter_tags": {"type": "newsletter_tags", "sources_read": ["Morningstar Morning Digest", "Money Stuff"],
+                        "items": [{"date": "2026-11-10", "source": "The Daily Upside", "subject": "email subject",
+                                   "kind": "stock|macro|theme", "ticker": "NVDA (stock only)", "topic": "rates|election|AI capex|... (macro/theme)",
+                                   "stance": "positive|negative|neutral", "point": "one line: the claim and the number behind it",
+                                   "thesis_relevant": False, "hype": False}]},
     "news_tags": {"type": "news_tags", "items": [{"id": 123, "tag": "no change|strengthens|weakens|breaks",
                                                    "note": "one line on why"}]},
     "filing_tags": {"type": "filing_tags", "items": [{"id": 45, "tag": "no change|strengthens|weakens|breaks",
@@ -821,11 +826,15 @@ def export(conn):
     calendar = [dict(r) for r in cur.fetchall()]
     cur.execute("SELECT value FROM v2_settings WHERE key = 'macro'")
     macro = (cur.fetchone() or {}).get("value")
+    cur.execute("""SELECT date, source, kind, ticker, topic, stance, point, thesis_relevant, hype FROM v2_newsletter_mentions
+                   WHERE date >= CURRENT_DATE - 7 ORDER BY date DESC, kind, ticker NULLS LAST LIMIT 150""")
+    newsletters = [dict(r) for r in cur.fetchall()]
     state = {"generated": dt.datetime.now(dt.timezone.utc).isoformat(), "app_url": APP_URL, "inbox_folder_id": DRIVE_INBOX,
              "inbox_format": INBOX_FORMAT, "themes": list(THEMES), "screen": screen, "deep_dive_queue": dd,
              "watchlist_and_book": [summary(n) for n in names], "untagged_news": news, "new_book_filings": filings_,
              "pending_buy_checks": pending, "latest_outlooks": outlooks, "refresh_queue": refresh,
-             "calendar_next_21d": calendar, "macro": macro}
+             "calendar_next_21d": calendar, "macro": macro,
+             "newsletters_7d": newsletters}
     text = json.dumps(state, default=str, indent=1)
     out = Path(__file__).parent.parent / "outbox"
     out.mkdir(exist_ok=True)

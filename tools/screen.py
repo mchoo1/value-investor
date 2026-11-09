@@ -549,8 +549,10 @@ def price_stats(s):
 #   Scored on moat 30, growth and acceleration 25, industry acceleration 25, smart money 10, valuation 10,
 #   +5 when a strong moat sits in an accelerating industry. Risks are flagged, never used to exclude.
 print("4/5 Funnels and scores (value and growth tracks) ...")
-VALUE_FUNNELS = ("quant_value", "fallen_quality", "sharp_drop", "insider_buying", "activist")
-GROWTH_FUNNELS = ("fast_growth", "accelerating", "smart_money", "share_taker", "momentum_leader", "estimates_rising")
+VALUE_FUNNELS = ("quant_value", "fallen_quality", "sharp_drop", "insider_buying", "activist", "newsletter_buzz")
+GROWTH_FUNNELS = ("fast_growth", "accelerating", "smart_money", "share_taker", "momentum_leader", "estimates_rising",
+                  "newsletter_buzz")
+ALL_FUNNELS = tuple(dict.fromkeys(VALUE_FUNNELS + GROWTH_FUNNELS))
 W = {"moat": 0.30, "growth": 0.25, "industry": 0.25, "smart": 0.10, "valuation": 0.10}
 clip = lambda x, lo=0.0, hi=1.0: max(lo, min(hi, x))
 
@@ -772,6 +774,40 @@ for r in results:
         if r["hits"]:
             r["score"] = round(min(100, r["score"] + 3), 1)                     # value names: estimates turning up
 
+# newsletter buzz (Claude's tags of the investing newsletters): 3+ different newsletters positive in 21 days,
+# more positive than negative = a lead (it still has to pass the quality and valuation tests to rank).
+# 6+ newsletters in 14 days, or one flagged as hype = "crowded trade" caution flag (never excludes).
+NL = {}
+try:
+    _c = psycopg2.connect(os.environ["DATABASE_URL"], cursor_factory=psycopg2.extras.RealDictCursor)
+    _k = _c.cursor()
+    _k.execute("""SELECT ticker,
+                    COUNT(DISTINCT source) FILTER (WHERE stance = 'positive') AS pos,
+                    COUNT(DISTINCT source) FILTER (WHERE stance = 'negative') AS neg,
+                    COUNT(DISTINCT source) FILTER (WHERE date >= CURRENT_DATE - 14) AS n14,
+                    BOOL_OR(hype) AS hype,
+                    (ARRAY_AGG(source || ': ' || point ORDER BY date DESC))[1:3] AS last
+                  FROM v2_newsletter_mentions WHERE kind = 'stock' AND ticker IS NOT NULL AND date >= CURRENT_DATE - 21
+                  GROUP BY ticker""")
+    NL = {r["ticker"]: dict(r) for r in _k.fetchall()}
+    _c.close()
+except Exception as e:
+    print(f"    [warn] newsletter mentions unavailable: {e.__class__.__name__}")
+for r in results:
+    nl = NL.get(r["ticker"])
+    hit = bool(nl and nl["pos"] >= 3 and nl["pos"] > nl["neg"])
+    r["funnels"]["newsletter_buzz"] = hit
+    r["growth"]["funnels"]["newsletter_buzz"] = hit
+    r["growth"]["newsletters"] = nl
+    if hit:
+        r["g_hits"] += 1
+        if r["mcap"] >= VALUE_MIN_MCAP:
+            r["hits"] += 1
+    if nl and (nl["n14"] >= 6 or nl["hype"]):
+        r["growth"]["flags"].append(f"Crowded trade: {nl['n14']} newsletters in 2 weeks" + (" (hype)" if nl["hype"] else ""))
+print(f"    newsletters: {len(NL)} names mentioned in 21 days, "
+      f"{sum(r['funnels']['newsletter_buzz'] for r in results)} buzz hits")
+
 results.sort(key=lambda r: -r["score"])
 STAGES.update({"liquid": liquid, "with_fundamentals": len(results),
                "gate_pass": sum(r["fin"]["gate_pass"] for r in results),
@@ -875,7 +911,7 @@ for r in results:
                   (r["ticker"], f"Now ${r['px']['price']:,.2f}, {r['px']['price'] / float(base) - 1:+.0%} since rejected at "
                    f"${float(base):,.2f}. Score {r['score']:.0f}. Worth a second look?", f"rej20-{r['ticker']}-{TODAY}"))
         w.execute("UPDATE v2_names SET reject_price = %s WHERE ticker = %s", (r["px"]["price"], r["ticker"]))
-counts = {k: sum(r["funnels"][k] for r in results) for k in VALUE_FUNNELS + GROWTH_FUNNELS}
+counts = {k: sum(r["funnels"][k] for r in results) for k in ALL_FUNNELS}
 counts["scored"] = len(results)
 MARKET["theme_strength_6m"] = THEME_RS
 w.execute("""INSERT INTO v2_screen_runs (run_date, funnel_counts, top10, growth_top10, market, stages) VALUES (%s,%s,%s,%s,%s,%s)

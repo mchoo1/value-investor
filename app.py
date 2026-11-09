@@ -32,9 +32,10 @@ SECTIONS = [
 FUNNELS = [("quant_value", "Quant value"), ("fallen_quality", "Fallen quality"), ("sharp_drop", "Sharp drop"),
            ("fast_growth", "Fast growth"), ("accelerating", "Accelerating"), ("smart_money", "Smart money"),
            ("share_taker", "Share taker"), ("momentum_leader", "Momentum leader"), ("estimates_rising", "Estimates rising"),
-           ("insider_buying", "Insider buying"), ("activist", "Activist 13D")]
-VALUE_FUNNELS = ["quant_value", "fallen_quality", "sharp_drop", "insider_buying", "activist"]
-GROWTH_FUNNELS = ["fast_growth", "accelerating", "smart_money", "share_taker", "momentum_leader", "estimates_rising"]
+           ("insider_buying", "Insider buying"), ("activist", "Activist 13D"), ("newsletter_buzz", "Newsletter buzz")]
+VALUE_FUNNELS = ["quant_value", "fallen_quality", "sharp_drop", "insider_buying", "activist", "newsletter_buzz"]
+GROWTH_FUNNELS = ["fast_growth", "accelerating", "smart_money", "share_taker", "momentum_leader", "estimates_rising",
+                  "newsletter_buzz"]
 TAG_CLASS = {"strengthens": "good", "weakens": "warn", "breaks": "bad", "no change": "muted"}
 
 
@@ -47,6 +48,14 @@ def q(sql, params=()):
     with db() as conn, conn.cursor() as c:
         c.execute(sql, params)
         return [dict(r) for r in c.fetchall()]
+
+
+def qsafe(sql, args=()):
+    """q() that returns [] if the table is not there yet (first deploy before the daily job adds it)."""
+    try:
+        return q(sql, args)
+    except psycopg2.Error:
+        return []
 
 
 def q1(sql, params=()):
@@ -77,7 +86,11 @@ def ensure_schema():
              title TEXT NOT NULL, detail JSONB, source TEXT, UNIQUE (date, kind, title));
          CREATE TABLE IF NOT EXISTS v2_decisions (id SERIAL PRIMARY KEY, ticker TEXT NOT NULL, decided_at TIMESTAMPTZ DEFAULT now(),
              action TEXT, decision TEXT, price NUMERIC, shares NUMERIC, note TEXT, alert_id INT, spy_price NUMERIC);
-         ALTER TABLE v2_names ADD COLUMN IF NOT EXISTS growth_score NUMERIC;""")
+         ALTER TABLE v2_names ADD COLUMN IF NOT EXISTS growth_score NUMERIC;
+         CREATE TABLE IF NOT EXISTS v2_newsletter_mentions (id SERIAL PRIMARY KEY, date DATE NOT NULL, source TEXT NOT NULL,
+             subject TEXT, kind TEXT NOT NULL DEFAULT 'stock', ticker TEXT, topic TEXT, stance TEXT, point TEXT,
+             thesis_relevant BOOLEAN DEFAULT FALSE, hype BOOLEAN DEFAULT FALSE, loaded_at TIMESTAMPTZ DEFAULT now(),
+             UNIQUE NULLS NOT DISTINCT (date, source, kind, ticker, topic));""")
     _schema_ok = True
     try:
         sync(drive=False)                               # files checked in with the app (inbox-seed) load on first use
@@ -1170,6 +1183,7 @@ NAME_TPL = r"""
 <div class="card"><h3>Recent alerts, news and filings</h3>
 {% for a in alerts %}<div><span class="chip {{ {'high':'bad','medium':'warn'}.get(a.severity,'') }}">{{ a.severity }}</span> {{ a.fired_at|d }} · {{ a.kind }}{% if a.detail %}: {{ a.detail }}{% endif %}</div>{% endfor %}
 {% for x in news %}<div><span class="chip {{ TAG_CLASS.get(x.tag,'') }}">{{ x.tag or 'news' }}</span> {{ x.published|d }} · <a href="{{ x.url }}" target="_blank" rel="noopener">{{ x.headline }}</a>{% if x.note %}<br><span class="muted">{{ x.note }}</span>{% endif %}</div>{% endfor %}
+{% for x in nletters %}<div><span class="chip {{ 'good' if x.stance == 'positive' else 'warn' if x.stance == 'negative' else '' }}">newsletter</span> {{ x.date|d }} · {{ x.source }}: {{ x.point }}</div>{% endfor %}
 {% for e in events %}<div><span class="chip">{{ e.form }}</span> {{ e.filed|d }} · <a href="{{ e.url }}" target="_blank" rel="noopener">{{ e.kind or e.form }}</a>{% if e.detail %}: {{ e.detail }}{% endif %}</div>{% endfor %}
 {% if not (alerts or news or events) %}<p class="empty">Nothing yet. The daily and weekly jobs fill this.</p>{% endif %}
 </div></div>
@@ -1342,6 +1356,7 @@ def name(ticker):
                 scenarios=q("SELECT * FROM v2_scenarios WHERE ticker = %s ORDER BY created_at DESC", (ticker,)),
                 alerts=q("SELECT * FROM v2_alerts WHERE ticker = %s ORDER BY fired_at DESC LIMIT 10", (ticker,)),
                 news=q("SELECT * FROM v2_news WHERE ticker = %s ORDER BY published DESC NULLS LAST LIMIT 8", (ticker,)),
+                nletters=qsafe("SELECT * FROM v2_newsletter_mentions WHERE ticker = %s ORDER BY date DESC LIMIT 6", (ticker,)),
                 events=q("SELECT * FROM v2_events WHERE ticker = %s ORDER BY filed DESC LIMIT 8", (ticker,)),
                 legacy=(n.get("legacy") or {}).get("thesis"), tam_rows=tam_calc(val.get("tam"), price),
                 style=name_style(n, thesis)[0], style_how=name_style(n, thesis)[1])
@@ -1727,6 +1742,10 @@ OUTLOOK_TPL = r"""
 <div class="card"><p style="margin-top:0">{{ wa.summary }}</p>
 {% for e in wa.events or [] %}<div style="margin:6px 0"><b>{{ e.date }} · {{ e.title }}</b>{% if e.names %} <span class="muted">({{ e.names|join(', ') }})</span>{% endif %}<br>
 <span class="muted">{{ e.why }}</span>{% if e.playbook %}<br>→ {{ e.playbook }}{% endif %}</div>{% endfor %}</div>{% endif %}
+{% if nl %}<h2>What the newsletters say <span class="muted" style="font-weight:400;font-size:13px">last 7 days, tagged by Claude</span></h2>
+<div class="card">{% for r in nl %}<div style="margin:5px 0"><span class="{{ 'good' if r.stance == 'positive' else 'bad' if r.stance == 'negative' else 'muted' }}">{{ '▲' if r.stance == 'positive' else '▼' if r.stance == 'negative' else '•' }}</span>
+<b>{% if r.ticker %}<a href="{{ url_for('name', ticker=r.ticker) }}">{{ r.ticker }}</a>{% else %}{{ (r.topic or '')|capitalize }}{% endif %}</b> {{ r.point }}
+<span class="muted" style="font-size:12px">· {{ r.source }}, {{ r.date.strftime('%d %b') }}</span></div>{% endfor %}</div>{% endif %}
 {% if m %}{% set r = m.regime %}
 <h2>Macro backdrop</h2>
 {% if m.flags %}<div class="flash">⚠ {{ m.flags|join(' · ') }}</div>{% endif %}
@@ -1776,7 +1795,13 @@ def outlook():
     except psycopg2.Error:
         cal = []
     sens = sorted(((m or {}).get("sens") or {}).items(), key=lambda kv: (kv[1].get("level") != "book", kv[0]))
-    return page("outlook", "Outlook", OUTLOOK_TPL, m=m, wa=wa, cal=cal, sens=sens)
+    try:   # macro and theme views first, then mentions of your Book and Watchlist names
+        nl = q("""SELECT m.* FROM v2_newsletter_mentions m LEFT JOIN v2_names n USING (ticker)
+                  WHERE m.date >= CURRENT_DATE - 7 AND (m.kind <> 'stock' OR n.level IN ('watchlist','book'))
+                  ORDER BY m.kind = 'stock', m.date DESC, m.id LIMIT 25""")
+    except psycopg2.Error:
+        nl = []
+    return page("outlook", "Outlook", OUTLOOK_TPL, m=m, wa=wa, cal=cal, sens=sens, nl=nl)
 
 
 RESEARCH_TPL = r"""

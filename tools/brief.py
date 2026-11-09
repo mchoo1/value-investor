@@ -10,7 +10,8 @@ APP_URL = os.environ.get("APP_URL", "https://value-investor-weld.vercel.app").rs
 DECIDE_KINDS = {"Kill criterion hit": "EXIT?", "Buy signal confirmed": "BUY", "Buy signal": "BUY", "Add zone": "ADD",
                 "Trim zone": "TRIM", "Buy signal, thesis weakened": "REVIEW", "Add zone, thesis flagged": "REVIEW",
                 "Fair value reached": "REVIEW", "Thesis refreshed after results": "APPROVE", "Earnings preview": "PREPARE",
-                "Old idea at buy level": "RE-CHECK", "Screen idea on sale": "LOOK"}
+                "Old idea at buy level": "RE-CHECK", "Screen idea on sale": "LOOK",
+                "Newsletter flag": "REVIEW"}
 ORDER = ["EXIT?", "BUY", "ADD", "TRIM", "REVIEW", "PREPARE", "APPROVE", "RE-CHECK", "LOOK"]
 
 
@@ -131,6 +132,23 @@ def build(cur, html=True):
         head = e(wa["summary"].split(". ")[0][:160]) + "\n" if wa.get("summary") and str(wa.get("as_of", "")) >= str(today - dt.timedelta(days=7)) else ""
         out.append(b("Next 7 days") + "\n" + head + "\n".join(lines))
 
+    # ---- what the newsletters say (last ~36h): your names first, then macro and themes
+    cur.execute("""SELECT m.kind, m.ticker, m.topic, m.stance, m.point, m.source, n.level FROM v2_newsletter_mentions m
+                   LEFT JOIN v2_names n USING (ticker) WHERE m.loaded_at > now() - interval '36 hours'
+                   ORDER BY (n.level = 'book') IS NOT TRUE, (n.level = 'watchlist') IS NOT TRUE, m.kind = 'stock' DESC,
+                            m.thesis_relevant DESC, m.id""")
+    nl = cur.fetchall()
+    if nl:
+        mine = [r for r in nl if r["level"] in ("book", "watchlist")]
+        mac = [r for r in nl if r["kind"] in ("macro", "theme")]
+        pick_ = (mine[:3] + mac[:5])[:5]
+        arrow = {"positive": "▲", "negative": "▼"}
+        lines = [f"{arrow.get(r['stance'], '•')} " + (a(r["ticker"]) if r["ticker"] else e((r["topic"] or "").capitalize()))
+                 + f": {e((r['point'] or '')[:110])} <i>({e(r['source'])})</i>" if html else
+                 f"{arrow.get(r['stance'], '-')} {r['ticker'] or r['topic']}: {(r['point'] or '')[:110]} ({r['source']})" for r in pick_]
+        srcs = len({r["source"] for r in nl})
+        out.append(b(f"Newsletters ({srcs} read)") + "\n" + "\n".join(lines))
+
     # ---- new from Claude (last 24h) and the screen
     cur.execute("""SELECT kind, COUNT(*) AS c FROM v2_inbox_log WHERE loaded_at > now() - interval '24 hours'
                    AND kind IS NOT NULL AND kind <> 'error' GROUP BY kind""")
@@ -138,7 +156,7 @@ def build(cur, html=True):
     if new:
         label = {"thesis": "new theses", "refresh": "results refreshes", "reason_cards": "reason/growth cards",
                  "news_tags": "news tags", "filing_tags": "filing reads", "buy_checks": "buy checks",
-                 "week_ahead": "week ahead", "outlook": "theme outlooks", "book": "Book update", "tam": "TAM updates"}
+                 "week_ahead": "week ahead", "newsletter_tags": "newsletter tags", "outlook": "theme outlooks", "book": "Book update", "tam": "TAM updates"}
         out.append(b("New from Claude (24h)") + "\n" + ", ".join(f"{c} {label.get(k, k)}" for k, c in new.items()))
     cur.execute("SELECT run_date, top10, growth_top10 FROM v2_screen_runs ORDER BY run_date DESC LIMIT 1")
     run = cur.fetchone()

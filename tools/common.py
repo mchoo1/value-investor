@@ -64,6 +64,10 @@ def ensure_schema(cur):
           action TEXT, decision TEXT, price NUMERIC, shares NUMERIC, note TEXT, alert_id INT, spy_price NUMERIC);
       CREATE TABLE IF NOT EXISTS v2_calendar (id SERIAL PRIMARY KEY, date DATE NOT NULL, time_et TEXT, kind TEXT, ticker TEXT,
           title TEXT NOT NULL, detail JSONB, source TEXT, UNIQUE (date, kind, title));
+      CREATE TABLE IF NOT EXISTS v2_newsletter_mentions (id SERIAL PRIMARY KEY, date DATE NOT NULL, source TEXT NOT NULL,
+          subject TEXT, kind TEXT NOT NULL DEFAULT 'stock', ticker TEXT, topic TEXT, stance TEXT, point TEXT,
+          thesis_relevant BOOLEAN DEFAULT FALSE, hype BOOLEAN DEFAULT FALSE, loaded_at TIMESTAMPTZ DEFAULT now(),
+          UNIQUE NULLS NOT DISTINCT (date, source, kind, ticker, topic));
       ALTER TABLE v2_screen_runs ADD COLUMN IF NOT EXISTS growth_top10 JSONB;
       ALTER TABLE v2_screen_scores ADD COLUMN IF NOT EXISTS growth_score NUMERIC;
       ALTER TABLE v2_names ADD COLUMN IF NOT EXISTS health TEXT;
