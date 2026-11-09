@@ -1,0 +1,160 @@
+"""Load results from Claude's scheduled tasks (Drive folder ValueInvestor/v2-inbox) into the database.
+
+  python tools\\inbox.py              read new files from Drive
+  python tools\\inbox.py --dir PATH   read *.json from a local folder (testing)
+Each file is loaded once (tracked by file id and modified time). Files are never edited or deleted.
+"""
+import sys, json, argparse
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
+from common import db, J, alert, ensure_schema, drive_list, drive_read, DRIVE_INBOX, TODAY
+
+ap = argparse.ArgumentParser()
+ap.add_argument("--dir")
+args = ap.parse_args()
+
+WATCH_CAP = 50
+SECTION_KEYS = {"industry_map", "size_growth", "structure", "demand_supply", "industry_risks", "outlook", "winners",
+                "business", "right_to_win", "moat", "tam_competitors", "management", "financials", "company_risks",
+                "variant_view", "valuation", "pillars", "catalysts_flow", "premortem"}
+TAGS = {"no change", "strengthens", "weakens", "breaks"}
+
+
+def known(cur, t):
+    cur.execute("SELECT * FROM v2_names WHERE ticker = %s", (t,))
+    return cur.fetchone()
+
+
+def load_thesis(cur, d):
+    t = d["ticker"].upper()
+    n = known(cur, t)
+    if not n:
+        cur.execute("INSERT INTO v2_names (ticker, level, status, first_seen, last_screened) VALUES (%s,'screen','new',%s,%s)",
+                    (t, TODAY, TODAY))
+        n = known(cur, t)
+    sections = {k: v for k, v in (d.get("sections") or {}).items() if k in SECTION_KEYS and v}
+    missing = sorted(SECTION_KEYS - set(sections))
+    cur.execute("SELECT COALESCE(MAX(version), 0) + 1 AS v FROM v2_theses WHERE ticker = %s", (t,))
+    ver = cur.fetchone()["v"]
+    cur.execute("""INSERT INTO v2_theses (ticker, version, author, approval, sections, valuation, conviction, verdict, entry_target)
+                   VALUES (%s,%s,'claude','pending',%s,%s,%s,%s,%s)""",
+                (t, ver, J(sections), J(d.get("valuation") or {}), d.get("conviction"), d.get("verdict"), d.get("entry_target")))
+    if d.get("themes"):
+        cur.execute("UPDATE v2_names SET themes = (SELECT ARRAY(SELECT DISTINCT unnest(themes || %s))) WHERE ticker = %s",
+                    (d["themes"], t))
+    moved = ""
+    if d.get("add_to_watchlist") and n["level"] == "screen":
+        cur.execute("SELECT COUNT(*) AS c FROM v2_names WHERE level = 'watchlist'")
+        if cur.fetchone()["c"] < WATCH_CAP:
+            cur.execute("""UPDATE v2_names SET level = 'watchlist', status = 'watching', level_since = CURRENT_DATE,
+                           updated_at = now() WHERE ticker = %s""", (t,))
+            cur.execute("INSERT INTO v2_comments (ticker, section, body) VALUES (%s, 'move', 'Moved screen → watchlist after deep dive')", (t,))
+            moved = " Added to the Watchlist."
+        else:
+            cur.execute("UPDATE v2_names SET status = 'deep_dive_done' WHERE ticker = %s", (t,))
+            moved = " Watchlist is full (50): remove a name to add it."
+    elif n["status"] == "deep_dive_requested":
+        cur.execute("UPDATE v2_names SET status = %s WHERE ticker = %s",
+                    ("watching" if n["level"] == "watchlist" else "holding" if n["level"] == "book" else "deep_dive_done", t))
+    alert(cur, t, "New thesis ready", "medium",
+          f"v{ver} · {d.get('verdict') or '?'} · conviction {d.get('conviction') or '?'} · entry target "
+          f"{('$%.2f' % d['entry_target']) if d.get('entry_target') else '—'}.{moved} Approve it in the app."
+          + (f" Missing sections: {', '.join(missing)}." if missing else ""),
+          f"thesis-{t}-v{ver}", source="claude", action="Review and approve")
+    return f"{t} v{ver}{' (' + str(len(missing)) + ' sections missing)' if missing else ''}"
+
+
+def load(cur, name, d):
+    kind = d.get("type")
+    if kind == "reason_cards":
+        n = 0
+        for it in d.get("items", []):
+            t = (it.get("ticker") or "").upper()
+            card = {k: it.get(k) for k in ("why_cheap", "who_selling", "market_missing", "buyers_back")}
+            if t and all(card.values()):
+                cur.execute("UPDATE v2_names SET reason_card = %s WHERE ticker = %s", (J(card), t))
+                n += cur.rowcount
+        return f"{n} reason cards"
+    if kind == "thesis":
+        return load_thesis(cur, d)
+    if kind in ("news_tags", "filing_tags"):
+        table = "v2_news" if kind == "news_tags" else "v2_events"
+        n = 0
+        for it in d.get("items", []):
+            tag = (it.get("tag") or "").lower()
+            if tag not in TAGS or not it.get("id"):
+                continue
+            cur.execute(f"UPDATE {table} SET tag = %s, note = %s WHERE id = %s RETURNING ticker, "
+                        + ("headline" if table == "v2_news" else "kind") + " AS what", (tag, it.get("note"), it["id"]))
+            row = cur.fetchone()
+            if not row:
+                continue
+            n += 1
+            book = (known(cur, row["ticker"]) or {}).get("level") == "book"
+            if tag == "breaks":
+                alert(cur, row["ticker"], "Thesis pillar broken", "high", f"{row['what']}: {it.get('note') or ''}",
+                      f"{kind}-{it['id']}", source="claude", action="Full re-review; buy signal paused")
+            elif tag == "weakens" and book:
+                alert(cur, row["ticker"], "Thesis weakened", "medium", f"{row['what']}: {it.get('note') or ''}",
+                      f"{kind}-{it['id']}", source="claude")
+        return f"{n} tags"
+    if kind == "buy_checks":
+        n = 0
+        for it in d.get("items", []):
+            t = (it.get("ticker") or "").upper()
+            ok = (it.get("verdict") or "").lower() == "holds"
+            cur.execute("""UPDATE v2_alerts SET sent_via = NULL,
+                             kind = %s, severity = %s,
+                             detail = detail || %s, action = %s
+                           WHERE ticker = %s AND kind = 'Buy signal' AND sent_via = 'hold' AND NOT sent""",
+                        ("Buy signal confirmed" if ok else "Buy signal, thesis weakened", "high" if ok else "medium",
+                         f" · Claude: {'thesis holds' if ok else 'thesis has weakened'} — {it.get('note') or ''}",
+                         "Decide in the app" if ok else "Review before buying", t))
+            n += cur.rowcount
+        return f"{n} buy checks"
+    if kind == "outlook":
+        cur.execute("INSERT INTO v2_industry_outlooks (theme, as_of, kind, content) VALUES (%s,%s,%s,%s)",
+                    (d.get("theme"), TODAY, d.get("kind") or "light", J(d.get("content") or {})))
+        return f"outlook {d.get('theme')}"
+    raise ValueError(f"unknown type {kind!r}")
+
+
+def main():
+    conn = db()
+    cur = conn.cursor()
+    ensure_schema(cur)
+    conn.commit()
+    if args.dir:
+        files = [{"id": str(p), "name": p.name, "modifiedTime": str(p.stat().st_mtime), "path": p}
+                 for p in sorted(Path(args.dir).glob("*.json"))]
+    else:
+        files = drive_list(DRIVE_INBOX)
+        if files is None:
+            print("Inbox: no Drive credentials (GOOGLE_SERVICE_ACCOUNT_JSON); nothing loaded.")
+            return
+        files = [f for f in files if f["name"].lower().endswith(".json")]
+    done = 0
+    for f in files:
+        cur.execute("SELECT 1 FROM v2_inbox_log WHERE file_id = %s AND modified = %s", (f["id"], f["modifiedTime"]))
+        if cur.fetchone():
+            continue
+        try:
+            text = f["path"].read_text() if "path" in f else drive_read(f["id"])
+            d = json.loads(text)
+            result = load(cur, f["name"], d)
+            kind = d.get("type")
+        except Exception as e:
+            conn.rollback()
+            result, kind = f"ERROR {e.__class__.__name__}: {str(e)[:150]}", "error"
+            alert(cur, "SYSTEM", "Inbox file rejected", "info", f"{f['name']}: {result}", f"inbox-{f['id']}-{f['modifiedTime']}")
+        cur.execute("INSERT INTO v2_inbox_log (file_id, modified, name, kind, result) VALUES (%s,%s,%s,%s,%s)",
+                    (f["id"], f["modifiedTime"], f["name"], kind, result))
+        conn.commit()
+        done += 1
+        print(f"  {f['name']}: {result}")
+    print(f"Inbox: {done} new file(s) loaded, {len(files) - done} already done.")
+    conn.close()
+
+
+main()

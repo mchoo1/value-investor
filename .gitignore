@@ -38,3 +38,8 @@ desktop.ini
 
 # Screenshots (local only)
 screenshot/
+
+# ValueInvestor v2 local files
+tools/.cache/
+outbox/
+*.json.bak

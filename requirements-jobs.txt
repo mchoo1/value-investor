@@ -1,0 +1,5 @@
+requests>=2.31
+pandas>=2.2
+yfinance>=0.2.40
+psycopg2-binary>=2.9
+google-auth>=2.29

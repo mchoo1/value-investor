@@ -1,0 +1,40 @@
+name: "Daily monitor (Mon-Fri 07:07 SGT)"
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "7 23 * * 0-4"   # 07:07 SGT Mon-Fri
+
+concurrency:
+  group: valueinvestor
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+      GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-jobs.txt
+      - run: pip install -r requirements-jobs.txt
+      - name: Load Claude's results
+        run: python tools/inbox.py
+      - name: Check prices, filings, analysts, buy signals and themes
+        id: monitor
+        run: python tools/monitor.py daily
+      - name: Re-run the screen after a theme sell-off of 10% or more
+        if: steps.monitor.outputs.rerun_screen == 'true'
+        run: python tools/screen.py
+      - name: Send Telegram alerts
+        run: python tools/notify.py daily
+      - name: Hand data to Claude's tasks
+        run: python tools/monitor.py export
