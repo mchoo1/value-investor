@@ -33,3 +33,5 @@ jobs:
         run: python tools/inbox.py
       - name: Weekly digest
         run: python tools/notify.py digest
+      - name: Heartbeat
+        run: python tools/heartbeat.py digest

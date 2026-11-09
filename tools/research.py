@@ -541,7 +541,8 @@ def research(ticker, cik, sector, industry, peers_all):
     if holders is not None and len(holders):
         for _, r in holders.head(8).iterrows():
             top_holders.append({"holder": r.get("Holder"), "pct": r.get("pctHeld") if "pctHeld" in r else r.get("% Out"),
-                                "shares": r.get("Shares"), "value": r.get("Value")})
+                                "shares": r.get("Shares"), "value": r.get("Value"), "pct_change": r.get("pctChange"),
+                                "reported": str(r.get("Date Reported"))[:10] if r.get("Date Reported") is not None else None})
     business = {"summary": info.get("longBusinessSummary"), "website": info.get("website"),
                 "employees": info.get("fullTimeEmployees"), "city": info.get("city"), "country": info.get("country"),
                 "officers": [{"name": o.get("name"), "title": o.get("title"), "age": o.get("age"),

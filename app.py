@@ -303,7 +303,7 @@ tr:last-child td{border-bottom:none}td.r,th.r{text-align:right}.tablewrap{overfl
 .chip{display:inline-block;padding:1px 8px;border-radius:999px;background:var(--chip);font-size:12px;color:var(--mute);margin:1px 2px 1px 0;white-space:nowrap}
 .chip.good{color:var(--good)}.chip.warn{color:var(--warn)}.chip.bad{color:var(--bad)}.chip.acc{color:var(--accent)}
 .dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--mute);margin-right:6px}
-.dot.green{background:var(--good)}.dot.amber{background:var(--warn)}.dot.red{background:var(--bad)}
+.dot.grey{background:transparent;border:1.5px solid var(--mute)}.dot.green{background:var(--good)}.dot.amber{background:var(--warn)}.dot.red{background:var(--bad)}
 .good{color:var(--good)}.warn{color:var(--warn)}.bad{color:var(--bad)}.muted{color:var(--mute)}
 button,.btn{font:inherit;font-size:13px;padding:5px 11px;border-radius:8px;border:1px solid var(--line);
 background:var(--panel2);color:var(--ink);cursor:pointer}button:hover{border-color:var(--accent)}
@@ -453,7 +453,7 @@ SCREEN_TPL = r"""
 <h3><span><a href="{{ url_for('name', ticker=t.ticker) }}">{{ loop.index }}. {{ t.ticker }}</a> <span class="muted" style="font-weight:400">{{ (m.name or '')|cname }}</span></span><span>{{ t.score|n1 }}</span></h3>
 <div class="muted" style="font-size:12px">{{ m.sector }}{% if m.industry %} · {{ m.industry }}{% endif %}</div>
 <div style="margin-top:6px">{{ funnel_chips(t.funnels) }}{% if t.promote %}<span class="chip good">Clears bar</span>{% endif %}
-{% if t.status == 'deep_dive_requested' %}<span class="chip acc">Deep dive requested</span>{% endif %}</div>
+{% if t.status == 'deep_dive_requested' %}<span class="chip acc">Deep dive requested</span><form class="inline" method="post" action="{{ url_for('deepdive_cancel', ticker=t.ticker) }}"><button title="Cancel the request">Cancel</button></form>{% endif %}</div>
 <div class="mini">
 <div><span>Price</span><b>{{ m.px.price|money }}</b></div><div><span>Off 52w high</span><b class="dn">{{ m.px.drawdown|pct }}</b></div>
 <div><span>P/E</span><b>{{ '%.1f'|format(m.fin.pe) if m.fin.pe else '—' }}</b></div><div><span>FCF yield</span><b>{{ m.fin.fcf_yield|pct }}</b></div>
@@ -496,7 +496,7 @@ SCREEN_TPL = r"""
 <div class="tablewrap"><table id="res"><thead><tr id="hdr"></tr></thead><tbody id="rows"></tbody></table></div>
 <div class="bulk" id="bulk"><form method="post" action="{{ url_for('bulk') }}" class="row" onsubmit="return fillBulk(this)">
 <b id="selcount"></b><input type="hidden" name="tickers"><button name="action" value="watch" class="primary">+ Add to Watchlist</button>
-<button name="action" value="deepdive">Request deep dive</button><button type="button" onclick="SEL.clear();render()">Clear</button></form></div>
+<button name="action" value="deepdive">Request deep dive</button><button name="action" value="canceldd">Cancel deep dive</button><button type="button" onclick="SEL.clear();render()">Clear</button></form></div>
 {% endif %}
 
 <h2>Names on record <span class="muted" style="font-weight:400">{{ names|length }} · none ever deleted</span></h2>
@@ -765,7 +765,7 @@ scored on moat 30, growth and acceleration 25, industry acceleration 25, smart m
 <h3><span><a href="{{ url_for('name', ticker=t.ticker) }}">{{ loop.index }}. {{ t.ticker }}</a> <span class="muted" style="font-weight:400">{{ (m.name or '')|cname }}</span></span><span>{{ t.score|n1 }}</span></h3>
 <div class="muted" style="font-size:12px">{{ m.industry or m.sector }}{% if g.themes %} · {{ g.themes|join(', ') }}{% endif %}</div>
 <div style="margin-top:6px">{{ funnel_chips(t.funnels) }}{% if t.promote %}<span class="chip good">Deep dive this week</span>{% endif %}
-{% if t.status == 'deep_dive_requested' %}<span class="chip acc">Deep dive requested</span>{% endif %}</div>
+{% if t.status == 'deep_dive_requested' %}<span class="chip acc">Deep dive requested</span><form class="inline" method="post" action="{{ url_for('deepdive_cancel', ticker=t.ticker) }}"><button title="Cancel the request">Cancel</button></form>{% endif %}</div>
 <div class="parts">{% for k,label in [('moat','Moat'),('growth','Growth'),('industry','Industry'),('smart','Smart money'),('valuation','Valuation')] %}
 <span>{{ label }}</span><div class="b"><i style="width:{{ (t.parts or {}).get(k, 0) }}%"></i></div><b>{{ (t.parts or {}).get(k, 0)|round|int }}</b>{% endfor %}</div>
 <div class="mini">
@@ -856,6 +856,9 @@ def bulk():
             ensure_name(t)
         x("UPDATE v2_names SET status = 'deep_dive_requested', updated_at = now() WHERE ticker = ANY(%s)", (tickers,))
         flash(f"Deep dive requested for {', '.join(tickers)}.")
+    elif action == "canceldd":
+        n_ = cancel_deep_dive(tickers)
+        flash(f"Deep dive cancelled for {n_} name(s)." if n_ else "None of those had a deep dive requested.")
     elif action == "watch":
         room = WATCH_CAP - q1("SELECT COUNT(*) AS c FROM v2_names WHERE level = 'watchlist'")["c"]
         take, skipped = tickers[:max(room, 0)], tickers[max(room, 0):]
@@ -1098,7 +1101,111 @@ def book():
         r["es"] = (th.get("sections") or {}).get("exec_summary")
     alerts = q("SELECT a.* FROM v2_alerts a JOIN v2_names n USING (ticker) WHERE n.level IN ('book','watchlist') "
                "ORDER BY a.addressed, a.fired_at DESC LIMIT 100")
-    return page("book", "Book", BOOK_TPL, rows=rows, alerts=alerts, target=BOOK_TARGET)
+    risk = book_risk(rows, pos)
+    return page("book", "Book", BOOK_TPL + RISK_TPL, rows=rows, alerts=alerts, target=BOOK_TARGET, risk=risk)
+
+
+RISK_CAPS = {"sector": 0.35, "driver": 0.40, "pair_corr": 0.70, "bear_loss": 0.40, "drawdown": 0.15}
+
+
+def _corr(a, b):
+    n = len(a)
+    if n < 20:
+        return None
+    ma, mb = sum(a) / n, sum(b) / n
+    va = sum((x - ma) ** 2 for x in a)
+    vb = sum((y - mb) ** 2 for y in b)
+    if not va or not vb:
+        return None
+    return sum((x - ma) * (y - mb) for x, y in zip(a, b)) / math.sqrt(va * vb)
+
+
+def book_risk(rows, pos):
+    """Shared risks in the Book: correlation, sector and driver concentration, bear-case downside, drawdown."""
+    tks = [r["ticker"] for r in rows]
+    if not tks:
+        return None
+    names = {n["ticker"]: n for n in qsafe("SELECT ticker, sector, drivers FROM v2_names WHERE ticker = ANY(%s)", (tks,))}
+    shares = {t: num((pos.get(t) or {}).get("shares")) for t in tks}
+    val = {r["ticker"]: (shares[r["ticker"]] or 0) * (r["price"] or 0) for r in rows}
+    tot = sum(val.values())
+    w = {t: (val[t] / tot if tot else 1 / len(tks)) for t in tks}
+    # weekly closes, last ~1 year
+    px = {}
+    for r_ in q("""SELECT ticker, date, close FROM v2_prices WHERE ticker = ANY(%s) AND date > CURRENT_DATE - 380
+                   ORDER BY ticker, date""", (tks,)):
+        px.setdefault(r_["ticker"], {})[r_["date"]] = float(r_["close"])
+    dates = sorted({d for v in px.values() for d in v})
+    weekly = dates[::-5][::-1]
+    rets = {}
+    for t in tks:
+        c = [px.get(t, {}).get(d) for d in weekly]
+        rets[t] = [(c[i] / c[i - 1] - 1) if c[i] and c[i - 1] else None for i in range(1, len(c))]
+    pairs = []
+    for i, a in enumerate(tks):
+        for b in tks[i + 1:]:
+            xy = [(x, y) for x, y in zip(rets[a], rets[b]) if x is not None and y is not None]
+            c = _corr([x for x, _ in xy], [y for _, y in xy])
+            if c is not None:
+                pairs.append({"a": a, "b": b, "corr": round(c, 2)})
+    pairs.sort(key=lambda p: -p["corr"])
+    high = [p for p in pairs if p["corr"] > RISK_CAPS["pair_corr"]]
+    # effective number of bets: weight concentration adjusted for average correlation
+    avg_c = sum(p["corr"] for p in pairs) / len(pairs) if pairs else 0
+    hhi = sum(v * v for v in w.values()) or 1
+    eff = (1 / hhi) / (1 + avg_c * ((1 / hhi) - 1)) if avg_c > -0.9 else 1 / hhi
+    sectors, drivers = {}, {}
+    for t in tks:
+        sectors[(names.get(t) or {}).get("sector") or "Unknown"] = sectors.get((names.get(t) or {}).get("sector") or "Unknown", 0) + w[t]
+        for d in ((names.get(t) or {}).get("drivers") or []):
+            drivers[d] = drivers.get(d, 0) + w[t]
+    bear = []
+    stress = 0.0
+    for r in rows:
+        th = q1("SELECT valuation FROM v2_theses WHERE ticker = %s ORDER BY version DESC LIMIT 1", (r["ticker"],)) or {}
+        e = (th.get("valuation") or {}).get("engine") or {}
+        bv = ((e.get("scenarios") or {}).get("bear") or {}).get("value")
+        loss = (bv / r["price"] - 1) if bv and r["price"] else None
+        if loss is not None:
+            stress += w[r["ticker"]] * loss
+        bear.append({"ticker": r["ticker"], "weight": w[r["ticker"]], "bear": bv, "loss": loss,
+                     "halve": loss is not None and loss < -RISK_CAPS["bear_loss"]})
+    covered = sum(w[b["ticker"]] for b in bear if b["loss"] is not None)
+    # drawdown of today's holdings over the last year
+    held = [t for t in tks if shares[t] and px.get(t)]
+    last, series = {}, []
+    for d in dates:                                   # carry the last close forward so a missing day is not a crash
+        for t in held:
+            if d in px[t]:
+                last[t] = px[t][d]
+        if len(last) == len(held):
+            series.append(sum(shares[t] * last[t] for t in held))
+    dd = (series[-1] / max(series) - 1) if series else None
+    return {"pairs": pairs[:8], "high": high, "eff": round(eff, 1), "n": len(tks), "avg_corr": round(avg_c, 2),
+            "sectors": sorted(sectors.items(), key=lambda kv: -kv[1]), "drivers": sorted(drivers.items(), key=lambda kv: -kv[1]),
+            "bear": sorted(bear, key=lambda b: (b["loss"] is None, b["loss"] or 0)), "stress": stress if covered else None,
+            "covered": covered, "drawdown": dd, "caps": RISK_CAPS, "weighted_by_value": bool(tot)}
+
+
+RISK_TPL = r"""
+{% if risk %}<h2 id="risk">Portfolio risk <span class="muted" style="font-weight:400">shared risks, not just name and theme counts</span></h2>
+<div class="grid g4">
+<div class="card tile"><div class="k">Effective number of bets</div><div class="v">{{ risk.eff }}</div><div class="k">of {{ risk.n }} names · average correlation {{ risk.avg_corr }}</div></div>
+<div class="card tile"><div class="k">Highly correlated pairs (above {{ risk.caps.pair_corr }})</div><div class="v {{ 'warn' if risk.high }}">{{ risk.high|length }}</div><div class="k">weekly returns, 1 year</div></div>
+<div class="card tile"><div class="k">All names at bear value</div><div class="v {{ 'bad' if risk.stress is not none and risk.stress < -0.25 }}">{{ risk.stress|pct(true) }}</div><div class="k">covers {{ risk.covered|pct }} of the Book (engine theses only)</div></div>
+<div class="card tile"><div class="k">Drawdown from 1-year peak</div><div class="v {{ 'bad' if risk.drawdown is not none and risk.drawdown < -risk.caps.drawdown }}">{{ risk.drawdown|pct(true) }}</div><div class="k">today's holdings · alert past {{ risk.caps.drawdown|pct }}</div></div>
+</div>
+<div class="grid g2" style="margin-top:12px">
+<div class="card"><h3>Most correlated pairs</h3><table><tbody>{% for p in risk.pairs %}<tr><td>{{ p.a }} · {{ p.b }}</td><td class="r {{ 'warn' if p.corr > risk.caps.pair_corr }}">{{ p.corr }}</td></tr>{% else %}<tr><td class="empty">Needs 20+ weeks of prices.</td></tr>{% endfor %}</tbody></table>
+<h3 style="margin-top:12px">Sector weight <span class="muted" style="font-weight:400;font-size:13px">cap {{ risk.caps.sector|pct }}</span></h3><table><tbody>
+{% for k, v in risk.sectors %}<tr><td>{{ k }}</td><td class="r {{ 'bad' if v > risk.caps.sector }}">{{ v|pct }}</td></tr>{% endfor %}</tbody></table>
+<h3 style="margin-top:12px">Common drivers <span class="muted" style="font-weight:400;font-size:13px">cap {{ risk.caps.driver|pct }} · tagged by each thesis</span></h3><table><tbody>
+{% for k, v in risk.drivers %}<tr><td>{{ k }}</td><td class="r {{ 'bad' if v > risk.caps.driver }}">{{ v|pct }}</td></tr>{% else %}<tr><td class="empty">No driver tags yet; new theses add them.</td></tr>{% endfor %}</tbody></table></div>
+<div class="card"><h3>Bear-case downside and sizing</h3><table><thead><tr><th>Name</th><th class="r">Weight</th><th class="r">Bear value</th><th class="r">Loss from today</th><th>Sizing</th></tr></thead><tbody>
+{% for b in risk.bear %}<tr><td><a href="{{ url_for('name', ticker=b.ticker) }}">{{ b.ticker }}</a></td><td class="r">{{ b.weight|pct }}</td><td class="r">{{ b.bear|money }}</td>
+<td class="r {{ 'bad' if b.halve }}">{{ b.loss|pct(true) }}</td><td>{% if b.halve %}<span class="chip bad">max size halved</span>{% elif b.loss is none %}<span class="muted">no engine thesis yet</span>{% else %}<span class="muted">normal</span>{% endif %}</td></tr>{% endfor %}</tbody></table>
+<p class="muted" style="font-size:12px">A bear-case loss above {{ risk.caps.bear_loss|pct }} halves the maximum size, whatever the conviction.{% if not risk.weighted_by_value %} Weights are equal until positions have shares.{% endif %}</p></div></div>{% endif %}
+"""
 
 
 # ------------------------------------------------------------------ Name / thesis page
@@ -1114,7 +1221,10 @@ NAME_TPL = r"""
 {% if n.level == 'screen' %}<form class="inline" method="post" action="{{ url_for('move', ticker=n.ticker) }}"><input type="hidden" name="to" value="watchlist"><button class="primary">Add to Watchlist</button></form>{% endif %}
 {% if n.level == 'watchlist' %}<form class="inline" method="post" action="{{ url_for('move', ticker=n.ticker) }}"><input type="hidden" name="to" value="book"><button class="primary">Move to Book</button></form>{% endif %}
 {% if n.level == 'book' %}<form class="inline" method="post" action="{{ url_for('move', ticker=n.ticker) }}"><input type="hidden" name="to" value="watchlist"><button>Back to Watchlist</button></form>{% endif %}
+{% if n.status == 'deep_dive_requested' %}<span class="chip acc">Deep dive requested</span><form class="inline" method="post" action="{{ url_for('deepdive_cancel', ticker=n.ticker) }}"><button>Cancel deep dive</button></form>
+{% else %}<form class="inline" method="post" action="{{ url_for('deepdive', ticker=n.ticker) }}"><button>Request deep dive</button></form>{% endif %}
 {% if n.level != 'screen' %}<form class="inline" method="post" action="{{ url_for('move', ticker=n.ticker) }}"><input type="hidden" name="to" value="screen">
+<select name="tag" title="Why it leaves"><option value="thesis broken">Thesis broken</option><option value="business rejected">Business rejected</option><option value="too expensive">Too expensive (re-check at entry)</option></select>
 <input name="reason" placeholder="Reason for rejecting" required> <button>Reject</button></form>{% endif %}
 </div></div>
 {{ REPORT_CSS }}
@@ -1156,7 +1266,7 @@ NAME_TPL = r"""
 {% if val.tam.what_must_go_right %}<p><b>What must go right:</b> {{ val.tam.what_must_go_right }}</p>{% endif %}
 </div>{% endif %}
 {% if spark %}<div class="card" style="margin-top:12px">{{ spark }}</div>{% endif %}
-
+{{ extra }}
 {{ research }}
 <div id="screen">{{ detail }}</div>
 <div class="grid g2" style="margin-top:12px" id="scenarios">
@@ -1221,7 +1331,67 @@ f.addEventListener('input',calc);calc()})();
 """
 
 
-def sparkline(pts, lines):
+NAME_EXTRA_TPL = r"""
+{% set e = val.engine or {} %}
+{% if r %}<div class="grid g4" style="margin-top:12px" id="snapshot">
+<div class="card tile"><div class="k">Market cap</div><div class="v">{{ big(r.mcap) }}</div><div class="k">{{ r.sector or '' }}</div></div>
+<div class="card tile"><div class="k">P/E · forward P/E</div><div class="v" style="font-size:18px">{{ fx(me.pe) }} · {{ fx((r.analysts or {}).forward_pe) }}</div><div class="k">EV/EBITDA {{ fx(me.ev_ebitda) }}</div></div>
+<div class="card tile"><div class="k">P/S · FCF yield</div><div class="v" style="font-size:18px">{{ fx(ps) }} · {{ me.fcf_yield|pct }}</div><div class="k">revenue CAGR {{ me.rev_cagr|pct }}</div></div>
+<div class="card tile"><div class="k">Short interest</div><div class="v" style="font-size:18px">{{ (r.ownership or {}).short_float|pct }}</div><div class="k">{{ fx((r.ownership or {}).short_ratio) }} days to cover</div></div>
+</div><p class="muted" style="font-size:12px;margin:4px 0 0">Snapshot from the weekly research run of {{ r.as_of|d }} (SEC and Yahoo).{% if stale %} <b class="warn">Data is {{ stale }} days old.</b>{% endif %}</p>{% endif %}
+
+<div class="card" style="margin-top:12px" id="engine"><h3>Valuation engine <span class="muted" style="font-weight:400;font-size:13px">code computes; Claude only sets assumptions</span></h3>
+{% if not e %}<p class="warn" style="margin-top:0">No assumptions file on this thesis: the values above were typed in, not computed. The next deep dive or results refresh adds one.</p>
+{% elif not e.dcf_valid %}<p style="margin-top:0"><b>{{ e.note }}</b></p>
+{% else %}<table><thead><tr><th>Scenario</th><th class="r">Weight</th><th class="r">Value today</th><th class="r">vs price</th><th class="r">Value in 5 years</th><th class="r">Return a year (5y)</th><th>Growth yr 1 → 10</th><th>Op. margin yr 1 → 10</th></tr></thead><tbody>
+{% for k in ['bear','base','bull'] if e.scenarios.get(k) %}{% set sc = e.scenarios[k] %}<tr><td><b>{{ k|capitalize }}</b></td><td class="r">{{ (e.weights or {}).get(k)|pct }}</td>
+<td class="r"><b>{{ sc.value|money }}</b></td><td class="r">{% if price %}{{ (sc.value / price - 1)|pct(true) }}{% endif %}</td><td class="r">{{ sc.value_y5|money }}</td>
+<td class="r {{ 'good' if sc.return_5y and sc.return_5y >= 0.15 else ('bad' if sc.return_5y is not none and sc.return_5y < 0 else '') }}">{{ sc.return_5y|pct }}</td>
+<td>{{ sc.growth_path[0]|pct }} → {{ sc.growth_path[-1]|pct }}</td><td>{{ sc.margin_path[0]|pct }} → {{ sc.margin_path[-1]|pct }}</td></tr>{% endfor %}</tbody></table>
+<div class="kv" style="margin-top:8px">
+<span class="k">Probability-weighted value</span><span>{{ e.prob_weighted|money }}</span>
+<span class="k">Discount rate (fixed method)</span><span>{{ e.discount_rate|pct }}</span>
+<span class="k">Margin of safety (risk-based)</span><span>{{ e.margin_of_safety|pct }} → entry target <b>{{ e.entry_target|money }}</b></span>
+<span class="k">Growth buy zone</span><span>{{ e.growth_zone|money }} <span class="muted">({{ e.growth_zone_why }}; bear case {{ e.bear_loss_from_price|pct(true) }} from today)</span></span>
+<span class="k">Reverse DCF</span><span>today's price implies {{ e.reverse_dcf_growth|pct }} revenue growth a year for 5 years at base margins</span>
+<span class="k">Inputs fingerprint</span><span class="muted">{{ e.inputs_hash }} · same inputs always give the same values</span></div>{% endif %}
+{% for x in val.engine_notes or [] %}<p class="warn" style="margin:6px 0 0">{{ x }}</p>{% endfor %}
+</div>
+
+{% if val.evidence or val.moat_source or sections.change_my_mind %}<div class="grid g2" style="margin-top:12px" id="evidence">
+<div class="card"><h3>Evidence behind the thesis</h3>
+{% if val.evidence %}{% set ev = val.evidence %}<p style="margin-top:0">{% for g, c in ev.counts.items() %}<span class="chip {{ 'good' if g in 'AB' else ('warn' if g in 'CD' else 'bad') }}" title="{{ GRADES[g] }}">{{ g }} · {{ c }}</span>{% endfor %}
+{% if ev.pillar_weak_share is not none %} <span class="{{ 'bad' if ev.weak_flag else 'muted' }}">{{ ev.pillar_weak_share|pct }} of pillar support is estimates or AI assumptions</span>{% endif %}</p>
+<table><thead><tr><th>Claim</th><th>Grade</th><th>Source</th></tr></thead><tbody>
+{% for c in val.claims or [] %}<tr><td>{{ c.claim }}{% if c.pillar %} <span class="muted">· pillar {{ c.pillar }}</span>{% endif %}</td><td><span class="chip">{{ c.grade }}</span></td><td class="muted">{{ c.source or '—' }}{% if c.date %} · {{ c.date }}{% endif %}</td></tr>{% endfor %}</tbody></table>
+<p class="muted" style="font-size:12px">A verified source · B reliable third party · C management · D analyst estimate · E AI assumption</p>{% endif %}</div>
+<div class="card"><h3>Moat source and what would change our mind</h3><div class="kv">
+<span class="k">Moat source</span><span>{% if val.moat_source and val.moat_source.type %}{{ val.moat_source.type }} <span class="chip">{{ val.moat_source.grade }}</span><br><span class="muted">{{ val.moat_source.evidence }}</span>{% else %}<span class="warn">Unproven: conviction capped at 60</span>{% endif %}</span>
+<span class="k">Change our mind if</span><span>{{ sections.change_my_mind or '—' }}</span>
+<span class="k">Main drivers</span><span>{{ (n.drivers or [])|join(', ') or '—' }}</span></div></div></div>{% endif %}
+
+<div class="card" style="margin-top:12px" id="second"><h3>Second opinion <span class="muted" style="font-weight:400;font-size:13px">blind valuation and red team; values are never averaged</span></h3>
+{% if not so %}<p class="empty" style="margin-top:0">None yet. The second-opinion task reviews each new deep dive.</p>{% else %}{% set g = so.result.gap or {} %}
+<p style="margin-top:0"><span class="chip {{ 'bad' if so.result.split else 'good' }}">{{ 'Split' if so.result.split else 'Agree' }}</span>
+{{ so.model }} · {{ so.created_at|d }} · on thesis v{{ so.thesis_version }} · verdict {{ so.result.claude_verdict or '?' }} (Claude) vs {{ so.verdict or '?' }}</p>
+{% if g.a %}<p>Base value: Claude <b>{{ g.a|money }}</b> vs second <b>{{ g.b|money }}</b>{% if g.gap is not none %} ({{ g.gap|pct(true) }}){% endif %}.
+{% for p in g.parts[:4] %}{% if loop.first %} Driven by {% endif %}{{ p.input|replace('_',' ') }} {{ p.share|pct }} ({{ p.effect|money }}){{ ', ' if not loop.last }}{% endfor %}{% if g.note %} <span class="muted">{{ g.note }}</span>{% endif %}</p>{% endif %}
+{% if so.result.attacks %}<table><thead><tr><th>#</th><th>Attack</th><th>Type</th><th>Grade</th><th>Claude's answer</th></tr></thead><tbody>
+{% for a in so.result.attacks %}{% set i = loop.index0 %}<tr><td>{{ loop.index }}</td><td>{{ a.point }}{% if a.evidence %}<br><span class="muted">{{ a.evidence }}</span>{% endif %}</td><td>{{ a.category or '' }}</td><td>{{ a.grade or '' }}</td>
+<td>{% for rb in rebuttals if rb.attack == i %}{{ rb.response }} {% if rb.resolved %}<span class="chip good">resolved</span>{% else %}<span class="chip warn">open</span>{% endif %}{% else %}<span class="chip warn">not answered</span>{% endfor %}</td></tr>{% endfor %}</tbody></table>{% endif %}{% endif %}
+</div>
+
+{% if tgt_hist or si_hist or holders %}<div class="grid g2" style="margin-top:12px" id="market">
+<div class="card"><h3>Analyst mean target over time</h3>{{ tgt_hist or '' }}{% if not tgt_hist %}<p class="empty">Builds up from the daily check.</p>{% endif %}
+<h3 style="margin-top:12px">Short interest over time</h3>{{ si_hist or '' }}{% if not si_hist %}<p class="empty">Recorded from the daily check from now on.</p>{% endif %}</div>
+<div class="card"><h3>Largest holders · change last quarter</h3><table><thead><tr><th>Holder</th><th class="r">% held</th><th class="r">Change</th><th>Reported</th></tr></thead><tbody>
+{% for h in holders %}<tr><td>{{ h.holder }}</td><td class="r">{{ h.pct|pct }}</td><td class="r {{ 'good' if h.pct_change and h.pct_change > 0 else ('bad' if h.pct_change and h.pct_change < 0) }}">{{ h.pct_change|pct(true) }}</td><td class="muted">{{ h.reported or '' }}</td></tr>
+{% else %}<tr><td colspan="4" class="empty">Not available.</td></tr>{% endfor %}</tbody></table>
+<p class="muted" style="font-size:12px">From 13F filings via Yahoo; filings arrive up to 45 days after quarter end, so this confirms, never times.</p></div></div>{% endif %}
+"""
+
+
+def sparkline(pts, lines, label=None):
     """Inline SVG price line with optional horizontal reference lines."""
     if len(pts) < 2:
         return None
@@ -1237,7 +1407,7 @@ def sparkline(pts, lines):
         f'<line x1="0" x2="{W}" y1="{Y(v):.1f}" y2="{Y(v):.1f}" stroke="var(--{c})" stroke-dasharray="5 5"/>'
         f'<text x="{W - 4}" y="{max(Y(v) - 4, 14):.1f}" text-anchor="end" fill="var(--{c})" font-size="12">{label} {money(v)}</text>'
         for label, v, c in lines if v)
-    return Markup(f'<div class="muted" style="font-size:12px">Price, last {len(pts)} trading days</div>'
+    return Markup(f'<div class="muted" style="font-size:12px">{label or f"Price, last {len(pts)} trading days"}</div>'
                   f'<svg viewBox="0 0 {W} {H}" width="100%" preserveAspectRatio="none" role="img" aria-label="Price history">'
                   f'<polyline fill="none" stroke="var(--accent)" stroke-width="2" points="{path}"/>{ref}</svg>')
 
@@ -1350,7 +1520,29 @@ def name(ticker):
             inp["fcf_ps"] = round(fin["fcf"] / fin["shares"], 2)
         if fin.get("rev_cagr") is not None:
             inp["g1"] = round(min(max(fin["rev_cagr"] * 100, 0), 12), 1)
-    return page(n["level"], ticker, NAME_TPL, detail=Markup(render_template_string(SCREEN_DETAIL_TPL, sc=sc)),
+    me = ((r or {}).get("peers") or [{}])[0] or {}
+    hist_r = [h for h in ((r or {}).get("history") or []) if h.get("revenue")]
+    ps = (num((r or {}).get("mcap")) / num(hist_r[-1]["revenue"])) if r and r.get("mcap") and hist_r else None
+    stale = None
+    if r and r.get("as_of"):
+        stale = (dt.date.today() - dt.date.fromisoformat(str(r["as_of"])[:10])).days
+        stale = stale if stale > 14 else None
+    so = qsafe("SELECT * FROM v2_second_opinion WHERE ticker = %s AND kind = 'review' ORDER BY created_at DESC LIMIT 1", (ticker,))
+    so = so[0] if so else None
+    rebuttals = []
+    if so:
+        rebuttals = list((so["result"] or {}).get("rebuttals") or [])
+    tg = [(num(a["mean"]), a["date"]) for a in q("SELECT date, mean FROM v2_analyst WHERE ticker = %s ORDER BY date", (ticker,)) if a["mean"]]
+    si = [num(a["short_float"]) for a in qsafe("SELECT short_float FROM v2_short_interest WHERE ticker = %s ORDER BY date", (ticker,))
+          if a["short_float"] is not None]
+    extra = Markup(render_template_string(
+        NAME_EXTRA_TPL, r=r, me=me, ps=ps, stale=stale, val=val, price=price, n=n, so=so, rebuttals=rebuttals,
+        sections=(thesis or {}).get("sections") or {}, GRADES=GRADES, big=big, fx=fx,
+        holders=((r or {}).get("ownership") or {}).get("top_holders") or [],
+        tgt_hist=Markup(sparkline([v for v, _ in tg], [("Price", price, "good")],
+                                  f"Mean target, {len(tg)} readings since {tg[0][1]} · now {money(tg[-1][0])}")) if len(tg) >= 2 else None,
+        si_hist=Markup(sparkline(si, [], f"Short interest, % of float · now {si[-1]:.1%}")) if len(si) >= 2 else None))
+    return page(n["level"], ticker, NAME_TPL, extra=extra, detail=Markup(render_template_string(SCREEN_DETAIL_TPL, sc=sc)),
                 r=r, research=Markup(render_template_string(RESEARCH_TPL, r=r, ticker=ticker)), n=n, thesis=thesis, val=val, analyst=analyst, price=price,
                 spark=spark, comments=cm, moves=moves, inp=inp, SECTIONS=SECTIONS,
                 scenarios=q("SELECT * FROM v2_scenarios WHERE ticker = %s ORDER BY created_at DESC", (ticker,)),
@@ -1391,6 +1583,9 @@ def move(ticker):
     x("INSERT INTO v2_comments (ticker, section, body) VALUES (%s, 'move', %s)",
       (ticker, f"Moved {n['level']} → {to}" + (f": {reason}" if reason else "")))
     if status == "rejected":
+        tag = request.form.get("tag") if request.form.get("tag") in ("thesis broken", "business rejected", "too expensive") else None
+        x("ALTER TABLE v2_names ADD COLUMN IF NOT EXISTS reject_tag TEXT")
+        x("UPDATE v2_names SET reject_tag = %s WHERE ticker = %s", (tag, ticker))
         x("ALTER TABLE v2_names ADD COLUMN IF NOT EXISTS reject_price NUMERIC")
         x("UPDATE v2_names SET reject_price = %s WHERE ticker = %s", (latest_prices([ticker]).get(ticker), ticker))
     if to == "book" and (q1("SELECT COUNT(*) AS c FROM v2_names WHERE level = 'book'")["c"] > BOOK_TARGET):
@@ -1420,6 +1615,22 @@ def deepdive(ticker):
         abort(404)
     x("UPDATE v2_names SET status = 'deep_dive_requested', updated_at = now() WHERE ticker = %s", (ticker.upper(),))
     flash(f"Deep dive requested for {ticker.upper()}. The next deep-dive task picks it up.")
+    return back(url_for("screen"))
+
+
+def cancel_deep_dive(tickers):
+    """Undo a deep-dive request: the name goes back to the status its level implies."""
+    rows = q("""UPDATE v2_names n SET status = CASE n.level WHEN 'book' THEN 'holding' WHEN 'watchlist' THEN 'watching'
+                  ELSE CASE WHEN EXISTS (SELECT 1 FROM v2_theses t WHERE t.ticker = n.ticker) THEN 'deep_dive_done' ELSE 'new' END END,
+                  updated_at = now()
+                WHERE n.ticker = ANY(%s) AND n.status = 'deep_dive_requested' RETURNING n.ticker""", (tickers,))
+    return len(rows)
+
+
+@app.post("/name/<ticker>/deepdive/cancel")
+def deepdive_cancel(ticker):
+    if cancel_deep_dive([ticker.upper()]):
+        flash(f"Deep dive request for {ticker.upper()} cancelled.")
     return back(url_for("screen"))
 
 
@@ -1470,6 +1681,8 @@ def ack(alert_id):
 
 
 # ------------------------------------------------------------------ Decide: one list of everything that needs a decision
+GRADES = {"A": "Verified primary source", "B": "Reliable third party", "C": "Management statement",
+          "D": "Analyst estimate", "E": "AI assumption"}
 SIZING = {"value": {"starter": 0.03, "full": 0.05}, "growth": {"starter": 0.02, "full": 0.06}}
 LIMITS = {"name": 0.10, "theme": 0.35, "style": 0.80}
 ORDER_OF = {"EXIT?": 0, "BUY": 1, "ADD": 2, "TRIM": 2, "REVIEW": 3}
@@ -1514,6 +1727,11 @@ def size_for(ticker, style, conviction, pf, price):
     s = SIZING.get(style, SIZING["value"])
     c = conviction or 0
     target = s["full"] if c >= 75 else (s["starter"] + s["full"]) / 2 if c >= 60 else s["starter"]
+    th = q1("SELECT valuation FROM v2_theses WHERE ticker = %s ORDER BY version DESC LIMIT 1", (ticker,)) or {}
+    bear_v = ((((th.get("valuation") or {}).get("engine") or {}).get("scenarios") or {}).get("bear") or {}).get("value")
+    bear_loss = (bear_v / price - 1) if bear_v and price else None
+    if bear_loss is not None and bear_loss < -RISK_CAPS["bear_loss"]:
+        target = target / 2                     # downside sizing: a big bear-case loss halves the size
     cur_w = next((r["w"] for r in pf["rows"] if r["ticker"] == ticker), 0)
     n = q1("SELECT themes FROM v2_names WHERE ticker = %s", (ticker,)) or {}
     room = [LIMITS["name"] - cur_w]
@@ -1521,7 +1739,9 @@ def size_for(ticker, style, conviction, pf, price):
         room.append(LIMITS["theme"] - pf["by_theme"].get(t, 0))
     add_w = max(0.0, min(target - cur_w, *room))
     amt = add_w * pf["total"] if pf["total"] else None
-    why = f"{style} · conviction {c:.0f} → target {target:.0%} of the portfolio, now {cur_w:.1%}"
+    why = f"{style} · conviction {c:.0f} → target {target:.1%} of the portfolio, now {cur_w:.1%}"
+    if bear_loss is not None and bear_loss < -RISK_CAPS["bear_loss"]:
+        why += f" · halved: bear case loses {-bear_loss:.0%}"
     if add_w <= 0 and target > cur_w:
         why += " · no room: a name or theme limit is already reached (trim elsewhere first, or accept the extra concentration)"
     elif add_w < target - cur_w:
@@ -1677,6 +1897,22 @@ def decide():
                 glance=Markup(glance), st=sync_status())
 
 
+def expected_of(ticker):
+    """What the thesis expected when the decision was made, for the 6/12/24-month assumptions-vs-actual review."""
+    th = q1("SELECT version, conviction, verdict, entry_target, valuation, sections FROM v2_theses WHERE ticker = %s "
+            "ORDER BY version DESC LIMIT 1", (ticker,))
+    if not th:
+        return None
+    v = th["valuation"] or {}
+    e = v.get("engine") or {}
+    base = ((e.get("assumptions") or {}).get("scenarios") or {}).get("base") or {}
+    return {"thesis_version": th["version"], "conviction": num(th["conviction"]), "verdict": th["verdict"],
+            "entry_target": num(th["entry_target"]), "iv_base": num(v.get("iv_base")),
+            "revenue_growth": (base.get("growth") or [None])[0], "margin": (base.get("margin") or [None])[0],
+            "return_5y": ((e.get("scenarios") or {}).get("base") or {}).get("return_5y"),
+            "stated": (th["sections"] or {}).get("expected"), "engine": bool(e.get("dcf_valid"))}
+
+
 @app.post("/decide/record")
 def decide_record():
     f = request.form
@@ -1686,9 +1922,10 @@ def decide_record():
     shares = num(f.get("shares"))
     price = num(f.get("price"))
     spy = latest_prices(["SPY"]).get("SPY")
-    x("""INSERT INTO v2_decisions (ticker, action, decision, price, shares, note, alert_id, spy_price)
-         VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""", (t, act, dec, price, shares, (f.get("note") or "").strip() or None,
-                                              num(f.get("alert_id")), spy))
+    x("ALTER TABLE v2_decisions ADD COLUMN IF NOT EXISTS expected JSONB")
+    x("""INSERT INTO v2_decisions (ticker, action, decision, price, shares, note, alert_id, spy_price, expected)
+         VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""", (t, act, dec, price, shares, (f.get("note") or "").strip() or None,
+                                              num(f.get("alert_id")), spy, psycopg2.extras.Json(expected_of(t))))
     if f.get("alert_id"):
         x("UPDATE v2_alerts SET addressed = TRUE, action = %s, note = %s WHERE id = %s",
           ("acted" if dec == "done" else "dismissed", f.get("note") or None, int(f["alert_id"])))

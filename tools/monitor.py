@@ -14,7 +14,7 @@ import pandas as pd
 import yfinance as yf
 
 sys.path.insert(0, str(Path(__file__).parent))
-from common import (db, J, alert, ensure_schema, week_key, TODAY, THEMES, APP_URL, DRIVE_STATE_FILE,
+from common import (db, J, alert, ensure_schema, heartbeat, HEARTBEAT_MAX_H, week_key, TODAY, THEMES, APP_URL, DRIVE_STATE_FILE,
                     DRIVE_INBOX, drive_update)
 
 MODE = sys.argv[1] if len(sys.argv) > 1 else "daily"
@@ -400,6 +400,11 @@ def daily(conn):
                                          f"rating-{tk}-{a.get('Firm')}-{str(a[dcol])[:10]}")
         except Exception:
             health_log["info_failed"].append(tk)
+        if info.get("shortPercentOfFloat") is not None or info.get("sharesShort") is not None:
+            cur.execute("""INSERT INTO v2_short_interest (ticker, date, short_float, short_ratio, shares_short)
+                           VALUES (%s,%s,%s,%s,%s) ON CONFLICT (ticker, date) DO UPDATE SET short_float = EXCLUDED.short_float,
+                           short_ratio = EXCLUDED.short_ratio, shares_short = EXCLUDED.shares_short""",
+                        (tk, TODAY, num(info.get("shortPercentOfFloat")), num(info.get("shortRatio")), num(info.get("sharesShort"))))
         mean = num(info.get("targetMeanPrice"))
         if mean:
             cur.execute("SELECT mean, date FROM v2_analyst WHERE ticker = %s AND date <= %s ORDER BY date DESC LIMIT 1",
@@ -547,8 +552,31 @@ def daily(conn):
         r5 = chg(c, 5)
         if r5 is not None and r5 <= -0.12 and level == "green":
             level = "amber"; why.append(f"price {r5:+.0%} in 5 days")
+        # missing or stale data is never shown as healthy
+        gaps = []
+        if tk in health_log["prices_missing"]:
+            gaps.append("no price today")
+        if tk in health_log["info_failed"]:
+            gaps.append("Yahoo data failed")
+        as_of = (rs or {}).get("as_of")
+        if not rs:
+            gaps.append("no research data")
+        elif as_of and (TODAY - dt.date.fromisoformat(str(as_of)[:10])).days > 14:
+            gaps.append(f"research data from {as_of}")
+        if gaps and level == "green":
+            level = "grey"
+        why += [f"data: {g}" for g in gaps]
         cur.execute("UPDATE v2_names SET health = %s, health_why = %s WHERE ticker = %s", (level, "; ".join(why), tk))
 
+    # scheduled jobs that have not reported in time
+    heartbeat(cur, "daily")
+    cur.execute("SELECT key, updated_at FROM v2_settings WHERE key LIKE 'heartbeat:%%'")
+    beats = {r["key"].split(":", 1)[1]: r["updated_at"] for r in cur.fetchall()}
+    now = dt.datetime.now(dt.timezone.utc)
+    late = [f"{j} (last {beats[j]:%d %b %H:%M} UTC)" if j in beats else f"{j} (never)"
+            for j, hrs in HEARTBEAT_MAX_H.items() if j not in beats or (now - beats[j]).total_seconds() > hrs * 3600]
+    if late and beats:            # only once heartbeats have started arriving
+        health_log["late_jobs"] = late
     failures = {k: v for k, v in health_log.items() if v}
     cur.execute("""INSERT INTO v2_settings (key, value) VALUES ('data_health', %s)
                    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()""",
@@ -665,6 +693,28 @@ EXEC_EXAMPLE = {   # executive summary: shown first on the stock page, the Decid
     "plan": {"action": "exactly what to do (and how much, if Ming holds it)", "add_below": 0.0, "trim_above": 0.0, "cut_if": "..."},
     "position": "shares, cost, weight if held"}
 
+ASSUMPTIONS_EXAMPLE = {
+    "revenue0": None, "shares0": None, "net_debt": None,
+    "profile": {"model": "standard|bank|insurer|reit|commodity|pre_profit", "cyclical": False, "nd_ebitda": 0.5,
+                "pre_profit": False, "moat": "widening|stable|narrowing|unproven", "roic_10y_above_15": True, "stable_revenue": True},
+    "scenarios": {k: {"growth": [0.10, 0.09, 0.08, 0.07, 0.06], "margin": [0.30, 0.32], "reinvest_pct": 0.06, "tax": 0.18,
+                      "share_change": -0.01, "terminal_growth": 0.025, "exit_multiple": None, "grade": "E",
+                      "why": "one line per scenario"} for k in ("bear", "base", "bull")},
+    "weights": {"bear": 0.25, "base": 0.5, "bull": 0.25}}
+
+RESEARCH_RULES = [
+    "Never type in a valuation number the engine can compute: write 'assumptions' (bear, base, bull) and let the app compute values.",
+    "Grade every material claim A-E (A primary source, B reliable third party, C management, D analyst estimate, E AI assumption), "
+    "with source and date. Grade E claims can support a pillar only with a measurable KPI.",
+    "Name the moat source with grade A-C evidence, or the moat is 'unproven' and conviction is capped at 60.",
+    "Quality gate before any deep dive: check 'quality_gate' on each queue item; a failed gate means write a short PASS note, "
+    "not a full thesis, unless Ming requested it.",
+    "Market confirmation (momentum, estimates, 13F, insiders, newsletter buzz) can raise rank but never replaces business or industry quality.",
+    "Banks, insurers, REITs and commodity producers: set profile.model; the engine marks DCF not valid.",
+    "Every thesis states 'change_my_mind' and tags 1-3 'drivers' (shared economic exposures).",
+    "Second opinion: write your own assumptions from the data pack BEFORE reading Claude's thesis; then attack it. Never average values.",
+]
+
 INBOX_FORMAT = {
     "where": f"Save one JSON file per task run into Drive folder ValueInvestor/v2-inbox (id {DRIVE_INBOX}). "
              "Name it <type>-<YYYY-MM-DD>-<short>.json. Never edit or delete other files.",
@@ -682,6 +732,27 @@ INBOX_FORMAT = {
                                                  "moat", "tam_competitors", "management", "financials",
                                                  "company_risks", "variant_view", "valuation", "pillars",
                                                  "catalysts_flow", "premortem"]}},
+    "thesis_v2_additions": {
+        "note": "Add these keys to every thesis and refresh item (9 Nov 2026 revisions). The app's valuation engine computes "
+                "iv_low/base/high, entry_target and the growth zone from 'assumptions'; typed-in values are only a fallback.",
+        "run_id": "dd-<TICKER>-<YYYYMMDD> (unique per run; a re-saved file with the same run_id is skipped)",
+        "style": "value|growth",
+        "assumptions": ASSUMPTIONS_EXAMPLE,
+        "claims": [{"claim": "Revenue grew 16% in FY25", "grade": "A", "source": "10-K FY25", "date": "2025-07-30", "pillar": 1},
+                   {"claim": "Can reach 25% share of the market by 2030", "grade": "E", "source": None, "pillar": 2}],
+        "moat_source": {"type": "pricing power|switching costs|network effects|cost advantage|distribution|IP or regulation",
+                        "grade": "A|B|C", "evidence": "the fact that proves it, with its source"},
+        "change_my_mind": "the evidence that would invalidate the thesis even if the price rises",
+        "drivers": ["hyperscaler capex", "rates", "China", "oil", "consumer spending", "enterprise IT spend"],
+        "expected": {"revenue_growth_next_year": 0.12, "op_margin_next_year": 0.30, "notes": "what must be true in 12 months"}},
+    "second_opinion": {"type": "second_opinion", "run_id": "so-<TICKER>-<YYYYMMDD>", "ticker": "AMAT",
+                       "model": "claude-second|chatgpt", "verdict": "BUY|WATCH|PASS",
+                       "assumptions": "ASSUMPTIONS_EXAMPLE shape, written BEFORE reading Claude's thesis",
+                       "attacks": [{"point": "the bear argument", "evidence": "fact + source", "grade": "A-E",
+                                    "pillar": 1, "category": "factual|financial|valuation|interpretation"}],
+                       "summary": "two lines"},
+    "rebuttal": {"type": "second_opinion", "run_id": "rb-<TICKER>-<YYYYMMDD>", "ticker": "AMAT", "model": "claude",
+                 "rebuttals": [{"attack": 0, "response": "answer with evidence", "resolved": True}]},
     "tam": {"type": "tam", "items": [{"ticker": "AMAT", "tam": TAM_EXAMPLE}]},
     "exec_summary": {"type": "exec_summary", "items": [{"ticker": "AMAT", "exec_summary": EXEC_EXAMPLE}]},
     "refresh": {"type": "refresh", "items": [{"ticker": "AMAT", "conviction": 70, "verdict": "BUY|WATCH|PASS", "entry_target": 150.0,
@@ -710,6 +781,46 @@ INBOX_FORMAT = {
     "outlook": {"type": "outlook", "theme": "Critical resources", "kind": "light|full",
                 "content": {"summary": "...", "demand_supply": "...", "risks": "...", "beneficiaries": ["..."]}},
 }
+
+
+def quality_gate(r, track="value"):
+    """Deep-dive quality gate (proposed, unvalidated until the screening lab reports). Uses the weekly research data.
+    Pass when: gross margin stable or rising over 3 years OR ROIC above 10%; free cash flow positive OR runway above
+    24 months; share count growing under 5% a year; no accounting red flag. Growth names failing only the cash test
+    pass with a moat score of 65+ (moat points as a share of the maximum)."""
+    hist = [h for h in (r.get("history") or []) if h]
+    if len(hist) < 3:
+        return {"pass": None, "why": ["not enough history in the research data"]}
+    last3 = hist[-3:]
+    gm = [h.get("gross_margin") for h in last3 if h.get("gross_margin") is not None]
+    roic = [h.get("roic") if h.get("roic") is not None else h.get("roc") for h in last3]
+    roic = [x for x in roic if x is not None]
+    fails, notes = [], []
+    margin_ok = (len(gm) >= 2 and gm[-1] >= gm[0] - 0.01) or (roic and roic[-1] > 0.10)
+    if not margin_ok:
+        fails.append("gross margin falling and ROIC 10% or less")
+    fcf = [h.get("fcf") for h in last3 if h.get("fcf") is not None]
+    cash_ok = bool(fcf and fcf[-1] > 0)
+    if not cash_ok:
+        cash = num(((r.get("valuation") or {}).get("assumptions") or {}).get("Net debt"))
+        burn = -fcf[-1] if fcf and fcf[-1] < 0 else None
+        if cash is not None and burn and -cash / burn > 2:
+            cash_ok = True
+            notes.append("cash-burning but runway above 24 months")
+    sh = [h.get("shares") for h in hist[-4:] if h.get("shares")]
+    if len(sh) >= 2 and (sh[-1] / sh[0]) ** (1 / (len(sh) - 1)) - 1 >= 0.05:
+        fails.append("share count growing 5%+ a year")
+    flags = " ".join(str(f.get("text") or f) for f in (r.get("red_flags") or [])).lower()
+    if any(w in flags for w in ("restat", "auditor", "late filing", "material weakness")):
+        fails.append("accounting red flag")
+    moat = r.get("moat") or {}
+    moat_pct = (moat.get("points") or 0) / moat["of"] if moat.get("of") else 0
+    if not cash_ok:
+        if track == "growth" and moat_pct >= 0.65:
+            notes.append("fails the cash test but passes on moat score")
+        else:
+            fails.append("free cash flow negative and runway under 24 months")
+    return {"pass": not fails, "why": fails + notes, "rule_status": "proposed (unvalidated)"}
 
 
 def export(conn):
@@ -785,6 +896,35 @@ def export(conn):
         d["research"] = {k: r.get(k) for k in ("valuation", "moat", "risk", "red_flags", "peers", "analysts", "history",
                                                 "business", "insiders", "ownership")} if r else None
 
+    for d in dd:
+        d["quality_gate"] = quality_gate(rs.get(d["ticker"]) or {}, d["track"])
+    # second opinion: new theses (last 10 days) with no review yet; open attacks waiting for Claude's answer
+    cur.execute("""SELECT t.ticker, t.version, t.verdict, t.conviction, t.created_at, n.level, n.style
+                   FROM v2_theses t JOIN v2_names n USING (ticker)
+                   WHERE t.author = 'claude' AND t.created_at > now() - interval '10 days'
+                     AND NOT EXISTS (SELECT 1 FROM v2_second_opinion s WHERE s.ticker = t.ticker AND s.thesis_version = t.version)
+                   ORDER BY (n.level = 'book') DESC, t.created_at LIMIT 6""")
+    so_queue = [dict(r) for r in cur.fetchall()]
+    for r in so_queue:
+        rr = research.get(r["ticker"])
+        if rr is None:
+            cur.execute("SELECT data FROM v2_research WHERE ticker = %s ORDER BY as_of DESC LIMIT 1", (r["ticker"],))
+            rr = (cur.fetchone() or {}).get("data") or {}
+        r["data_pack"] = {k: rr.get(k) for k in ("price", "shares", "mcap", "sector", "industry", "history", "peers",
+                                                 "analysts", "moat", "risk", "red_flags")}
+    cur.execute("""SELECT DISTINCT ON (ticker) ticker, thesis_version, result->'attacks' AS attacks, created_at
+                   FROM v2_second_opinion WHERE kind = 'review' AND (result->>'open_attacks')::int > 0
+                     AND created_at > now() - interval '30 days' ORDER BY ticker, created_at DESC""")
+    open_attacks = [dict(r) for r in cur.fetchall()]
+    # Watchlist and Book theses still without an assumptions file: the engine cannot compute their values yet
+    backfill = [{"ticker": n["ticker"], "level": n["level"], "style": n.get("style"),
+                 "thesis_version": (theses.get(n["ticker"]) or {}).get("version"),
+                 "iv_base_typed": ((theses.get(n["ticker"]) or {}).get("valuation") or {}).get("iv_base"),
+                 "price": px.get(n["ticker"]),
+                 "data_pack": {k: (research.get(n["ticker"]) or {}).get(k) for k in ("shares", "sector", "industry", "history")}}
+                for n in sorted(names, key=lambda n: n["level"] != "book")
+                if theses.get(n["ticker"]) and not ((theses[n["ticker"]].get("valuation") or {}).get("engine") or {}).get("assumptions")][:3]
+
     def summary(n):
         th = theses.get(n["ticker"]) or {}
         s = th.get("sections") or {}
@@ -834,7 +974,8 @@ def export(conn):
              "watchlist_and_book": [summary(n) for n in names], "untagged_news": news, "new_book_filings": filings_,
              "pending_buy_checks": pending, "latest_outlooks": outlooks, "refresh_queue": refresh,
              "calendar_next_21d": calendar, "macro": macro,
-             "newsletters_7d": newsletters}
+             "newsletters_7d": newsletters, "research_rules": RESEARCH_RULES,
+             "second_opinion_queue": so_queue, "open_red_team_points": open_attacks, "engine_backfill_queue": backfill}
     text = json.dumps(state, default=str, indent=1)
     out = Path(__file__).parent.parent / "outbox"
     out.mkdir(exist_ok=True)

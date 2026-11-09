@@ -4,11 +4,12 @@
   python tools\\inbox.py --dir PATH   read *.json from a local folder (e.g. inbox-seed/, loaded once per file)
 Each file is loaded once (tracked by file id and modified time). Files are never edited or deleted.
 """
-import sys, json, argparse
+import sys, json, argparse, hashlib
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from common import db, J, alert, ensure_schema, drive_list, drive_read, DRIVE_INBOX, TODAY
+from common import db, J, alert, ensure_schema, heartbeat, drive_list, drive_read, DRIVE_INBOX, TODAY
+import valuation as V
 
 
 WATCH_CAP = 50
@@ -16,6 +17,97 @@ SECTION_KEYS = {"industry_map", "size_growth", "structure", "demand_supply", "in
                 "business", "right_to_win", "moat", "tam_competitors", "management", "financials", "company_risks",
                 "variant_view", "valuation", "pillars", "catalysts_flow", "premortem"}
 TAGS = {"no change", "strengthens", "weakens", "breaks"}
+SPLIT_GAP = 0.25          # second opinion: a base-value gap above 25% is a split
+SPLIT_CAP = 74            # conviction cap while a split is unresolved (half size at most)
+UNPROVEN_MOAT_CAP = 60    # conviction cap when the moat source has no grade A-C evidence
+
+# minimum shape of each inbox file; anything else is rejected and logged, never half-loaded
+REQUIRED = {"thesis": ["ticker"], "refresh": ["items"], "book": ["items"], "newsletter_tags": ["items"],
+            "exec_summary": ["items"], "tam": ["items"], "reason_cards": ["items"], "news_tags": ["items"],
+            "filing_tags": ["items"], "buy_checks": ["items"], "outlook": ["theme"], "week_ahead": [],
+            "second_opinion": ["ticker"]}
+
+
+class Later(Exception):
+    """The file depends on something not loaded yet (e.g. a second opinion before its thesis): retry on the next run."""
+
+
+def validate(d):
+    if not isinstance(d, dict):
+        raise ValueError("file is not a JSON object")
+    kind = d.get("type")
+    if kind not in REQUIRED:
+        raise ValueError(f"unknown type {kind!r}")   # validate() stops this earlier
+    missing = [k for k in REQUIRED[kind] if not d.get(k)]
+    if missing:
+        raise ValueError(f"{kind} file missing {', '.join(missing)}")
+    if "items" in REQUIRED[kind] and not isinstance(d["items"], list):
+        raise ValueError("items must be a list")
+    for blk in [d] + (d.get("items") if isinstance(d.get("items"), list) else []):
+        a = blk.get("assumptions") if isinstance(blk, dict) else None
+        if a is not None and not (isinstance(a, dict) and isinstance(a.get("scenarios"), dict) and "base" in a["scenarios"]):
+            raise ValueError("assumptions need a scenarios object with at least a base case")
+
+
+def research_of(cur, t):
+    cur.execute("SELECT data FROM v2_research WHERE ticker = %s ORDER BY as_of DESC LIMIT 1", (t,))
+    r = cur.fetchone()
+    return (r or {}).get("data") or {}
+
+
+def price_of(cur, t):
+    cur.execute("SELECT close FROM v2_prices WHERE ticker = %s ORDER BY date DESC LIMIT 1", (t,))
+    r = cur.fetchone()
+    return float(r["close"]) if r and r["close"] is not None else None
+
+
+def apply_engine(cur, t, blk, val, style=None):
+    """Run the valuation engine on the file's assumptions; the engine's numbers replace any typed-in values.
+    Also grades evidence and applies conviction caps. Returns (entry_target or None, cap or None, notes)."""
+    notes, cap, entry = [], None, None
+    a = blk.get("assumptions")
+    if a:
+        try:
+            rs = research_of(cur, t)
+            out = V.run(a, rs, price_of(cur, t), style=style, sector=rs.get("sector"), industry=rs.get("industry"))
+            out["assumptions"] = a
+            val["engine"] = out
+            if out.get("dcf_valid"):
+                for k in ("iv_low", "iv_base", "iv_high"):
+                    val[k] = out[k]
+                entry = out.get("entry_target")
+                if (style or "value") == "growth" and out.get("growth_zone"):
+                    val["growth_zone_engine"] = out["growth_zone"]
+            else:
+                notes.append(out.get("note"))
+        except (ValueError, ZeroDivisionError, TypeError, KeyError) as e:
+            val["engine_error"] = str(e)[:200]
+            notes.append(f"Valuation engine could not run: {str(e)[:120]}")
+    else:
+        notes.append("No assumptions file: values are typed in, not computed (unverified)")
+    if blk.get("claims"):
+        val["claims"] = blk["claims"]
+        ev = V.evidence_summary(blk["claims"])
+        val["evidence"] = ev
+        if ev["weak_flag"]:
+            notes.append(f"{ev['pillar_weak_share']:.0%} of pillar support is analyst estimates or AI assumptions (above 40%)")
+    ms = blk.get("moat_source")
+    if ms is not None or blk.get("claims") is not None:
+        proven = isinstance(ms, dict) and ms.get("type") and str(ms.get("grade") or "E").upper()[:1] in "ABC"
+        val["moat_source"] = ms
+        if not proven:
+            cap = UNPROVEN_MOAT_CAP
+            notes.append(f"Moat source not shown with grade A-C evidence: conviction capped at {cap}")
+    if notes:
+        val["engine_notes"] = notes
+    return entry, cap, notes
+
+
+def capped(conv, cap):
+    try:
+        return min(int(conv), cap) if cap and conv is not None else conv
+    except (TypeError, ValueError):
+        return conv
 
 
 def known(cur, t):
@@ -37,9 +129,18 @@ def load_thesis(cur, d):
         sections["exec_summary"] = es
     cur.execute("SELECT COALESCE(MAX(version), 0) + 1 AS v FROM v2_theses WHERE ticker = %s", (t,))
     ver = cur.fetchone()["v"]
+    for k in ("change_my_mind", "expected"):
+        if d.get(k):
+            sections[k] = d[k]
+    val = dict(d.get("valuation") or {})
+    entry, cap, notes = apply_engine(cur, t, d, val, (d.get("style") or n.get("style")))
+    entry = entry if entry is not None else d.get("entry_target")
+    conv = capped(d.get("conviction"), cap)
     cur.execute("""INSERT INTO v2_theses (ticker, version, author, approval, sections, valuation, conviction, verdict, entry_target)
                    VALUES (%s,%s,'claude','pending',%s,%s,%s,%s,%s)""",
-                (t, ver, J(sections), J(d.get("valuation") or {}), d.get("conviction"), d.get("verdict"), d.get("entry_target")))
+                (t, ver, J(sections), J(val), conv, d.get("verdict"), entry))
+    if d.get("drivers"):
+        cur.execute("UPDATE v2_names SET drivers = %s WHERE ticker = %s", ([str(x)[:40] for x in d["drivers"]][:6], t))
     if d.get("themes"):
         cur.execute("UPDATE v2_names SET themes = (SELECT ARRAY(SELECT DISTINCT unnest(themes || %s))) WHERE ticker = %s",
                     (d["themes"], t))
@@ -58,9 +159,10 @@ def load_thesis(cur, d):
         cur.execute("UPDATE v2_names SET status = %s WHERE ticker = %s",
                     ("watching" if n["level"] == "watchlist" else "holding" if n["level"] == "book" else "deep_dive_done", t))
     alert(cur, t, "New thesis ready", "medium",
-          f"v{ver} · {d.get('verdict') or '?'} · conviction {d.get('conviction') or '?'} · entry target "
-          f"{('$%.2f' % d['entry_target']) if d.get('entry_target') else '—'}.{moved} Approve it in the app."
-          + (f" Missing sections: {', '.join(missing)}." if missing else ""),
+          f"v{ver} · {d.get('verdict') or '?'} · conviction {conv or '?'} · entry target "
+          f"{('$%.2f' % float(entry)) if entry else '—'}{' (engine)' if val.get('engine', {}).get('dcf_valid') else ''}.{moved} Approve it in the app."
+          + (f" Missing sections: {', '.join(missing)}." if missing else "")
+          + ("".join(f" {x}." for x in notes if x) if notes else ""),
           f"thesis-{t}-v{ver}", source="claude", action="Review and approve")
     return f"{t} v{ver}{' (' + str(len(missing)) + ' sections missing)' if missing else ''}"
 
@@ -110,6 +212,78 @@ def load_book(cur, d):
     return f"Book: {len(held)} held ({', '.join(held)})" + (f"; {len(sold)} marked sold ({', '.join(sold)})" if sold else "")
 
 
+def load_second_opinion(cur, d):
+    """A second analyst's blind valuation and red-team attacks on the latest thesis.
+    {"type":"second_opinion","ticker","model","thesis_version","assumptions":{...},"verdict":"BUY|WATCH|PASS",
+     "attacks":[{"point","evidence","grade","pillar","category":"factual|financial|valuation|interpretation"}],
+     "rebuttals":[{"attack":0,"response","resolved":true}]}   (rebuttals come from Claude in a later file)"""
+    t = d["ticker"].upper()
+    if d.get("rebuttals") and not d.get("attacks"):      # Claude answers the open red-team points of the latest review
+        cur.execute("SELECT * FROM v2_second_opinion WHERE ticker = %s AND kind = 'review' ORDER BY created_at DESC LIMIT 1", (t,))
+        rv = cur.fetchone()
+        if not rv:
+            raise Later(f"no second-opinion review for {t} yet")
+        res = dict(rv["result"] or {})
+        res["rebuttals"] = (res.get("rebuttals") or []) + d["rebuttals"]
+        res["open_attacks"] = sum(1 for i, _ in enumerate(res.get("attacks") or [])
+                                  if not any(r.get("attack") == i and r.get("resolved") for r in res["rebuttals"]))
+        cur.execute("UPDATE v2_second_opinion SET result = %s WHERE id = %s", (J(res), rv["id"]))
+        cur.execute("INSERT INTO v2_second_opinion (ticker, kind, model, thesis_version, result) VALUES (%s,'rebuttal',%s,%s,%s)",
+                    (t, d.get("model") or "claude", rv["thesis_version"], J({"rebuttals": d["rebuttals"]})))
+        if res["open_attacks"] == 0:
+            cur.execute("UPDATE v2_alerts SET addressed = TRUE, note = 'all red-team points answered' "
+                        "WHERE ticker = %s AND kind IN ('Second opinion split','Open red-team points') AND NOT addressed", (t,))
+        return f"rebuttal {t}: {res['open_attacks']} point(s) still open"
+    cur.execute("SELECT * FROM v2_theses WHERE ticker = %s ORDER BY version DESC LIMIT 1", (t,))
+    th = cur.fetchone()
+    if not th:
+        raise Later(f"no thesis for {t} yet")
+    mine = ((th["valuation"] or {}).get("engine") or {}).get("assumptions")
+    res = {"attacks": d.get("attacks") or [], "rebuttals": d.get("rebuttals") or [], "summary": d.get("summary")}
+    if d.get("assumptions") and mine:
+        try:
+            res["gap"] = V.attribute_gap(mine, d["assumptions"], research_of(cur, t), price_of(cur, t))
+        except (ValueError, ZeroDivisionError, TypeError, KeyError) as e:
+            res["gap_error"] = str(e)[:200]
+    elif d.get("assumptions"):
+        try:
+            o = V.run(d["assumptions"], research_of(cur, t), price_of(cur, t))
+            res["gap"] = {"a": num_((th["valuation"] or {}).get("iv_base")), "b": o.get("iv_base"), "parts": [],
+                          "note": "Claude's thesis has no assumptions file, so the gap cannot be attributed"}
+            if res["gap"]["a"] and res["gap"]["b"]:
+                res["gap"]["gap"] = round(res["gap"]["b"] / res["gap"]["a"] - 1, 4)
+        except (ValueError, ZeroDivisionError, TypeError, KeyError) as e:
+            res["gap_error"] = str(e)[:200]
+    gap = (res.get("gap") or {}).get("gap")
+    verdict_split = bool(d.get("verdict") and th["verdict"] and d["verdict"].upper()[:3] != str(th["verdict"]).upper()[:3])
+    open_attacks = [i for i, _ in enumerate(res["attacks"])
+                    if not any(r.get("attack") == i and r.get("resolved") for r in res["rebuttals"])]
+    split = (gap is not None and abs(gap) > SPLIT_GAP) or verdict_split
+    res.update(split=split, verdict_split=verdict_split, open_attacks=len(open_attacks), claude_verdict=th["verdict"])
+    cur.execute("""INSERT INTO v2_second_opinion (ticker, kind, model, thesis_version, verdict, result)
+                   VALUES (%s,%s,%s,%s,%s,%s)""",
+                (t, "rebuttal" if d.get("rebuttals") and not d.get("attacks") else "review", d.get("model") or "claude-second",
+                 th["version"], d.get("verdict"), J(res)))
+    if split or open_attacks:
+        if split and th["conviction"] and int(th["conviction"]) > SPLIT_CAP:
+            cur.execute("UPDATE v2_theses SET conviction = %s WHERE id = %s", (SPLIT_CAP, th["id"]))
+        cur.execute("SELECT level FROM v2_names WHERE ticker = %s", (t,))
+        lvl = (cur.fetchone() or {}).get("level")
+        top = ", ".join(f"{p['input']} {p['share']:.0%}" for p in ((res.get("gap") or {}).get("parts") or [])[:3])
+        alert(cur, t, "Second opinion split" if split else "Open red-team points", "high" if (split and lvl == "book") else "medium",
+              (f"Base value Claude {money_(res['gap'].get('a'))} vs second {money_(res['gap'].get('b'))} ({gap:+.0%})"
+               + (f", driven by {top}" if top else "") + ". " if gap is not None else "")
+              + (f"Verdict {th['verdict']} vs {d.get('verdict')}. " if verdict_split else "")
+              + (f"{len(open_attacks)} attack(s) not yet answered." if open_attacks else "")
+              + (f" Conviction capped at {SPLIT_CAP}." if split else ""),
+              f"so-{t}-v{th['version']}-{len(res['rebuttals'])}", source="claude", action="Review both views")
+    return f"second opinion {t}: gap {gap:+.0%}" if gap is not None else f"second opinion {t}"
+
+
+def money_(v):
+    return f"${float(v):,.2f}" if v is not None else "—"
+
+
 def load(cur, name, d):
     kind = d.get("type")
     if kind == "book":
@@ -131,16 +305,25 @@ def load(cur, name, d):
             val["refresh"] = {"date": str(TODAY), "summary": it.get("summary"), "pillars": pillars,
                               "previous": {"conviction": num_(last["conviction"]), "verdict": last["verdict"],
                                            "entry_target": num_(last["entry_target"]), "iv_base": (last["valuation"] or {}).get("iv_base")}}
-            conv = it.get("conviction", last["conviction"])
+            cur.execute("SELECT style FROM v2_names WHERE ticker = %s", (t,))
+            st_ = (cur.fetchone() or {}).get("style")
+            if not it.get("assumptions") and (last["valuation"] or {}).get("engine", {}).get("assumptions"):
+                it = dict(it, assumptions=last["valuation"]["engine"]["assumptions"])   # re-run last assumptions at today's price
+            e_entry, cap, _ = apply_engine(cur, t, it, val, st_)
+            conv = capped(it.get("conviction", last["conviction"]), cap)
             verdict = it.get("verdict") or last["verdict"]
-            entry = it.get("entry_target", last["entry_target"])
+            entry = e_entry if e_entry is not None else it.get("entry_target", last["entry_target"])
             secs = dict(last["sections"] or {})
+            for k in ("change_my_mind", "expected"):
+                if it.get(k):
+                    secs[k] = it[k]
             if isinstance(it.get("exec_summary"), dict):
                 secs["exec_summary"] = it["exec_summary"]
             cur.execute("""INSERT INTO v2_theses (ticker, version, author, approval, sections, valuation, conviction, verdict, entry_target)
                            VALUES (%s, %s, 'claude-refresh', 'pending', %s, %s, %s, %s, %s)""",
                         (t, last["version"] + 1, J(secs), J(val), conv, verdict, entry))
-            cur.execute("UPDATE v2_names SET refresh_due = NULL, updated_at = now() WHERE ticker = %s", (t,))
+            if it.get("reason") != "engine_backfill":
+                cur.execute("UPDATE v2_names SET refresh_due = NULL, updated_at = now() WHERE ticker = %s", (t,))
             changed = verdict != last["verdict"] or bool(breached)
             if it.get("full_reunderwrite") or breached:
                 cur.execute("UPDATE v2_names SET status = 'deep_dive_requested' WHERE ticker = %s", (t,))
@@ -151,7 +334,9 @@ def load(cur, name, d):
                 bits.append(f"entry ${float(last['entry_target']):,.2f} → ${float(entry):,.2f}")
             if breached:
                 bits.append("pillar breached: " + "; ".join(p.get("pillar", "")[:60] for p in breached))
-            alert(cur, t, "Thesis refreshed after results", "high" if changed else "medium",
+            backfill = it.get("reason") == "engine_backfill"
+            alert(cur, t, "Engine values added" if backfill else "Thesis refreshed after results",
+                  "info" if backfill and not changed else "high" if changed else "medium",
                   (it.get("summary") or "")[:300] + " (" + ", ".join(bits) + ")", f"refresh-{t}-{TODAY}", source="claude",
                   action="Full re-underwrite queued" if (it.get("full_reunderwrite") or breached) else "Approve the update")
             done.append(t)
@@ -225,6 +410,8 @@ def load(cur, name, d):
         return f"{n} reason cards"
     if kind == "thesis":
         return load_thesis(cur, d)
+    if kind == "second_opinion":
+        return load_second_opinion(cur, d)
     if kind in ("news_tags", "filing_tags"):
         table = "v2_news" if kind == "news_tags" else "v2_events"
         n = 0
@@ -264,7 +451,7 @@ def load(cur, name, d):
         cur.execute("INSERT INTO v2_industry_outlooks (theme, as_of, kind, content) VALUES (%s,%s,%s,%s)",
                     (d.get("theme"), TODAY, d.get("kind") or "light", J(d.get("content") or {})))
         return f"outlook {d.get('theme')}"
-    raise ValueError(f"unknown type {kind!r}")
+    raise ValueError(f"unknown type {kind!r}")   # validate() stops this earlier
 
 
 def main(dir_=None, conn=None, log=print):
@@ -290,21 +477,35 @@ def main(dir_=None, conn=None, log=print):
         cur.execute("SELECT 1 FROM v2_inbox_log WHERE file_id = %s AND modified = %s", (f["id"], f["modifiedTime"]))
         if cur.fetchone():
             continue
+        chash, run_id = None, None
         try:
             text = f["path"].read_text() if "path" in f else drive_read(f["id"])
+            chash = hashlib.sha256(text.encode()).hexdigest()[:24]
             d = json.loads(text)
-            result = load(cur, f["name"], d)
-            kind = d.get("type")
+            validate(d)
+            kind, run_id = d.get("type"), d.get("run_id")
+            cur.execute("""SELECT name FROM v2_inbox_log WHERE (content_hash = %s OR (run_id IS NOT NULL AND run_id = %s))
+                           AND kind <> 'error' LIMIT 1""", (chash, run_id))
+            dup = cur.fetchone()
+            result = f"duplicate of {dup['name']}: skipped" if dup else load(cur, f["name"], d)
+            if dup:
+                kind = "duplicate"
+        except Later as e:
+            conn.rollback()
+            log(f"  {f['name']}: waiting ({e})")
+            continue
         except Exception as e:
             conn.rollback()
             result, kind = f"ERROR {e.__class__.__name__}: {str(e)[:150]}", "error"
             alert(cur, "SYSTEM", "Inbox file rejected", "info", f"{f['name']}: {result}", f"inbox-{f['id']}-{f['modifiedTime']}")
-        cur.execute("INSERT INTO v2_inbox_log (file_id, modified, name, kind, result) VALUES (%s,%s,%s,%s,%s)",
-                    (f["id"], f["modifiedTime"], f["name"], kind, result))
+        cur.execute("INSERT INTO v2_inbox_log (file_id, modified, name, kind, result, content_hash, run_id) VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                    (f["id"], f["modifiedTime"], f["name"], kind, result, chash if kind != "error" else None, run_id))
         conn.commit()
         done += 1
         loaded.append(f"{f['name']}: {result}")
         log(f"  {f['name']}: {result}")
+    heartbeat(cur, "inbox", note=f"{done} loaded")
+    conn.commit()
     log(f"Inbox: {done} new file(s) loaded, {len(files) - done} already done.")
     if own:
         conn.close()

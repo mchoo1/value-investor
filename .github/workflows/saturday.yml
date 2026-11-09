@@ -42,6 +42,9 @@ jobs:
       - name: Hand data to Claude's tasks
         if: github.event.schedule != '7 0 * * 6'
         run: python tools/monitor.py export
+      - name: Heartbeat (screen and research finished)
+        if: github.event.schedule != '7 0 * * 6'
+        run: python tools/heartbeat.py screen && python tools/heartbeat.py research
       - name: Telegram screen summary
         if: github.event.schedule == '7 0 * * 6'
         run: python tools/notify.py screen

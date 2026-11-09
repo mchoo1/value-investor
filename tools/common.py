@@ -80,7 +80,28 @@ def ensure_schema(cur):
       ALTER TABLE v2_alerts ADD COLUMN IF NOT EXISTS sent_at TIMESTAMPTZ;
       ALTER TABLE v2_screen_runs ADD COLUMN IF NOT EXISTS market JSONB;
       ALTER TABLE v2_screen_runs ADD COLUMN IF NOT EXISTS stages JSONB;
+      ALTER TABLE v2_inbox_log ADD COLUMN IF NOT EXISTS content_hash TEXT;
+      ALTER TABLE v2_inbox_log ADD COLUMN IF NOT EXISTS run_id TEXT;
+      ALTER TABLE v2_names ADD COLUMN IF NOT EXISTS drivers TEXT[] DEFAULT '{}';
+      ALTER TABLE v2_names ADD COLUMN IF NOT EXISTS reject_tag TEXT;
+      ALTER TABLE v2_decisions ADD COLUMN IF NOT EXISTS expected JSONB;
+      CREATE TABLE IF NOT EXISTS v2_second_opinion (id SERIAL PRIMARY KEY, ticker TEXT NOT NULL, kind TEXT NOT NULL,
+          model TEXT NOT NULL DEFAULT 'claude-second', thesis_version INT, verdict TEXT, result JSONB,
+          created_at TIMESTAMPTZ DEFAULT now());
+      CREATE TABLE IF NOT EXISTS v2_short_interest (ticker TEXT, date DATE, short_float NUMERIC, short_ratio NUMERIC,
+          shares_short NUMERIC, PRIMARY KEY (ticker, date));
     """)
+
+
+def heartbeat(cur, job, ok=True, note=None):
+    """Record that a scheduled job ran. The daily check flags any job whose heartbeat is missing or late."""
+    cur.execute("""INSERT INTO v2_settings (key, value, updated_at) VALUES (%s, %s, now())
+                   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()""",
+                (f"heartbeat:{job}", J({"at": dt.datetime.utcnow().isoformat(timespec="seconds"), "ok": ok, "note": note})))
+
+
+# expected gap between runs, in hours (a heartbeat older than this is reported as late)
+HEARTBEAT_MAX_H = {"inbox": 6, "daily": 80, "screen": 192, "research": 192, "digest": 192}
 
 
 def alert(cur, ticker, kind, severity, detail, dedupe, source="daily", action=None):
