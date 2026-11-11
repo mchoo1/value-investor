@@ -39,7 +39,12 @@ jobs:
       - name: Re-run the screen after a theme sell-off of 10% or more
         if: steps.monitor.outputs.rerun_screen == 'true'
         run: python tools/screen.py
-      - name: Send Telegram alerts
+      - name: Send the daily brief (Telegram and email), even if a step above failed
+        if: always()
         run: python tools/notify.py daily
       - name: Hand data to Claude's tasks
+        if: always()
         run: python tools/monitor.py export
+      - name: Tell Ming if this job failed
+        if: failure()
+        run: python tools/notify.py jobfail "${{ github.workflow }}" "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

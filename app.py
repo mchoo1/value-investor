@@ -150,7 +150,12 @@ def sync_status():
         last = q1("SELECT MAX(loaded_at) AS t FROM v2_inbox_log")
         dh = q1("SELECT updated_at FROM v2_settings WHERE key = 'macro'")
         scr = q1("SELECT MAX(run_date) AS d FROM v2_screen_runs")
-        return {"inbox": last and last["t"], "daily": dh and dh["updated_at"], "screen": scr and scr["d"]}
+        bh = qsafe("SELECT value, updated_at FROM v2_settings WHERE key = 'heartbeat:brief'")
+        br = None
+        if bh:
+            note = (bh[0]["value"] or {}).get("note") or {}
+            br = {"at": bh[0]["updated_at"], "telegram": note.get("telegram"), "email": note.get("email"), "why": note.get("why")}
+        return {"inbox": last and last["t"], "daily": dh and dh["updated_at"], "screen": scr and scr["d"], "brief": br}
     except psycopg2.Error:
         return {}
 
@@ -1378,7 +1383,11 @@ NAME_EXTRA_TPL = r"""
 {% for p in g.parts[:4] %}{% if loop.first %} Driven by {% endif %}{{ p.input|replace('_',' ') }} {{ p.share|pct }} ({{ p.effect|money }}){{ ', ' if not loop.last }}{% endfor %}{% if g.note %} <span class="muted">{{ g.note }}</span>{% endif %}</p>{% endif %}
 {% if so.result.attacks %}<table><thead><tr><th>#</th><th>Attack</th><th>Type</th><th>Grade</th><th>Claude's answer</th></tr></thead><tbody>
 {% for a in so.result.attacks %}{% set i = loop.index0 %}<tr><td>{{ loop.index }}</td><td>{{ a.point }}{% if a.evidence %}<br><span class="muted">{{ a.evidence }}</span>{% endif %}</td><td>{{ a.category or '' }}</td><td>{{ a.grade or '' }}</td>
-<td>{% for rb in rebuttals if rb.attack == i %}{{ rb.response }} {% if rb.resolved %}<span class="chip good">resolved</span>{% else %}<span class="chip warn">open</span>{% endif %}{% else %}<span class="chip warn">not answered</span>{% endfor %}</td></tr>{% endfor %}</tbody></table>{% endif %}{% endif %}
+<td>{% for rb in rebuttals if rb.attack == i %}{{ rb.response }} {% if rb.resolved %}<span class="chip good">resolved</span>{% else %}<span class="chip warn">open</span>{% endif %}{% else %}<span class="chip warn">not answered</span>{% endfor %}</td></tr>{% endfor %}</tbody></table>{% endif %}
+{% if so.result.scores %}<p style="margin:10px 0 4px"><b>Thesis quality</b> {% for k, v in so.result.scores.items() %}<span class="chip {{ 'good' if v|int >= 4 else ('bad' if v|int <= 2 else 'warn') }}">{{ k|replace('_',' ') }} {{ v }}/5</span>{% endfor %}</p>{% endif %}
+{% if so.result.improvements %}<h3 style="margin-top:12px">What would make this thesis better</h3><table><thead><tr><th>Priority</th><th>Area</th><th>Suggestion</th><th>How to fix</th><th></th></tr></thead><tbody>
+{% for m in so.result.improvements %}<tr><td><span class="chip {{ 'bad' if m.priority == 'high' else ('warn' if m.priority == 'medium' else '') }}">{{ m.priority or '—' }}</span></td><td>{{ (m.area or '')|replace('_',' ') }}</td>
+<td>{{ m.suggestion }}{% if m.why %}<br><span class="muted">{{ m.why }}</span>{% endif %}</td><td class="muted">{{ m.how or '' }}</td><td>{% if m.applied %}<span class="chip good">applied</span>{% else %}<span class="chip">open</span>{% endif %}</td></tr>{% endfor %}</tbody></table>{% endif %}{% endif %}
 </div>
 
 {% if tgt_hist or si_hist or holders %}<div class="grid g2" style="margin-top:12px" id="market">
@@ -1762,7 +1771,8 @@ DECIDE_TPL = r"""
 {{ REPORT_CSS }}
 <h1>Decide</h1>
 <div class="row" style="justify-content:space-between;margin:-2px 0 8px"><span class="muted" style="font-size:12px">
-Last loaded from Claude: {{ st.inbox|d if st.inbox else 'never' }} · daily check: {{ st.daily|d if st.daily else 'not yet' }} · screen: {{ st.screen|d if st.screen else 'not yet' }}</span>
+Last loaded from Claude: {{ st.inbox|d if st.inbox else 'never' }} · daily check: {{ st.daily|d if st.daily else 'not yet' }} · screen: {{ st.screen|d if st.screen else 'not yet' }}
+· last brief: {% if st.brief %}{{ st.brief.at|d }} · Telegram <span class="{{ 'good' if st.brief.telegram else 'bad' }}">{{ 'sent' if st.brief.telegram else 'not sent' }}</span> · email <span class="{{ 'good' if st.brief.email else 'bad' }}">{{ 'sent' if st.brief.email else 'not sent' }}</span>{% if st.brief.why %} <span class="bad">({{ st.brief.why }})</span>{% endif %}{% else %}<span class="warn">none recorded yet</span>{% endif %}</span>
 <span class="row"><form class="inline" method="post" action="{{ url_for('sync_now') }}"><button>Sync now</button></form>
 <form class="inline" method="post" action="{{ url_for('brief_send') }}"><button>Send summary to Telegram</button></form></span></div>
 <details class="card" style="margin-bottom:14px" open><summary><b>At a glance</b> <span class="muted">(same as the Telegram brief)</span></summary>

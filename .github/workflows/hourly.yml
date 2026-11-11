@@ -35,3 +35,8 @@ jobs:
         run: python tools/inbox.py --dir inbox-seed
       - name: Send Telegram alerts
         run: python tools/notify.py alerts
+      - name: Send today's brief if the 07:07 run did not
+        run: python tools/notify.py catchup
+      - name: Tell Ming if this job failed
+        if: failure()
+        run: python tools/notify.py jobfail "${{ github.workflow }}" "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

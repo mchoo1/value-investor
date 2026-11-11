@@ -4,13 +4,17 @@
   python tools\\notify.py brief     daily brief: overnight alerts + one-screen summary of everything (also: daily)
   python tools\\notify.py screen    Saturday screen summary
   python tools\\notify.py digest    Sunday weekly digest
+  python tools\\notify.py catchup   (hourly) send today's brief if the 07:07 run did not (Tue-Sat, 08:00-22:00 SGT)
+  python tools\\notify.py jobfail NAME URL   tell Ming a scheduled job failed
 Set TELEGRAM_DRY=1 to print instead of sending.
 """
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from common import db, ensure_schema, telegram, email, esc, APP_URL, TODAY
+import os, datetime as _dt
+from common import db, ensure_schema, telegram, email, esc, heartbeat, APP_URL, TODAY
+SGT = _dt.timezone(_dt.timedelta(hours=8))
 
 import re
 MODE = sys.argv[1] if len(sys.argv) > 1 else "alerts"
@@ -119,14 +123,43 @@ def brief(conn):
     tail = ("\n\n⚙️ <i>Data issues today: " + esc(", ".join(f"{k.replace('_', ' ')} {len(v)}" for k, v in fails.items()))
             + "</i>") if fails else ""
     text = head + build(cur) + tail
-    email(f"ValueInvestor daily brief · {TODAY:%a %d %b}", text)
-    if telegram(text):
+    mailed = email(f"ValueInvestor daily brief · {_dt.datetime.now(SGT):%a %d %b}", text)
+    tg_ready = bool(os.environ.get("TELEGRAM_BOT_TOKEN")) and not os.environ.get("TELEGRAM_DRY")
+    sent = telegram(text)
+    heartbeat(cur, "brief", ok=bool(sent and tg_ready), note={
+        "sgt_date": str(_dt.datetime.now(SGT).date()), "telegram": bool(sent and tg_ready), "email": bool(mailed),
+        "why": None if tg_ready else "TELEGRAM_BOT_TOKEN is not set for this job"})
+    conn.commit()
+    if not tg_ready:
+        print("::warning::Telegram is not configured (TELEGRAM_BOT_TOKEN missing): the brief was not sent to Telegram.")
+    if sent:
         mark(cur, [a["id"] for a in shown], "telegram")
         mark(cur, [a["id"] for a in rest], "digest")
         conn.commit()
         print(f"Brief sent ({len(shown)} alerts in it).")
     else:
         print("Brief not delivered; alerts stay queued.")
+
+
+def catchup(conn):
+    """Safety net, run every 2 hours: if today's brief has not gone out by 08:00 SGT (Tue-Sat), send it now."""
+    now = _dt.datetime.now(SGT)
+    if now.isoweekday() not in (2, 3, 4, 5, 6) or not (8 <= now.hour < 22):
+        return
+    cur = conn.cursor()
+    cur.execute("SELECT value FROM v2_settings WHERE key = 'heartbeat:brief'")
+    v = ((cur.fetchone() or {}).get("value") or {})
+    if ((v.get("note") or {}) if isinstance(v.get("note"), dict) else {}).get("sgt_date") == str(now.date()):
+        return
+    print("Today's brief was not sent at 07:07: sending it now.")
+    brief(conn)
+
+
+def jobfail(name, url):
+    text = (f"⚠️ <b>ValueInvestor job failed</b>: {esc(name)}\nThe rest of the system keeps running; this job's output is "
+            f"missing until it runs again.\n<a href=\"{esc(url)}\">Open the run log</a>")
+    email(f"ValueInvestor job failed: {name}", text)
+    telegram(text)
 
 
 def screen(conn):
@@ -265,6 +298,9 @@ def digest(conn):
 
 
 if __name__ == "__main__":
+    if MODE == "jobfail":                 # no database needed: the database may be what failed
+        jobfail(sys.argv[2] if len(sys.argv) > 2 else "?", sys.argv[3] if len(sys.argv) > 3 else APP_URL)
+        sys.exit(0)
     conn = db()
     c = conn.cursor()
     ensure_schema(c)
@@ -277,4 +313,6 @@ if __name__ == "__main__":
         screen(conn)
     elif MODE == "digest":
         digest(conn)
+    elif MODE == "catchup":
+        catchup(conn)
     conn.close()

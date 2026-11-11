@@ -22,7 +22,7 @@ SPLIT_CAP = 74            # conviction cap while a split is unresolved (half siz
 UNPROVEN_MOAT_CAP = 60    # conviction cap when the moat source has no grade A-C evidence
 
 # minimum shape of each inbox file; anything else is rejected and logged, never half-loaded
-REQUIRED = {"thesis": ["ticker"], "refresh": ["items"], "book": ["items"], "newsletter_tags": ["items"],
+REQUIRED = {"thesis": ["ticker"], "refresh": ["items"], "book": ["items"], "newsletter_tags": [],
             "exec_summary": ["items"], "tam": ["items"], "reason_cards": ["items"], "news_tags": ["items"],
             "filing_tags": ["items"], "buy_checks": ["items"], "outlook": ["theme"], "week_ahead": [],
             "second_opinion": ["ticker"]}
@@ -218,18 +218,23 @@ def load_second_opinion(cur, d):
      "attacks":[{"point","evidence","grade","pillar","category":"factual|financial|valuation|interpretation"}],
      "rebuttals":[{"attack":0,"response","resolved":true}]}   (rebuttals come from Claude in a later file)"""
     t = d["ticker"].upper()
-    if d.get("rebuttals") and not d.get("attacks"):      # Claude answers the open red-team points of the latest review
+    if (d.get("rebuttals") or d.get("improvements_applied")) and not d.get("attacks"):   # Claude answers the latest review
         cur.execute("SELECT * FROM v2_second_opinion WHERE ticker = %s AND kind = 'review' ORDER BY created_at DESC LIMIT 1", (t,))
         rv = cur.fetchone()
         if not rv:
             raise Later(f"no second-opinion review for {t} yet")
         res = dict(rv["result"] or {})
-        res["rebuttals"] = (res.get("rebuttals") or []) + d["rebuttals"]
+        res["rebuttals"] = (res.get("rebuttals") or []) + (d.get("rebuttals") or [])
+        done = {int(x) for x in (d.get("improvements_applied") or []) if str(x).isdigit()}
+        for i, imp in enumerate(res.get("improvements") or []):
+            if i in done:
+                imp["applied"] = True
         res["open_attacks"] = sum(1 for i, _ in enumerate(res.get("attacks") or [])
                                   if not any(r.get("attack") == i and r.get("resolved") for r in res["rebuttals"]))
         cur.execute("UPDATE v2_second_opinion SET result = %s WHERE id = %s", (J(res), rv["id"]))
         cur.execute("INSERT INTO v2_second_opinion (ticker, kind, model, thesis_version, result) VALUES (%s,'rebuttal',%s,%s,%s)",
-                    (t, d.get("model") or "claude", rv["thesis_version"], J({"rebuttals": d["rebuttals"]})))
+                    (t, d.get("model") or "claude", rv["thesis_version"],
+                     J({"rebuttals": d.get("rebuttals") or [], "improvements_applied": sorted(done)})))
         if res["open_attacks"] == 0:
             cur.execute("UPDATE v2_alerts SET addressed = TRUE, note = 'all red-team points answered' "
                         "WHERE ticker = %s AND kind IN ('Second opinion split','Open red-team points') AND NOT addressed", (t,))
@@ -239,7 +244,9 @@ def load_second_opinion(cur, d):
     if not th:
         raise Later(f"no thesis for {t} yet")
     mine = ((th["valuation"] or {}).get("engine") or {}).get("assumptions")
-    res = {"attacks": d.get("attacks") or [], "rebuttals": d.get("rebuttals") or [], "summary": d.get("summary")}
+    res = {"attacks": d.get("attacks") or [], "rebuttals": d.get("rebuttals") or [], "summary": d.get("summary"),
+           "improvements": [i for i in (d.get("improvements") or []) if isinstance(i, dict) and i.get("suggestion")][:10],
+           "scores": d.get("scores") if isinstance(d.get("scores"), dict) else None}
     if d.get("assumptions") and mine:
         try:
             res["gap"] = V.attribute_gap(mine, d["assumptions"], research_of(cur, t), price_of(cur, t))
@@ -264,6 +271,11 @@ def load_second_opinion(cur, d):
                    VALUES (%s,%s,%s,%s,%s,%s)""",
                 (t, "rebuttal" if d.get("rebuttals") and not d.get("attacks") else "review", d.get("model") or "claude-second",
                  th["version"], d.get("verdict"), J(res)))
+    hi = [i for i in res["improvements"] if str(i.get("priority") or "").lower() == "high"]
+    if hi and not (split or open_attacks):
+        alert(cur, t, "Thesis improvements suggested", "info",
+              "; ".join(f"{i.get('area', '')}: {i['suggestion']}"[:140] for i in hi[:3]),
+              f"soimp-{t}-v{th['version']}", source="claude", action="Applied at the next refresh")
     if split or open_attacks:
         if split and th["conviction"] and int(th["conviction"]) > SPLIT_CAP:
             cur.execute("UPDATE v2_theses SET conviction = %s WHERE id = %s", (SPLIT_CAP, th["id"]))
@@ -377,7 +389,19 @@ def load(cur, name, d):
                       f"{it.get('source')}: {(it.get('point') or '')[:240]}", f"nl-{t}-{it.get('source')}-{it.get('date') or TODAY}",
                       source="claude", action="Check against the thesis pillars" if stance == "negative" else "Note for the thesis")
                 flagged.append(t)
-        return f"{n} newsletter tags from {len({i.get('source') for i in d.get('items', [])})} sources" + (
+        ni = 0
+        for it in d.get("issues") or []:
+            if not isinstance(it, dict) or not it.get("source"):
+                continue
+            url = it.get("url") if str(it.get("url") or "").startswith("https://mail.google.com/") else None
+            cur.execute("""INSERT INTO v2_newsletter_issues (date, source, subject, headline, summary, url, tickers)
+                           VALUES (%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (date, source, subject) DO UPDATE SET headline = EXCLUDED.headline,
+                             summary = EXCLUDED.summary, url = COALESCE(EXCLUDED.url, v2_newsletter_issues.url),
+                             tickers = EXCLUDED.tickers, loaded_at = now()""",
+                        (it.get("date") or str(TODAY), it["source"][:80], (it.get("subject") or "")[:200], (it.get("headline") or "")[:300],
+                         (it.get("summary") or "")[:600], url, [str(x).upper()[:10] for x in (it.get("tickers") or [])][:10]))
+            ni += 1
+        return f"{ni} newsletter issues, {n} newsletter tags from {len({i.get('source') for i in d.get('items', [])})} sources" + (
             f"; flagged {', '.join(sorted(set(flagged)))}" if flagged else "")
     if kind == "exec_summary":            # add or refresh the executive summary on the latest thesis (no new version)
         n = 0

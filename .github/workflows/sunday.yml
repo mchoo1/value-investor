@@ -35,3 +35,6 @@ jobs:
         run: python tools/notify.py digest
       - name: Heartbeat
         run: python tools/heartbeat.py digest
+      - name: Tell Ming if this job failed
+        if: failure()
+        run: python tools/notify.py jobfail "${{ github.workflow }}" "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

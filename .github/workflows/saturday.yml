@@ -48,3 +48,6 @@ jobs:
       - name: Telegram screen summary
         if: github.event.schedule == '7 0 * * 6'
         run: python tools/notify.py screen
+      - name: Tell Ming if this job failed
+        if: failure()
+        run: python tools/notify.py jobfail "${{ github.workflow }}" "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

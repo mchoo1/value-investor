@@ -88,6 +88,9 @@ def ensure_schema(cur):
       CREATE TABLE IF NOT EXISTS v2_second_opinion (id SERIAL PRIMARY KEY, ticker TEXT NOT NULL, kind TEXT NOT NULL,
           model TEXT NOT NULL DEFAULT 'claude-second', thesis_version INT, verdict TEXT, result JSONB,
           created_at TIMESTAMPTZ DEFAULT now());
+      CREATE TABLE IF NOT EXISTS v2_newsletter_issues (id SERIAL PRIMARY KEY, date DATE NOT NULL, source TEXT NOT NULL,
+          subject TEXT NOT NULL DEFAULT '', headline TEXT, summary TEXT, url TEXT, tickers TEXT[] DEFAULT '{}',
+          loaded_at TIMESTAMPTZ DEFAULT now(), UNIQUE (date, source, subject));
       CREATE TABLE IF NOT EXISTS v2_short_interest (ticker TEXT, date DATE, short_float NUMERIC, short_ratio NUMERIC,
           shares_short NUMERIC, PRIMARY KEY (ticker, date));
     """)
@@ -147,7 +150,24 @@ def telegram(text):
     if not cid:
         print("Telegram: no chat id. Set TELEGRAM_CHAT_ID, or send your bot a message first.")
         return False
-    for chunk in [text[i:i + 3900] for i in range(0, len(text), 3900)]:
+    chunks, cur_ = [], ""
+    for para in text.split("\n\n"):              # split between sections so no HTML tag is cut in half
+        while len(para) > 3900:
+            cut = para.rfind("\n", 0, 3900)
+            cut = cut if cut > 0 else 3900
+            if cur_:
+                chunks.append(cur_)
+                cur_ = ""
+            chunks.append(para[:cut])
+            para = para[cut:].lstrip("\n")
+        if cur_ and len(cur_) + len(para) + 2 > 3900:
+            chunks.append(cur_)
+            cur_ = para
+        else:
+            cur_ = (cur_ + "\n\n" + para) if cur_ else para
+    if cur_:
+        chunks.append(cur_)
+    for chunk in chunks:
         res = _tg("sendMessage", chat_id=cid, text=chunk, parse_mode="HTML", disable_web_page_preview=True) or {}
         if not res.get("ok"):
             print("Telegram error:", res.get("description"))

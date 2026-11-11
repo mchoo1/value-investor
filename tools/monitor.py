@@ -92,7 +92,7 @@ def entry_of(tk, theses, research):
 
 
 # macro series (Yahoo): S&P, VIX, 3-month / 5-year / 10-year yields, dollar index, oil, gold, high-yield and long Treasuries
-MACRO_SYMS = ["^GSPC", "SPY", "^VIX", "^IRX", "^FVX", "^TNX", "DX-Y.NYB", "CL=F", "GC=F", "HYG", "TLT"]
+MACRO_SYMS = ["^GSPC", "SPY", "QQQ", "^VIX", "^IRX", "^FVX", "^TNX", "DX-Y.NYB", "CL=F", "GC=F", "HYG", "TLT"]
 LEAD_SCORE, LEAD_DROP = 75, 0.12   # screen names scoring 75+ that fall 12%+ after the screen get a heads-up
 GROWTH_HURDLE = 0.15          # growth buy zone: price where the 5-year TAM case returns 15%+ a year
 
@@ -573,9 +573,9 @@ def daily(conn):
     cur.execute("SELECT key, updated_at FROM v2_settings WHERE key LIKE 'heartbeat:%%'")
     beats = {r["key"].split(":", 1)[1]: r["updated_at"] for r in cur.fetchall()}
     now = dt.datetime.now(dt.timezone.utc)
-    late = [f"{j} (last {beats[j]:%d %b %H:%M} UTC)" if j in beats else f"{j} (never)"
-            for j, hrs in HEARTBEAT_MAX_H.items() if j not in beats or (now - beats[j]).total_seconds() > hrs * 3600]
-    if late and beats:            # only once heartbeats have started arriving
+    late = [f"{j} (last {beats[j]:%d %b %H:%M} UTC)" for j, hrs in HEARTBEAT_MAX_H.items()
+            if j in beats and (now - beats[j]).total_seconds() > hrs * 3600]   # a job not yet reporting is not late
+    if late:
         health_log["late_jobs"] = late
     failures = {k: v for k, v in health_log.items() if v}
     cur.execute("""INSERT INTO v2_settings (key, value) VALUES ('data_health', %s)
@@ -752,7 +752,13 @@ INBOX_FORMAT = {
                                     "pillar": 1, "category": "factual|financial|valuation|interpretation"}],
                        "summary": "two lines"},
     "rebuttal": {"type": "second_opinion", "run_id": "rb-<TICKER>-<YYYYMMDD>", "ticker": "AMAT", "model": "claude",
-                 "rebuttals": [{"attack": 0, "response": "answer with evidence", "resolved": True}]},
+                 "rebuttals": [{"attack": 0, "response": "answer with evidence", "resolved": True}],
+                 "improvements_applied": [0, 2]},
+    "second_opinion_improvements": [{"area": "evidence|assumptions|pillars|kill_criteria|risks|valuation|consistency|process",
+                                     "suggestion": "the specific change", "why": "what is weak now, with the fact",
+                                     "how": "the source or step that fixes it", "priority": "high|medium|low"}],
+    "second_opinion_scores": {"evidence": "1-5", "assumptions": "1-5", "pillars_measurable": "1-5",
+                              "kill_criteria": "1-5", "risk_coverage": "1-5", "consistency": "1-5"},
     "tam": {"type": "tam", "items": [{"ticker": "AMAT", "tam": TAM_EXAMPLE}]},
     "exec_summary": {"type": "exec_summary", "items": [{"ticker": "AMAT", "exec_summary": EXEC_EXAMPLE}]},
     "refresh": {"type": "refresh", "items": [{"ticker": "AMAT", "conviction": 70, "verdict": "BUY|WATCH|PASS", "entry_target": 150.0,
@@ -768,6 +774,10 @@ INBOX_FORMAT = {
                    "calendar": [{"date": "2026-11-20", "time_et": "10:00", "kind": "policy|macro|election|company",
                                  "title": "...", "detail": {"why": "...", "source": "url"}}]},
     "newsletter_tags": {"type": "newsletter_tags", "sources_read": ["Morningstar Morning Digest", "Money Stuff"],
+                        "issues": [{"date": "2026-11-10", "source": "The Daily Upside", "subject": "email subject",
+                                    "headline": "one line: the issue's single most important story, with its number",
+                                    "summary": "2-3 lines: the other top stories", "tickers": ["NVDA"],
+                                    "url": "the Gmail viewUrl of the email thread"}],
                         "items": [{"date": "2026-11-10", "source": "The Daily Upside", "subject": "email subject",
                                    "kind": "stock|macro|theme", "ticker": "NVDA (stock only)", "topic": "rates|election|AI capex|... (macro/theme)",
                                    "stance": "positive|negative|neutral", "point": "one line: the claim and the number behind it",
@@ -912,8 +922,12 @@ def export(conn):
             rr = (cur.fetchone() or {}).get("data") or {}
         r["data_pack"] = {k: rr.get(k) for k in ("price", "shares", "mcap", "sector", "industry", "history", "peers",
                                                  "analysts", "moat", "risk", "red_flags")}
-    cur.execute("""SELECT DISTINCT ON (ticker) ticker, thesis_version, result->'attacks' AS attacks, created_at
-                   FROM v2_second_opinion WHERE kind = 'review' AND (result->>'open_attacks')::int > 0
+    cur.execute("""SELECT DISTINCT ON (ticker) ticker, thesis_version, result->'attacks' AS attacks,
+                          result->'improvements' AS improvements, created_at
+                   FROM v2_second_opinion WHERE kind = 'review'
+                     AND ((result->>'open_attacks')::int > 0
+                          OR EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(result->'improvements', '[]'::jsonb)) i
+                                     WHERE NOT COALESCE((i->>'applied')::boolean, FALSE)))
                      AND created_at > now() - interval '30 days' ORDER BY ticker, created_at DESC""")
     open_attacks = [dict(r) for r in cur.fetchall()]
     # Watchlist and Book theses still without an assumptions file: the engine cannot compute their values yet
