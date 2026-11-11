@@ -164,7 +164,7 @@ def sync_status():
 @app.before_request
 def password_gate():
     pw = os.environ.get("APP_PASSWORD")
-    if not pw:
+    if not pw or request.path == "/telegram/webhook":     # the webhook checks Telegram's secret token instead
         return
     a = request.authorization
     if not a or a.password != pw:
@@ -1640,6 +1640,49 @@ def deepdive(ticker):
     return back(url_for("screen"))
 
 
+@app.post("/telegram/webhook")
+def telegram_webhook():
+    """Telegram calls this the moment Ming messages the bot, so /add and /ideas answer instantly."""
+    secret = os.environ.get("TELEGRAM_WEBHOOK_SECRET")
+    if not secret or request.headers.get("X-Telegram-Bot-Api-Secret-Token") != secret:
+        abort(403)
+    m = (request.get_json(silent=True) or {}).get("message") or {}
+    chat = str((m.get("chat") or {}).get("id") or "")
+    if chat and chat == str(os.environ.get("TELEGRAM_CHAT_ID") or ""):
+        from common import ensure_schema as _es, _tg
+        from ideas import handle_message
+        with db() as conn:
+            with conn.cursor() as c:
+                _es(c)
+            conn.commit()
+            reply = handle_message(conn, chat, m.get("text") or "")
+        if reply:
+            _tg("sendMessage", chat_id=chat, text=reply, disable_web_page_preview=True)
+    return {"ok": True}
+
+
+@app.post("/telegram/setup")
+def telegram_setup():
+    """One click on the Decide page: point the bot at this app so messages are answered instantly."""
+    need = [k for k in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "TELEGRAM_WEBHOOK_SECRET") if not os.environ.get(k)]
+    if need:
+        flash("Add these to Vercel's environment variables first, then redeploy: " + ", ".join(need))
+        return back(url_for("decide"))
+    from common import _tg
+    url = request.url_root.rstrip("/").replace("http://", "https://") + "/telegram/webhook"
+    by = os.environ.get("VERCEL_AUTOMATION_BYPASS_SECRET")
+    if by:
+        url += f"?x-vercel-protection-bypass={by}"
+    res = _tg("setWebhook", url=url, secret_token=os.environ["TELEGRAM_WEBHOOK_SECRET"], allowed_updates=["message"]) or {}
+    info = _tg("getWebhookInfo") or {}
+    flash("Telegram connected: messages to the bot are now answered instantly." if res.get("ok") else
+          f"Telegram refused the webhook: {res.get('description')}")
+    if (info.get("result") or {}).get("last_error_message"):
+        flash(f"Telegram reports: {info['result']['last_error_message']}" + ("" if by else
+              " · If this is a 401/403, turn on Vercel 'Protection Bypass for Automation' and redeploy."))
+    return back(url_for("decide"))
+
+
 @app.post("/ideas/add")
 def idea_add():
     from common import ensure_schema as _es
@@ -1803,7 +1846,8 @@ DECIDE_TPL = r"""
 Last loaded from Claude: {{ st.inbox|d if st.inbox else 'never' }} · daily check: {{ st.daily|d if st.daily else 'not yet' }} · screen: {{ st.screen|d if st.screen else 'not yet' }}
 · last brief: {% if st.brief %}{{ st.brief.at|d }} · Telegram <span class="{{ 'good' if st.brief.telegram else 'bad' }}">{{ 'sent' if st.brief.telegram else 'not sent' }}</span> · email <span class="{{ 'good' if st.brief.email else 'bad' }}">{{ 'sent' if st.brief.email else 'not sent' }}</span>{% if st.brief.why %} <span class="bad">({{ st.brief.why }})</span>{% endif %}{% else %}<span class="warn">none recorded yet</span>{% endif %}</span>
 <span class="row"><form class="inline" method="post" action="{{ url_for('sync_now') }}"><button>Sync now</button></form>
-<form class="inline" method="post" action="{{ url_for('brief_send') }}"><button>Send summary to Telegram</button></form></span></div>
+<form class="inline" method="post" action="{{ url_for('brief_send') }}"><button>Send summary to Telegram</button></form>
+<form class="inline" method="post" action="{{ url_for('telegram_setup') }}"><button title="Make /add and /ideas answer instantly">Connect Telegram commands</button></form></span></div>
 <details class="card" style="margin-bottom:14px" open><summary><b>At a glance</b> <span class="muted">(same as the Telegram brief)</span></summary>
 <div style="margin-top:8px;line-height:1.6">{{ glance|safe }}</div></details>
 <p class="sub">Everything that needs a decision, most urgent first. Each item shows why, the numbers that matter, Claude's check and a suggested size. Done or Skip records it in the decision journal.</p>

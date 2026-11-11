@@ -1,6 +1,7 @@
 """Stock ideas from outside the screen (a friend, a newsletter, a podcast, a client): one path from three doors.
 
   Telegram: send the bot   /add NVDA why or where you heard it   (also: add NVDA ..., /ideas to list pending)
+            Answered instantly by the app's webhook (/telegram/webhook); the 2-hourly job is the fallback.
   App:      Watchlist tab → "Add an idea"
 
 Every idea goes on the Watchlist at once, tagged "pending research", gets the weekly research data within ~2 hours,
@@ -90,8 +91,39 @@ def _reply(chat, text):
     _tg("sendMessage", chat_id=chat, text=text, disable_web_page_preview=True)
 
 
+def handle_message(conn, chat, text):
+    """Act on one Telegram message from Ming's chat. Returns the reply text (or None to stay silent)."""
+    cur = conn.cursor()
+    low = (text or "").strip().lower()
+    if low.startswith(("/add", "add ")):
+        rest = text.strip().split(None, 1)
+        tickers, note = parse_tickers(rest[1] if len(rest) > 1 else "")
+        if not tickers:
+            return "Send: /add TICKER [TICKER ...] why or where you heard it, e.g. /add CRWV ASTS podcast on AI cloud"
+        url = next((w for w in (note or "").split() if w.startswith("http")), None)
+        msgs = []
+        for t in tickers[:5]:
+            ok, msg = add_idea(cur, t, "telegram", note=note, url=url)
+            conn.commit()
+            msgs.append(msg)
+        return "\n".join(msgs)
+    if low.startswith("/ideas"):
+        cur.execute("""SELECT ticker, added_at, via FROM v2_ideas WHERE status = 'pending' ORDER BY added_at""")
+        rows = cur.fetchall()
+        cur.execute("""SELECT ticker, verdict FROM v2_ideas WHERE status = 'researched' AND done_at > now() - interval '14 days'
+                       ORDER BY done_at DESC LIMIT 8""")
+        done = cur.fetchall()
+        return ("Waiting for a deep dive: " + (", ".join(r["ticker"] for r in rows) if rows else "none")
+                + ("\nResearched in the last 2 weeks: " + ", ".join(f"{r['ticker']} {r['verdict'] or ''}".strip() for r in done)
+                   if done else ""))
+    if low.startswith(("/help", "/start")):
+        return ("Add stock ideas: /add TICKER [TICKER ...] note (e.g. /add CRWV ASTS podcast on AI cloud). "
+                "Each goes on your Watchlist and gets a full deep dive tonight. /ideas lists ideas waiting and done.")
+    return None
+
+
 def telegram_intake(conn, log=print):
-    """Read new messages sent to the bot. Only Ming's chat (TELEGRAM_CHAT_ID) is obeyed."""
+    """Fallback when the instant webhook is not set up: read new messages every 2 hours. Only TELEGRAM_CHAT_ID is obeyed."""
     allowed = os.environ.get("TELEGRAM_CHAT_ID")
     if not os.environ.get("TELEGRAM_BOT_TOKEN") or not allowed:
         log("Telegram intake skipped: TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are both needed.")
@@ -100,42 +132,26 @@ def telegram_intake(conn, log=print):
     cur.execute("SELECT value FROM v2_settings WHERE key = 'tg_offset'")
     off = ((cur.fetchone() or {}).get("value") or {}).get("offset")
     res = _tg("getUpdates", offset=off, timeout=0, allowed_updates=["message"]) or {}
-    added, last = 0, off
+    if not res.get("ok"):
+        log(f"Telegram intake: {res.get('description') or 'no updates'} (the app's instant webhook handles messages when set).")
+        return 0
+    n, last = 0, off
     for u in res.get("result", []):
         last = u["update_id"] + 1
         m = u.get("message") or {}
         chat = str((m.get("chat") or {}).get("id"))
-        text = (m.get("text") or "").strip()
-        if chat != str(allowed) or not text:
+        if chat != str(allowed):
             continue
-        low = text.lower()
-        if low.startswith(("/add", "add ")):
-            tickers, note = parse_tickers(text.split(None, 1)[1] if len(text.split(None, 1)) > 1 else "")
-            if not tickers:
-                _reply(chat, "Send: /add TICKER [TICKER ...] why or where you heard it, e.g. /add CRWV ASTS podcast on AI cloud")
-                continue
-            url = next((w for w in (note or "").split() if w.startswith("http")), None)
-            msgs = []
-            for t in tickers[:5]:
-                ok, msg = add_idea(cur, t, "telegram", note=note, url=url)
-                conn.commit()
-                msgs.append(msg)
-                added += ok
-            _reply(chat, "\n".join(msgs))
-        elif low.startswith("/ideas"):
-            cur.execute("SELECT ticker, added_at FROM v2_ideas WHERE status = 'pending' ORDER BY added_at")
-            rows = cur.fetchall()
-            _reply(chat, "Waiting for a deep dive: " + (", ".join(r["ticker"] for r in rows) if rows else "none"))
-        elif low.startswith(("/help", "/start")):
-            _reply(chat, "Add stock ideas: /add TICKER [TICKER ...] note (e.g. /add CRWV ASTS podcast on AI cloud). "
-                         "It goes on your Watchlist and gets a full deep dive tonight. /ideas lists ideas waiting.")
+        reply = handle_message(conn, chat, m.get("text") or "")
+        if reply:
+            _reply(chat, reply)
+            n += 1
     if last != off:
         cur.execute("""INSERT INTO v2_settings (key, value, updated_at) VALUES ('tg_offset', %s, now())
                        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()""", (J({"offset": last}),))
     conn.commit()
-    log(f"Telegram intake: {added} idea(s) added.")
-    return added
-
+    log(f"Telegram intake: {n} message(s) answered.")
+    return n
 
 if __name__ == "__main__":
     conn = db()
