@@ -774,6 +774,11 @@ INBOX_FORMAT = {
                    "calendar": [{"date": "2026-11-20", "time_et": "10:00", "kind": "policy|macro|election|company",
                                  "title": "...", "detail": {"why": "...", "source": "url"}}]},
     "newsletter_tags": {"type": "newsletter_tags", "sources_read": ["Morningstar Morning Digest", "Money Stuff"],
+                        "digest": {"top": [{"headline": "the story in one line, with its number",
+                                            "why": "why it matters for an investor (which sectors, rates, earnings)",
+                                            "tickers": ["NVDA"], "sources": ["Morningstar", "The Daily Upside"],
+                                            "url": "Gmail viewUrl of the best issue covering it"}],
+                                   "mood": "one line: the overall market tone across the newsletters"},
                         "issues": [{"date": "2026-11-10", "source": "The Daily Upside", "subject": "email subject",
                                     "headline": "one line: the issue's single most important story, with its number",
                                     "summary": "2-3 lines: the other top stories", "tickers": ["NVDA"],
@@ -931,6 +936,15 @@ def export(conn):
                      AND created_at > now() - interval '30 days' ORDER BY ticker, created_at DESC""")
     open_attacks = [dict(r) for r in cur.fetchall()]
     # Watchlist and Book theses still without an assumptions file: the engine cannot compute their values yet
+    cur.execute("""SELECT i.ticker, i.via, i.source, i.note, i.url, i.added_at, n.level, n.name, n.sector, n.industry
+                   FROM v2_ideas i JOIN v2_names n USING (ticker) WHERE i.status = 'pending' ORDER BY i.added_at""")
+    idea_queue = [dict(r) for r in cur.fetchall()]
+    for r in idea_queue:
+        cur.execute("SELECT data FROM v2_research WHERE ticker = %s ORDER BY as_of DESC LIMIT 1", (r["ticker"],))
+        rr = (cur.fetchone() or {}).get("data") or {}
+        r["research"] = {k: rr.get(k) for k in ("as_of", "price", "shares", "mcap", "sector", "industry", "valuation", "moat",
+                                                "risk", "red_flags", "peers", "analysts", "history", "business", "insiders",
+                                                "ownership")} if rr else None
     backfill = [{"ticker": n["ticker"], "level": n["level"], "style": n.get("style"),
                  "thesis_version": (theses.get(n["ticker"]) or {}).get("version"),
                  "iv_base_typed": ((theses.get(n["ticker"]) or {}).get("valuation") or {}).get("iv_base"),
@@ -989,7 +1003,7 @@ def export(conn):
              "pending_buy_checks": pending, "latest_outlooks": outlooks, "refresh_queue": refresh,
              "calendar_next_21d": calendar, "macro": macro,
              "newsletters_7d": newsletters, "research_rules": RESEARCH_RULES,
-             "second_opinion_queue": so_queue, "open_red_team_points": open_attacks, "engine_backfill_queue": backfill}
+             "second_opinion_queue": so_queue, "open_red_team_points": open_attacks, "engine_backfill_queue": backfill, "idea_queue": idea_queue}
     text = json.dumps(state, default=str, indent=1)
     out = Path(__file__).parent.parent / "outbox"
     out.mkdir(exist_ok=True)

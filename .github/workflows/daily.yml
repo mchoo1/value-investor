@@ -42,6 +42,9 @@ jobs:
       - name: Send the daily brief (Telegram and email), even if a step above failed
         if: always()
         run: python tools/notify.py daily
+      - name: Push new research to Telegram (with links to the reports)
+        if: always()
+        run: python tools/notify.py research
       - name: Hand data to Claude's tasks
         if: always()
         run: python tools/monitor.py export

@@ -23,6 +23,7 @@ import psycopg2, psycopg2.extras
 ap = argparse.ArgumentParser()
 ap.add_argument("--tickers", default="")
 ap.add_argument("--dry", action="store_true")
+ap.add_argument("--requested", action="store_true", help="only names flagged for research (new ideas, requests)")
 args = ap.parse_args()
 
 TODAY = dt.date.today()
@@ -581,6 +582,9 @@ peers_all = [dict(r) for r in cur.fetchall()]
 
 if args.tickers:
     tickers = [t.strip().upper() for t in args.tickers.split(",") if t.strip()]
+elif args.requested:
+    cur.execute("SELECT ticker FROM v2_names WHERE research_requested ORDER BY updated_at DESC LIMIT 6")
+    tickers = [r["ticker"] for r in cur.fetchall()]
 else:
     cur.execute("""SELECT ticker FROM v2_names WHERE level IN ('watchlist','book') OR is_core
                      OR status IN ('candidate','deep_dive_requested') OR research_requested

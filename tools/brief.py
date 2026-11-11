@@ -11,13 +11,13 @@ import os, re, datetime as dt
 
 APP_URL = os.environ.get("APP_URL", "https://value-investor-weld.vercel.app").rstrip("/")
 SGT = dt.timezone(dt.timedelta(hours=8))
-WORD_BUDGET = 620                 # ~2.8 minutes at 220 words a minute
+WORD_BUDGET = 650                 # under 3 minutes at 220 words a minute
 NAME_CAP, SECTOR_CAP, DRAWDOWN_ALERT = 0.10, 0.35, 0.15
 DECIDE_KINDS = {"Kill criterion hit": "EXIT?", "Buy signal confirmed": "BUY", "Buy signal": "BUY", "Add zone": "ADD",
                 "Trim zone": "TRIM", "Buy signal, thesis weakened": "REVIEW", "Add zone, thesis flagged": "REVIEW",
                 "Fair value reached": "REVIEW", "Thesis refreshed after results": "APPROVE", "Earnings preview": "PREPARE",
                 "Old idea at buy level": "RE-CHECK", "Screen idea on sale": "LOOK", "Newsletter flag": "REVIEW",
-                "Second opinion split": "REVIEW", "Open red-team points": "REVIEW", "Engine values added": "APPROVE"}
+                "Second opinion split": "REVIEW", "Idea researched": "REVIEW", "Open red-team points": "REVIEW", "Engine values added": "APPROVE"}
 ORDER = ["EXIT?", "BUY", "ADD", "TRIM", "REVIEW", "PREPARE", "APPROVE", "RE-CHECK", "LOOK"]
 MARKET = [("^GSPC", "S&P 500"), ("QQQ", "Nasdaq 100"), ("^VIX", "VIX"), ("^TNX", "10y"), ("DX-Y.NYB", "USD"),
           ("CL=F", "Oil"), ("GC=F", "Gold")]
@@ -254,6 +254,25 @@ def build(cur, html=True):
                 f"{arrow.get(r['stance'], '•')} {a(r['ticker'])} {e((r['point'] or '')[:80])} ({e(r['source'])})" for r in mine))
         return out
 
+    def key_news(cur):
+        cur.execute("SELECT value, updated_at FROM v2_settings WHERE key = 'news_digest'")
+        r = cur.fetchone()
+        if not r or (dt.datetime.now(dt.timezone.utc) - r["updated_at"]).total_seconds() > 36 * 3600:
+            return []
+        d = r["value"] or {}
+        out = [e(d["mood"][:160])] if d.get("mood") else []
+        for x in (d.get("top") or [])[:6]:
+            h = e((x.get("headline") or "")[:140])
+            tk = " ".join(a(t) for t in (x.get("tickers") or [])[:3])
+            out.append(f"• {link(x['url'], h) if str(x.get('url') or '').startswith('https://mail.google.com/') else h}"
+                       + (f" {tk}" if tk else "") + (f"\n  <i>{e(x['why'][:140])}</i>" if x.get("why") and html else ""))
+        return out
+
+    def ideas(cur):
+        cur.execute("SELECT ticker, via, added_at FROM v2_ideas WHERE status = 'pending' ORDER BY added_at")
+        rows = cur.fetchall()
+        return [f"Waiting for tonight's deep dive: " + ", ".join(f"{a(r['ticker'])} ({e(r['via'])})" for r in rows)] if rows else []
+
     def screen(cur):
         cur.execute("SELECT run_date, top10, growth_top10 FROM v2_screen_runs ORDER BY run_date DESC LIMIT 1")
         run = cur.fetchone()
@@ -264,10 +283,11 @@ def build(cur, html=True):
         return [f"{run['run_date']:%d %b} · value: {', '.join(a(t) for t in v)} · growth: {', '.join(a(t) for t in g)} · "
                 + link(f"{APP_URL}/screen", "Screen")]
 
-    sections = [("Market", _safe(market, cur), 3), ("Your Book", _safe(book, cur), 1),
+    sections = [("Market", _safe(market, cur), 3), ("Key news", _safe(key_news, cur), 1), ("Your Book", _safe(book, cur), 1),
                 ("To decide", _safe(decide, cur), 0), ("Holdings", _safe(holdings, cur), 2),
                 ("Risk check", _safe(risk, cur), 2), ("Watchlist near buy", _safe(near_buy, cur), 4),
                 ("Thesis activity", _safe(activity, cur), 5), ("Next 7 days", _safe(week, cur), 4),
+                ("Your ideas", _safe(ideas, cur), 4),
                 ("Newsletters", _safe(newsletters, cur), 3), ("Screen", _safe(screen, cur), 6)]
 
     def render(secs):

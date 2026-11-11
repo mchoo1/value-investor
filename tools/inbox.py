@@ -25,7 +25,7 @@ UNPROVEN_MOAT_CAP = 60    # conviction cap when the moat source has no grade A-C
 REQUIRED = {"thesis": ["ticker"], "refresh": ["items"], "book": ["items"], "newsletter_tags": [],
             "exec_summary": ["items"], "tam": ["items"], "reason_cards": ["items"], "news_tags": ["items"],
             "filing_tags": ["items"], "buy_checks": ["items"], "outlook": ["theme"], "week_ahead": [],
-            "second_opinion": ["ticker"]}
+            "second_opinion": ["ticker"], "idea": ["ticker"]}
 
 
 class Later(Exception):
@@ -158,6 +158,8 @@ def load_thesis(cur, d):
     elif n["status"] == "deep_dive_requested":
         cur.execute("UPDATE v2_names SET status = %s WHERE ticker = %s",
                     ("watching" if n["level"] == "watchlist" else "holding" if n["level"] == "book" else "deep_dive_done", t))
+    from ideas import researched
+    researched(cur, t, d.get("verdict") or (sections.get("exec_summary") or {}).get("recommendation"), ver)
     alert(cur, t, "New thesis ready", "medium",
           f"v{ver} · {d.get('verdict') or '?'} · conviction {conv or '?'} · entry target "
           f"{('$%.2f' % float(entry)) if entry else '—'}{' (engine)' if val.get('engine', {}).get('dcf_valid') else ''}.{moved} Approve it in the app."
@@ -389,6 +391,10 @@ def load(cur, name, d):
                       f"{it.get('source')}: {(it.get('point') or '')[:240]}", f"nl-{t}-{it.get('source')}-{it.get('date') or TODAY}",
                       source="claude", action="Check against the thesis pillars" if stance == "negative" else "Note for the thesis")
                 flagged.append(t)
+        if isinstance(d.get("digest"), dict) and d["digest"].get("top"):
+            cur.execute("""INSERT INTO v2_settings (key, value, updated_at) VALUES ('news_digest', %s, now())
+                           ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()""",
+                        (J({"as_of": str(TODAY), **d["digest"]}),))
         ni = 0
         for it in d.get("issues") or []:
             if not isinstance(it, dict) or not it.get("source"):
@@ -436,6 +442,12 @@ def load(cur, name, d):
         return load_thesis(cur, d)
     if kind == "second_opinion":
         return load_second_opinion(cur, d)
+    if kind == "idea":                    # a stock idea Ming gave Claude in a chat
+        from ideas import add_idea
+        ok, msg = add_idea(cur, d["ticker"], "chat", note=d.get("note"), source=d.get("source"), url=d.get("url"))
+        if not ok:
+            raise ValueError(msg)
+        return msg
     if kind in ("news_tags", "filing_tags"):
         table = "v2_news" if kind == "news_tags" else "v2_events"
         n = 0

@@ -4,6 +4,7 @@
   python tools\\notify.py brief     daily brief: overnight alerts + one-screen summary of everything (also: daily)
   python tools\\notify.py screen    Saturday screen summary
   python tools\\notify.py digest    Sunday weekly digest
+  python tools\\notify.py research  (2-hourly) push every new thesis, refresh and review to Telegram with a link
   python tools\\notify.py catchup   (hourly) send today's brief if the 07:07 run did not (Tue-Sat, 08:00-22:00 SGT)
   python tools\\notify.py jobfail NAME URL   tell Ming a scheduled job failed
 Set TELEGRAM_DRY=1 to print instead of sending.
@@ -13,7 +14,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 import os, datetime as _dt
-from common import db, ensure_schema, telegram, email, esc, heartbeat, APP_URL, TODAY
+from common import db, ensure_schema, telegram, email, esc, heartbeat, J, APP_URL, TODAY
 SGT = _dt.timezone(_dt.timedelta(hours=8))
 
 import re
@@ -139,6 +140,87 @@ def brief(conn):
         print(f"Brief sent ({len(shown)} alerts in it).")
     else:
         print("Brief not delivered; alerts stay queued.")
+
+
+RESEARCH_KINDS = ["New thesis ready", "Thesis refreshed after results", "Engine values added", "Idea researched",
+                  "Second opinion split", "Open red-team points", "Thesis improvements suggested"]
+
+
+def research(conn):
+    """Push each new piece of research (deep dive, idea, results refresh, engine backfill, review) to Telegram once,
+    with the call, the key numbers and a link to the full report. Held during quiet hours (23:00-07:00 SGT)."""
+    cur = conn.cursor()
+    if quiet_now() and "--force" not in sys.argv:
+        print("Quiet hours: research notes wait for the next run after 07:00.")
+        return
+    cur.execute("SELECT value FROM v2_settings WHERE key = 'research_notified'")
+    since = ((cur.fetchone() or {}).get("value") or {}).get("at")
+    now = _dt.datetime.now(_dt.timezone.utc).isoformat()
+    if not since:                                 # first run: start from now, do not replay history
+        cur.execute("""INSERT INTO v2_settings (key, value) VALUES ('research_notified', %s)
+                       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()""", (J({"at": now}),))
+        conn.commit()
+        return
+    cur.execute("""SELECT t.*, n.name, n.level,
+                     (SELECT close FROM v2_prices WHERE ticker = t.ticker ORDER BY date DESC LIMIT 1) AS px,
+                     (SELECT row_to_json(p) FROM (SELECT conviction, verdict FROM v2_theses p WHERE p.ticker = t.ticker
+                        AND p.version < t.version ORDER BY version DESC LIMIT 1) p) AS prev,
+                     (SELECT row_to_json(i) FROM (SELECT via, source FROM v2_ideas i WHERE i.ticker = t.ticker
+                        AND i.thesis_version = t.version LIMIT 1) i) AS idea
+                   FROM v2_theses t LEFT JOIN v2_names n USING (ticker) WHERE t.created_at > %s ORDER BY t.created_at""", (since,))
+    theses = cur.fetchall()
+    cur.execute("""SELECT * FROM v2_second_opinion WHERE kind = 'review' AND created_at > %s ORDER BY created_at""", (since,))
+    reviews = cur.fetchall()
+    if not theses and not reviews:
+        return
+    f = lambda v: float(v) if v is not None else None
+    blocks = []
+    for t in theses:
+        v = t["valuation"] or {}
+        es = (t["sections"] or {}).get("exec_summary") or {}
+        e_ = v.get("engine") or {}
+        call = es.get("recommendation") or t["verdict"] or "?"
+        kind = ("Engine values added" if (v.get("refresh") or {}).get("summary", "").startswith("Engine backfill")
+                else "Results refresh" if t["author"] == "claude-refresh" else "New deep dive")
+        if t["idea"]:
+            kind = f"Your idea ({t['idea']['via']}{', ' + t['idea']['source'] if t['idea'].get('source') else ''})"
+        head = f"<b>{esc(t['ticker'])}</b> {esc(cname(t['name'] or ''))[:40]} · {esc(kind)}"
+        line2 = f"<b>{esc(call)}</b> · conviction {t['conviction'] if t['conviction'] is not None else '—'}"
+        if t["prev"] and (t["prev"].get("verdict") != t["verdict"] or t["prev"].get("conviction") != t["conviction"]):
+            line2 += f" (was {esc(t['prev'].get('verdict') or '?')}, {t['prev'].get('conviction') or '—'})"
+        nums = []
+        if f(t["px"]):
+            nums.append(f"price ${f(t['px']):,.2f}")
+        if v.get("iv_base"):
+            nums.append(f"value ${f(v['iv_base']):,.2f}" + (" (engine)" if e_.get("dcf_valid") else ""))
+        if f(t["entry_target"]):
+            nums.append(f"buy below ${f(t['entry_target']):,.2f}")
+        if e_.get("growth_zone") and (t["level"] == "book" or (es.get("style") or "").lower() == "growth"):
+            nums.append(f"growth zone ${f(e_['growth_zone']):,.2f}")
+        one = es.get("one_line") or (v.get("refresh") or {}).get("summary") or ""
+        url = f"{APP_URL}/name/{t['ticker']}"
+        blocks.append("\n".join(x for x in [head, line2, " · ".join(nums), esc(one[:280]),
+                                              f'<a href="{url}#report">Read the report</a> · <a href="{url}#thesis">Full thesis</a>'] if x))
+    for r in reviews:
+        res = r["result"] or {}
+        sc = res.get("scores") or {}
+        avg = sum(float(x) for x in sc.values()) / len(sc) if sc else None
+        hi = [i for i in res.get("improvements") or [] if str(i.get("priority")).lower() == "high"]
+        gap = (res.get("gap") or {}).get("gap")
+        url = f"{APP_URL}/name/{r['ticker']}"
+        blocks.append("\n".join(x for x in [
+            f"<b>{esc(r['ticker'])}</b> · Thesis review: {'split' if res.get('split') else 'agrees'}"
+            + (f" · quality {avg:.1f}/5" if avg is not None else "") + (f" · value gap {gap:+.0%}" if gap is not None else ""),
+            (f"Top fix: {esc(hi[0]['suggestion'][:200])}" if hi else esc((res.get('summary') or '')[:200])),
+            f'<a href="{url}#second">Open the review</a>'] if x))
+    text = f"🔬 <b>New research ({len(blocks)})</b>\n\n" + "\n\n".join(blocks)
+    if telegram(text):
+        cur.execute("""UPDATE v2_alerts SET sent = TRUE, sent_via = 'research', sent_at = now()
+                       WHERE NOT sent AND kind = ANY(%s) AND fired_at > %s""", (RESEARCH_KINDS, since))
+        cur.execute("""INSERT INTO v2_settings (key, value) VALUES ('research_notified', %s)
+                       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()""", (J({"at": now}),))
+        conn.commit()
+        print(f"Research pushed: {len(theses)} thesis update(s), {len(reviews)} review(s).")
 
 
 def catchup(conn):
@@ -315,4 +397,6 @@ if __name__ == "__main__":
         digest(conn)
     elif MODE == "catchup":
         catchup(conn)
+    elif MODE == "research":
+        research(conn)
     conn.close()

@@ -889,6 +889,19 @@ WATCH_TPL = r"""
 <h1>Watchlist</h1>
 <p class="sub">{{ rows|length }} of {{ cap }} names · {{ core }} of {{ core_cap }} core pinned · every name carries a thesis and is checked daily for the buy signal.</p>
 {% if rows|length >= cap %}<div class="flash">The Watchlist is full. Remove names before new ones can be added. Suggestions below.</div>{% endif %}
+<div class="card" id="add-idea" style="margin-bottom:14px"><h3>Add an idea from outside</h3>
+<form class="row" method="post" action="{{ url_for('idea_add') }}">
+<input name="ticker" placeholder="Tickers, e.g. CRWV, ASTS" required style="width:170px;text-transform:uppercase">
+<input name="source" placeholder="Where from (podcast, friend, newsletter…)" style="width:240px">
+<input name="note" placeholder="Why it caught your eye, or a link" style="flex:1;min-width:220px">
+<button class="primary">Add and research</button></form>
+<p class="muted" style="margin:6px 0 0;font-size:12px">It goes on the Watchlist now, pending research; a full deep dive runs tonight and the call (BUY, WAIT or PASS) is in tomorrow's brief.
+Also from Telegram: <code>/add CRWV ASTS where you heard it</code> (up to 5 at once).</p>
+{% if ideas %}<table style="margin-top:10px"><thead><tr><th>Idea</th><th>Added</th><th>Via</th><th>Note</th><th>Status</th></tr></thead><tbody>
+{% for i in ideas %}<tr><td><a href="{{ url_for('name', ticker=i.ticker) }}"><b>{{ i.ticker }}</b></a></td><td>{{ i.added_at|d }}</td><td>{{ i.via }}{% if i.source %} · {{ i.source }}{% endif %}</td>
+<td class="muted">{{ (i.note or '')[:120] }}{% if i.url %} <a href="{{ i.url }}" target="_blank" rel="noopener">link</a>{% endif %}</td>
+<td>{% if i.status == 'pending' %}<span class="chip warn">pending research</span>{% else %}<span class="chip {{ 'bad' if (i.verdict or '').upper().startswith('PASS') else 'good' }}">{{ i.verdict or 'researched' }}</span>{% endif %}</td></tr>{% endfor %}</tbody></table>{% endif %}
+</div>
 <div class="tablewrap"><table id="wl"><thead><tr><th>Ticker</th><th class="r">Price</th><th class="r">Entry target</th>
 <th class="r">Gap to target</th><th>Buy signal</th><th class="r">Conviction</th><th>Verdict</th><th>Latest news</th>
 <th class="r">Alerts</th><th></th></tr></thead><tbody>
@@ -997,7 +1010,7 @@ def watchlist():
                WHERE s.run_date = (SELECT MAX(run_date) FROM v2_screen_scores) AND n.level = 'screen'
                  AND n.status <> 'rejected' AND GREATEST(COALESCE(s.score, 0), COALESCE(s.growth_score, 0)) > %s
                ORDER BY 2 DESC LIMIT 5""", (best(low),))]
-    return page("watchlist", "Watchlist", WATCH_TPL, rows=rows, weakest=weakest, cap=WATCH_CAP, swaps=swaps,
+    return page("watchlist", "Watchlist", WATCH_TPL, ideas=qsafe("SELECT * FROM v2_ideas ORDER BY (status = 'pending') DESC, added_at DESC LIMIT 15"), rows=rows, weakest=weakest, cap=WATCH_CAP, swaps=swaps,
                 core=sum(1 for r in rows if r["is_core"]), core_cap=CORE_CAP)
 
 
@@ -1625,6 +1638,22 @@ def deepdive(ticker):
     x("UPDATE v2_names SET status = 'deep_dive_requested', updated_at = now() WHERE ticker = %s", (ticker.upper(),))
     flash(f"Deep dive requested for {ticker.upper()}. The next deep-dive task picks it up.")
     return back(url_for("screen"))
+
+
+@app.post("/ideas/add")
+def idea_add():
+    from common import ensure_schema as _es
+    from ideas import add_idea
+    with db() as conn, conn.cursor() as c:
+        _es(c)
+        msgs = []
+        for t in _re.split(r"[\s,;]+", (request.form.get("ticker") or "").strip())[:5]:
+            if t:
+                ok, msg = add_idea(c, t, "app", note=request.form.get("note"), source=request.form.get("source"),
+                                   url=next((w for w in (request.form.get("note") or "").split() if w.startswith("http")), None))
+                msgs.append(msg)
+    flash(" ".join(msgs) or "Enter at least one ticker.")
+    return back(url_for("watchlist"))
 
 
 def cancel_deep_dive(tickers):

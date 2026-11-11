@@ -11,7 +11,7 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 25
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -33,6 +33,14 @@ jobs:
         run: python tools/inbox.py
       - name: Load checked-in files (inbox-seed, each loaded once)
         run: python tools/inbox.py --dir inbox-seed
+      - name: Read stock ideas sent to the Telegram bot (/add TICKER note)
+        id: ideas
+        run: python tools/ideas.py telegram
+      - name: Research new ideas and hand them to tonight's deep dive
+        if: steps.ideas.outputs.new_ideas == 'true'
+        run: python tools/research.py --requested && python tools/monitor.py export
+      - name: Push new research to Telegram (with links to the reports)
+        run: python tools/notify.py research
       - name: Send Telegram alerts
         run: python tools/notify.py alerts
       - name: Send today's brief if the 07:07 run did not

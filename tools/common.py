@@ -88,6 +88,9 @@ def ensure_schema(cur):
       CREATE TABLE IF NOT EXISTS v2_second_opinion (id SERIAL PRIMARY KEY, ticker TEXT NOT NULL, kind TEXT NOT NULL,
           model TEXT NOT NULL DEFAULT 'claude-second', thesis_version INT, verdict TEXT, result JSONB,
           created_at TIMESTAMPTZ DEFAULT now());
+      CREATE TABLE IF NOT EXISTS v2_ideas (id SERIAL PRIMARY KEY, ticker TEXT NOT NULL, added_at TIMESTAMPTZ DEFAULT now(),
+          via TEXT, source TEXT, note TEXT, url TEXT, status TEXT DEFAULT 'pending', verdict TEXT, thesis_version INT,
+          done_at TIMESTAMPTZ);
       CREATE TABLE IF NOT EXISTS v2_newsletter_issues (id SERIAL PRIMARY KEY, date DATE NOT NULL, source TEXT NOT NULL,
           subject TEXT NOT NULL DEFAULT '', headline TEXT, summary TEXT, url TEXT, tickers TEXT[] DEFAULT '{}',
           loaded_at TIMESTAMPTZ DEFAULT now(), UNIQUE (date, source, subject));
