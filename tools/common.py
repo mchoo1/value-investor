@@ -95,6 +95,7 @@ def ensure_schema(cur):
       ALTER TABLE v2_questions ADD COLUMN IF NOT EXISTS url TEXT;
       ALTER TABLE v2_questions ADD COLUMN IF NOT EXISTS details JSONB;
       ALTER TABLE v2_questions ADD COLUMN IF NOT EXISTS tg_message_id BIGINT;
+      ALTER TABLE v2_questions ADD COLUMN IF NOT EXISTS section TEXT;
       CREATE TABLE IF NOT EXISTS v2_ideas (id SERIAL PRIMARY KEY, ticker TEXT NOT NULL, added_at TIMESTAMPTZ DEFAULT now(),
           via TEXT, source TEXT, note TEXT, url TEXT, status TEXT DEFAULT 'pending', verdict TEXT, thesis_version INT,
           done_at TIMESTAMPTZ);

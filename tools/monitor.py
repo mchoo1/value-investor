@@ -956,7 +956,7 @@ def export(conn):
                      AND created_at > now() - interval '30 days' ORDER BY ticker, created_at DESC""")
     open_attacks = [dict(r) for r in cur.fetchall()]
     # Watchlist and Book theses still without an assumptions file: the engine cannot compute their values yet
-    cur.execute("""SELECT q.id, q.ticker, q.kind, q.text, q.url, q.parent_id, q.via, q.asked_at, n.level FROM v2_questions q
+    cur.execute("""SELECT q.id, q.ticker, q.kind, q.text, q.url, q.parent_id, q.section, q.via, q.asked_at, n.level FROM v2_questions q
                    LEFT JOIN v2_names n USING (ticker) WHERE q.status = 'open' ORDER BY q.asked_at LIMIT 10""")
     open_q = [dict(r) for r in cur.fetchall()]
     for q in open_q:
@@ -973,6 +973,8 @@ def export(conn):
         if q["ticker"] and not th:
             cur.execute("SELECT * FROM v2_theses WHERE ticker = %s ORDER BY version DESC LIMIT 1", (q["ticker"],))
             th = cur.fetchone()
+        if th and q.get("section"):
+            q["section_text"] = (th.get("sections") or {}).get(q["section"])
         if th:
             v = th.get("valuation") or {}
             q["thesis"] = {"version": th.get("version"), "verdict": th.get("verdict"), "conviction": th.get("conviction"),

@@ -1324,9 +1324,20 @@ NAME_TPL = r"""
 {% for key, title in secs %}<div class="sec"><b>{{ title }}</b>
 {% set body = (thesis or {}).get('sections', {}).get(key) %}
 <div class="body">{% if body %}{{ body }}{% else %}<span class="empty">Not written yet</span>{% endif %}</div>
-{% for c in comments.get(key, []) %}<div class="cmt">{{ c.body }} <span class="muted">· {{ c.created_at|d }}</span></div>{% endfor %}
-<details><summary>Comment</summary><form method="post" action="{{ url_for('comment', ticker=n.ticker) }}">
-<input type="hidden" name="section" value="{{ key }}"><textarea name="body" required></textarea><button>Save comment</button></form></details>
+{% for c in comments.get(key, []) %}<div class="cmt">{{ c.body }} <span class="muted">· {{ c.created_at|d }} · note</span></div>{% endfor %}
+{% for root, kids in sec_qa.get(key, []) %}<div class="cmt" style="color:var(--ink)">
+{% for c in [root] + kids %}<div {% if not loop.first %}style="margin-top:6px"{% endif %}><b>{{ 'You' }}</b> <span class="muted">· #{{ c.id }} · {{ c.asked_at|d }}</span> {{ c.text }}
+{% if c.status == 'answered' %}{% set vd = ((c.details or {}).verdict or '')|lower %}
+<div style="margin:4px 0 0 12px"><b>Claude</b> {% if vd %}<span class="chip {{ {'agree':'good','partly agree':'warn','disagree':'bad'}.get(vd, '') }}">{{ vd }}</span>{% endif %} <span class="muted">· {{ c.answered_at|d }}</span>
+<div class="body">{{ c.answer }}</div>
+{% for src in c.sources or [] %}<div class="muted" style="font-size:12px">· {% if src.url %}<a href="{{ src.url }}" target="_blank" rel="noopener">{{ src.title or src.url }}</a>{% else %}{{ src.title }}{% endif %}{% if src.date %} ({{ src.date }}){% endif %}</div>{% endfor %}
+{% if c.proposal %}<div class="flash" style="margin-top:6px">Proposed change ({{ c.proposal.priority or 'medium' }}): {{ c.proposal.change }}</div>{% endif %}</div>
+{% else %}<span class="chip warn">waiting for Claude</span>{% endif %}</div>{% endfor %}
+{% set last = (kids[-1] if kids else root) %}{% if last.status == 'answered' %}<details><summary>Reply</summary><form method="post" action="{{ url_for('comment', ticker=n.ticker) }}">
+<input type="hidden" name="section" value="{{ key }}"><input type="hidden" name="parent_id" value="{{ last.id }}"><textarea name="body" required></textarea><button>Send to Claude</button></form></details>{% endif %}
+</div>{% endfor %}
+<details id="sec-{{ key }}"><summary>Comment (Claude reviews it)</summary><form method="post" action="{{ url_for('comment', ticker=n.ticker) }}">
+<input type="hidden" name="section" value="{{ key }}"><textarea name="body" required placeholder="What you disagree with or question in this section, and why"></textarea><button>Send to Claude</button></form></details>
 </div>{% endfor %}</div>{% endfor %}
 
 {% if legacy %}<h2>Legacy thesis <span class="muted" style="font-weight:400">last updated {{ legacy.updated_date|d }} · needs review</span></h2>
@@ -1660,7 +1671,7 @@ def name(ticker):
     import valuation as _V
     sa, _sr, sbasis, sscen = sim_basis(ticker)
     sdr = round((_V.discount_rate_of(sa) if sa else 0.10) * 100, 2)
-    qa_rows = qsafe("SELECT * FROM v2_questions WHERE ticker = %s ORDER BY id DESC LIMIT 60", (ticker,))
+    qa_rows = qsafe("SELECT * FROM v2_questions WHERE ticker = %s AND section IS NULL ORDER BY id DESC LIMIT 60", (ticker,))
     by_id = {x["id"]: x for x in qa_rows}
 
     def _root(x):
@@ -1681,7 +1692,20 @@ def name(ticker):
         tgt_hist=Markup(sparkline([v for v, _ in tg], [("Price", price, "good")],
                                   f"Mean target, {len(tg)} readings since {tg[0][1]} · now {money(tg[-1][0])}")) if len(tg) >= 2 else None,
         si_hist=Markup(sparkline(si, [], f"Short interest, % of float · now {si[-1]:.1%}")) if len(si) >= 2 else None))
-    return page(n["level"], ticker, NAME_TPL, extra=extra, detail=Markup(render_template_string(SCREEN_DETAIL_TPL, sc=sc)),
+    sq = qsafe("SELECT * FROM v2_questions WHERE ticker = %s AND section IS NOT NULL ORDER BY id", (ticker,))
+    sq_by = {x["id"]: x for x in sq}
+    sec_qa = {}
+    for x_ in sq:
+        if not x_.get("parent_id") or x_["parent_id"] not in sq_by:
+            sec_qa.setdefault(x_["section"], []).append((x_, []))
+    roots = {r["id"]: kids for lst in sec_qa.values() for r, kids in lst}
+    for x_ in sq:
+        if x_.get("parent_id") in sq_by:
+            r = x_
+            while r.get("parent_id") in sq_by:
+                r = sq_by[r["parent_id"]]
+            roots.get(r["id"], []).append(x_)
+    return page(n["level"], ticker, NAME_TPL, sec_qa=sec_qa, extra=extra, detail=Markup(render_template_string(SCREEN_DETAIL_TPL, sc=sc)),
                 r=r, research=Markup(render_template_string(RESEARCH_TPL, r=r, ticker=ticker)), n=n, thesis=thesis, val=val, analyst=analyst, price=price,
                 spark=spark, comments=cm, moves=moves, inp=inp, SECTIONS=SECTIONS,
                 scenarios=q("SELECT * FROM v2_scenarios WHERE ticker = %s ORDER BY created_at DESC", (ticker,)),
@@ -1914,11 +1938,19 @@ def approve(ticker):
 
 @app.post("/name/<ticker>/comment")
 def comment(ticker):
+    """A comment on one thesis section goes to Claude, who reviews it with that section's text and replies under it."""
     body = (request.form.get("body") or "").strip()
+    sec = request.form.get("section") or "general"
     if body:
-        x("INSERT INTO v2_comments (ticker, section, body) VALUES (%s, %s, %s)",
-          (ticker.upper(), request.form.get("section") or "general", body))
-    return back(url_for("name", ticker=ticker))
+        from common import ensure_schema as _es
+        from ideas import add_question
+        pid = request.form.get("parent_id")
+        with db() as conn, conn.cursor() as c:
+            _es(c)
+            ok, msg = add_question(c, body, "app", ticker=ticker.upper(), kind="comment", section=sec,
+                                   parent_id=int(pid) if pid and pid.isdigit() else None)
+        flash(msg)
+    return redirect(url_for("name", ticker=ticker.upper()) + f"#sec-{sec}")
 
 
 @app.post("/name/<ticker>/scenario")

@@ -96,20 +96,22 @@ KIND_REPLY = {
     "feedback": "Feedback noted (#{id}{t}). Claude reviews it within 2 hours and tells you what it changes.",
     "challenge": "Challenge queued (#{id}{t}). Claude will try hard to break the thesis: scorecard, the strongest counter-arguments "
                  "and fixes, usually within 2 hours (09:00-21:00).",
+    "comment": "Comment saved (#{id}{t}). Claude reviews it against the evidence and replies under it within about 2 hours (09:00-21:00).",
     "check": "Source check queued (#{id}{t}). Claude will test each claim in it against filings and the thesis, within about 2 hours.",
 }
 
 
-def add_question(cur, text, via, ticker=None, kind="question", parent_id=None, url=None):
+def add_question(cur, text, via, ticker=None, kind="question", parent_id=None, url=None, section=None):
     """A question, feedback, challenge or source check for Claude, answered by the 2-hourly Q&A task (09:00-21:00 SGT).
     A follow-up (parent_id) carries the whole thread so Claude answers in context."""
     text = (text or "").strip()
     if not text and kind not in ("challenge", "check"):
         return False, "Write the question after the command, e.g. /ask NOW what happens if AI agents replace seats?"
     t = (ticker or "").upper().lstrip("$") or None
-    if parent_id and not t:
-        cur.execute("SELECT ticker FROM v2_questions WHERE id = %s", (parent_id,))
-        t = (cur.fetchone() or {}).get("ticker")
+    if parent_id and (not t or not section):
+        cur.execute("SELECT ticker, section FROM v2_questions WHERE id = %s", (parent_id,))
+        pr = cur.fetchone() or {}
+        t, section = t or pr.get("ticker"), section or pr.get("section")
     if t is None and text:                          # first word a known ticker? then it is about that stock
         first = text.split()[0].strip(",:;?").lstrip("$")
         if TICKER.match(first.upper()) and (first.isupper() or first.startswith("$")):
@@ -121,8 +123,9 @@ def add_question(cur, text, via, ticker=None, kind="question", parent_id=None, u
     url = url or next((w for w in text.split() if w.startswith("http")), None)
     if kind == "check" and not url and len(text) < 40:
         return False, "Send the link (or paste the text) to check, e.g. /check HOOD https://example.com/bear-report"
-    cur.execute("""INSERT INTO v2_questions (ticker, kind, text, via, parent_id, url) VALUES (%s,%s,%s,%s,%s,%s) RETURNING id""",
-                (t, kind, (text or f"Challenge the {t} thesis")[:4000], via, parent_id, url))
+    cur.execute("""INSERT INTO v2_questions (ticker, kind, text, via, parent_id, url, section)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                (t, kind, (text or f"Challenge the {t} thesis")[:4000], via, parent_id, url, section))
     qid = cur.fetchone()["id"]
     msg = KIND_REPLY.get(kind, KIND_REPLY["question"]).format(id=qid, t=f", {t}" if t else "")
     return True, (msg + (f" (follow-up to #{parent_id})" if parent_id else ""))

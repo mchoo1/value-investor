@@ -219,7 +219,10 @@ def research(conn):
     for q in answers:                      # each answer is its own message, so Ming can reply to it to follow up
         where = f"{APP_URL}/name/{q['ticker']}#qa" if q["ticker"] else f"{APP_URL}/decide"
         label = {"question": "Your question", "feedback": "Your feedback", "challenge": "Thesis challenge",
-                 "check": "Source check"}.get(q["kind"], "Your question")
+                 "check": "Source check", "comment": "Your thesis comment"}.get(q["kind"], "Your question")
+        if q.get("section"):
+            label += f" ({q['section'].replace('_', ' ')})"
+            where = f"{APP_URL}/name/{q['ticker']}#sec-{q['section']}"
         det = q.get("details") or {}
         extra = ""
         if det.get("claims"):
@@ -227,6 +230,8 @@ def research(conn):
             for c in det["claims"]:
                 cnt[str(c.get("verdict") or "?").lower()] = cnt.get(str(c.get("verdict") or "?").lower(), 0) + 1
             extra = "Claims: " + ", ".join(f"{v} {k}" for k, v in cnt.items())
+        if det.get("verdict") and q["kind"] == "comment":
+            extra = f"Claude: {det['verdict']}"
         if det.get("scores"):
             sc_ = det["scores"]
             extra = "Quality " + f"{sum(float(v) for v in sc_.values()) / len(sc_):.1f}/5 · " + ", ".join(f"{k.replace('_', ' ')} {v}" for k, v in sc_.items())
