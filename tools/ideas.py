@@ -91,30 +91,60 @@ def _reply(chat, text):
     _tg("sendMessage", chat_id=chat, text=text, disable_web_page_preview=True)
 
 
-def add_question(cur, text, via, ticker=None, kind="question"):
-    """A question or feedback for Claude. Answered by the 2-hourly Q&A task (08:00-22:00 SGT); the answer is pushed
-    to Telegram and kept on the stock page (or the Decide page for general questions)."""
+KIND_REPLY = {
+    "question": "Got it (#{id}{t}). Claude researches it and replies here, usually within 2 hours between 09:00 and 21:00.",
+    "feedback": "Feedback noted (#{id}{t}). Claude reviews it within 2 hours and tells you what it changes.",
+    "challenge": "Challenge queued (#{id}{t}). Claude will try hard to break the thesis: scorecard, the strongest counter-arguments "
+                 "and fixes, usually within 2 hours (09:00-21:00).",
+    "check": "Source check queued (#{id}{t}). Claude will test each claim in it against filings and the thesis, within about 2 hours.",
+}
+
+
+def add_question(cur, text, via, ticker=None, kind="question", parent_id=None, url=None):
+    """A question, feedback, challenge or source check for Claude, answered by the 2-hourly Q&A task (09:00-21:00 SGT).
+    A follow-up (parent_id) carries the whole thread so Claude answers in context."""
     text = (text or "").strip()
-    if not text:
+    if not text and kind not in ("challenge", "check"):
         return False, "Write the question after the command, e.g. /ask NOW what happens if AI agents replace seats?"
     t = (ticker or "").upper().lstrip("$") or None
-    if t is None:                                   # first word a known ticker? then it is about that stock
+    if parent_id and not t:
+        cur.execute("SELECT ticker FROM v2_questions WHERE id = %s", (parent_id,))
+        t = (cur.fetchone() or {}).get("ticker")
+    if t is None and text:                          # first word a known ticker? then it is about that stock
         first = text.split()[0].strip(",:;?").lstrip("$")
         if TICKER.match(first.upper()) and (first.isupper() or first.startswith("$")):
             cur.execute("SELECT 1 FROM v2_names WHERE ticker = %s", (first.upper(),))
             if cur.fetchone():
                 t = first.upper()
-    cur.execute("INSERT INTO v2_questions (ticker, kind, text, via) VALUES (%s,%s,%s,%s) RETURNING id",
-                (t, kind, text[:2000], via))
+    if kind in ("challenge", "check") and not t:
+        return False, f"Say which stock, e.g. /{kind} NOW" + (" https://link-to-the-report" if kind == "check" else "")
+    url = url or next((w for w in text.split() if w.startswith("http")), None)
+    if kind == "check" and not url and len(text) < 40:
+        return False, "Send the link (or paste the text) to check, e.g. /check HOOD https://example.com/bear-report"
+    cur.execute("""INSERT INTO v2_questions (ticker, kind, text, via, parent_id, url) VALUES (%s,%s,%s,%s,%s,%s) RETURNING id""",
+                (t, kind, (text or f"Challenge the {t} thesis")[:4000], via, parent_id, url))
     qid = cur.fetchone()["id"]
-    return True, (f"Got it (#{qid}{', ' + t if t else ''}). Claude researches it and replies here, usually within 2 hours "
-                  f"between 08:00 and 22:00." if kind == "question" else
-                  f"Feedback noted (#{qid}{', ' + t if t else ''}). Claude reviews it within 2 hours and tells you what it changes.")
+    msg = KIND_REPLY.get(kind, KIND_REPLY["question"]).format(id=qid, t=f", {t}" if t else "")
+    return True, (msg + (f" (follow-up to #{parent_id})" if parent_id else ""))
 
 
-def handle_message(conn, chat, text):
-    """Act on one Telegram message from Ming's chat. Returns the reply text (or None to stay silent)."""
+def _qref(text):
+    """'#12 and what about margins?' -> (12, 'and what about margins?')"""
+    m = re.match(r"^#(\d+)\s*(.*)$", (text or "").strip(), re.S)
+    return (int(m.group(1)), m.group(2)) if m else (None, text)
+
+
+def handle_message(conn, chat, text, reply_to=None):
+    """Act on one Telegram message from Ming's chat. Returns the reply text (or None to stay silent).
+    reply_to: the Telegram message id Ming replied to; a reply to one of Claude's answers is a follow-up in that thread."""
     cur = conn.cursor()
+    if reply_to and not (text or "").strip().startswith("/"):
+        cur.execute("SELECT id FROM v2_questions WHERE tg_message_id = %s ORDER BY id DESC LIMIT 1", (reply_to,))
+        r = cur.fetchone()
+        if r:
+            ok, msg = add_question(cur, text, "telegram", parent_id=r["id"])
+            conn.commit()
+            return msg
     low = (text or "").strip().lower()
     if low.startswith(("/add", "add ")):
         rest = text.strip().split(None, 1)
@@ -141,10 +171,20 @@ def handle_message(conn, chat, text):
         return ("Commands:\n/add TICKER [TICKER ...] note: research new ideas (full deep dive tonight)\n"
                 "/ideas: ideas waiting and done\n/ask [TICKER] question: Claude researches and replies within ~2 hours\n"
                 "/feedback [TICKER] text: tell Claude what you think of a thesis or the app\n"
+                "/challenge TICKER [focus]: Claude tries hard to break the thesis (scorecard, counter-arguments, fixes)\n"
+                "/check TICKER link [note]: Claude tests a bear report, analyst note or article against the facts\n"
+                "Reply to any of Claude's answers to follow up in the same thread (or /ask #12 your follow-up).\n"
                 "Any other message is treated as a question.")
-    for cmd, kind in (("/ask", "question"), ("/feedback", "feedback")):
+    for cmd, kind in (("/ask", "question"), ("/feedback", "feedback"), ("/challenge", "challenge"), ("/check", "check")):
         if low.startswith(cmd):
-            ok, msg = add_question(cur, text.strip()[len(cmd):].strip(), "telegram", kind=kind)
+            body = text.strip()[len(cmd):].strip()
+            parent, body = _qref(body)
+            tk = None
+            if kind in ("challenge", "check") and body:
+                w = body.split()[0].strip(",:;").lstrip("$")
+                if TICKER.match(w.upper()):
+                    tk, body = w.upper(), body[len(body.split()[0]):].strip()
+            ok, msg = add_question(cur, body, "telegram", ticker=tk, kind=kind, parent_id=parent)
             conn.commit()
             return msg
     if not low.startswith("/"):
@@ -174,7 +214,7 @@ def telegram_intake(conn, log=print):
         chat = str((m.get("chat") or {}).get("id"))
         if chat != str(allowed):
             continue
-        reply = handle_message(conn, chat, m.get("text") or "")
+        reply = handle_message(conn, chat, m.get("text") or "", (m.get("reply_to_message") or {}).get("message_id"))
         if reply:
             _reply(chat, reply)
             n += 1

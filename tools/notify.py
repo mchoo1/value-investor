@@ -215,6 +215,42 @@ def research(conn):
             + (f" · quality {avg:.1f}/5" if avg is not None else "") + (f" · value gap {gap:+.0%}" if gap is not None else ""),
             (f"Top fix: {esc(hi[0]['suggestion'][:200])}" if hi else esc((res.get('summary') or '')[:200])),
             f'<a href="{url}#second">Open the review</a>'] if x))
+    sent_answers = []
+    for q in answers:                      # each answer is its own message, so Ming can reply to it to follow up
+        where = f"{APP_URL}/name/{q['ticker']}#qa" if q["ticker"] else f"{APP_URL}/decide"
+        label = {"question": "Your question", "feedback": "Your feedback", "challenge": "Thesis challenge",
+                 "check": "Source check"}.get(q["kind"], "Your question")
+        det = q.get("details") or {}
+        extra = ""
+        if det.get("claims"):
+            cnt = {}
+            for c in det["claims"]:
+                cnt[str(c.get("verdict") or "?").lower()] = cnt.get(str(c.get("verdict") or "?").lower(), 0) + 1
+            extra = "Claims: " + ", ".join(f"{v} {k}" for k, v in cnt.items())
+        if det.get("scores"):
+            sc_ = det["scores"]
+            extra = "Quality " + f"{sum(float(v) for v in sc_.values()) / len(sc_):.1f}/5 · " + ", ".join(f"{k.replace('_', ' ')} {v}" for k, v in sc_.items())
+        ans = q["answer"] or ""
+        prop = (q["proposal"] or {}).get("change") if isinstance(q["proposal"], dict) else None
+        msg = "\n".join(x for x in [
+            f"💬 <b>{label}</b> #{q['id']}" + (f" · {esc(q['ticker'])}" if q["ticker"] else "") + (" (follow-up)" if q.get("parent_id") else ""),
+            f"<i>{esc(q['text'][:200])}</i>", esc(ans[:1500]) + ("…" if len(ans) > 1500 else ""), esc(extra),
+            (f"Proposed thesis change: {esc(prop[:240])}" if prop else ""),
+            f'<a href="{where}">Open in the app</a> · reply to this message to follow up'] if x)
+        sent_answers.append((q["id"], msg))
+    if sent_answers and os.environ.get("TELEGRAM_BOT_TOKEN") and not os.environ.get("TELEGRAM_DRY"):
+        from common import _tg, chat_id
+        cid = chat_id()
+        for qid, msg in sent_answers:
+            r = _tg("sendMessage", chat_id=cid, text=msg, parse_mode="HTML", disable_web_page_preview=True) or {}
+            mid = (r.get("result") or {}).get("message_id")
+            if mid:
+                cur.execute("UPDATE v2_questions SET tg_message_id = %s WHERE id = %s", (mid, qid))
+        conn.commit()
+    else:
+        for _, msg in sent_answers:
+            print("---- TELEGRAM (not sent) ----\n" + msg)
+    answers = []
     for q in answers:
         where = f"{APP_URL}/name/{q['ticker']}#qa" if q["ticker"] else f"{APP_URL}/decide"
         ans = q["answer"] or ""
@@ -223,7 +259,12 @@ def research(conn):
             f"💬 <b>{'Your question' if q['kind'] == 'question' else 'Your feedback'}</b> #{q['id']}" + (f" · {esc(q['ticker'])}" if q["ticker"] else ""),
             f"<i>{esc(q['text'][:200])}</i>", esc(ans[:900]) + ("…" if len(ans) > 900 else ""),
             (f"Proposed thesis change: {esc(prop[:200])}" if prop else ""), f'<a href="{where}">Open in the app</a>'] if x))
-    text = f"🔬 <b>New research and answers ({len(blocks)})</b>\n\n" + "\n\n".join(blocks)
+    if not blocks:
+        cur.execute("""INSERT INTO v2_settings (key, value) VALUES ('research_notified', %s)
+                       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()""", (J({"at": now}),))
+        conn.commit()
+        return
+    text = f"🔬 <b>New research ({len(blocks)})</b>\n\n" + "\n\n".join(blocks)
     if telegram(text):
         cur.execute("""UPDATE v2_alerts SET sent = TRUE, sent_via = 'research', sent_at = now()
                        WHERE NOT sent AND kind = ANY(%s) AND fired_at > %s""", (RESEARCH_KINDS, since))

@@ -766,6 +766,8 @@ INBOX_FORMAT = {
                        "summary": "two lines"},
     "scenarios": {"type": "scenarios", "items": [{"ticker": "NOW", "scenarios": [SIM_SCENARIO_EXAMPLE]}]},
     "answers": {"type": "answers", "run_id": "qa-<YYYYMMDDHH>", "items": [{"id": 12, "answer": "plain-English answer with numbers",
+                "claims": "check only: [{claim, verdict supported|partly|contradicted|unverifiable, evidence (fact + source), grade A-E}]",
+                "review": "challenge only: {verdict, assumptions, scores, improvements, attacks, summary} exactly like second_opinion",
                 "sources": [{"title": "10-Q Q3 FY26", "url": "https://...", "date": "2026-10-29"}],
                 "proposal": {"ticker": "NOW", "change": "what should change in the thesis and why", "priority": "high|medium|low"}}],
                 "scenarios": [{"ticker": "NOW", "scenarios": [SIM_SCENARIO_EXAMPLE]}]},
@@ -954,10 +956,19 @@ def export(conn):
                      AND created_at > now() - interval '30 days' ORDER BY ticker, created_at DESC""")
     open_attacks = [dict(r) for r in cur.fetchall()]
     # Watchlist and Book theses still without an assumptions file: the engine cannot compute their values yet
-    cur.execute("""SELECT q.id, q.ticker, q.kind, q.text, q.via, q.asked_at, n.level FROM v2_questions q
+    cur.execute("""SELECT q.id, q.ticker, q.kind, q.text, q.url, q.parent_id, q.via, q.asked_at, n.level FROM v2_questions q
                    LEFT JOIN v2_names n USING (ticker) WHERE q.status = 'open' ORDER BY q.asked_at LIMIT 10""")
     open_q = [dict(r) for r in cur.fetchall()]
     for q in open_q:
+        thread, pid, hops = [], q.get("parent_id"), 0          # the earlier questions and answers in this thread
+        while pid and hops < 10:
+            cur.execute("SELECT id, kind, text, answer, parent_id, url FROM v2_questions WHERE id = %s", (pid,))
+            p_ = cur.fetchone()
+            if not p_:
+                break
+            thread.insert(0, {"id": p_["id"], "kind": p_["kind"], "you": p_["text"], "url": p_["url"], "claude": p_["answer"]})
+            pid, hops = p_["parent_id"], hops + 1
+        q["thread"] = thread
         th = theses.get(q["ticker"]) if q["ticker"] else None
         if q["ticker"] and not th:
             cur.execute("SELECT * FROM v2_theses WHERE ticker = %s ORDER BY version DESC LIMIT 1", (q["ticker"],))

@@ -1450,16 +1450,31 @@ run();return{run:run,reset:reset}})();
 </script>{% endif %}
 </div>
 
-<div class="card" style="margin-top:12px" id="qa"><h3>Questions and feedback <span class="muted" style="font-weight:400;font-size:13px">Claude researches and replies within about 2 hours (08:00–22:00), also on Telegram</span></h3>
+<div class="card" style="margin-top:12px" id="qa"><h3>Challenge this thesis <span class="muted" style="font-weight:400;font-size:13px">Claude researches and replies within about 2 hours (09:00–21:00), also on Telegram</span></h3>
 <form method="post" action="{{ url_for('ask') }}" class="row"><input type="hidden" name="ticker" value="{{ n.ticker }}">
-<select name="kind"><option value="question">Question</option><option value="feedback">Feedback</option></select>
-<input name="text" required placeholder="e.g. What happens to revenue if AI agents replace seats? Is the 2027 margin target realistic?" style="flex:1;min-width:260px">
+<select name="kind" onchange="this.form.url.style.display=this.value=='check'?'':'none'">
+<option value="question">Question</option><option value="challenge">Challenge the thesis</option><option value="check">Check a source</option><option value="feedback">Feedback</option></select>
+<input name="url" placeholder="Link to the report or article" style="display:none;width:240px">
+<input name="text" placeholder="e.g. What growth does today's price need? Or: focus on the margin pillar" style="flex:1;min-width:240px">
 <button class="primary">Send to Claude</button></form>
-{% for x in qa %}<div class="sec"><b>{{ 'You asked' if x.kind == 'question' else 'Your feedback' }}</b> <span class="muted">· {{ x.asked_at|d }} · via {{ x.via }}</span><div class="body">{{ x.text }}</div>
+<p class="muted" style="font-size:12px;margin:6px 0 0"><b>Challenge</b>: Claude tries hard to break the thesis (quality scores, strongest counter-arguments, fixes). <b>Check a source</b>: paste a bear report, analyst note or article; each claim is tested against filings and graded. Reply under any answer to follow up in the same thread.</p>
+{% for root, kids in qa_tree %}<div class="sec">
+{% for x in [root] + kids %}<div {% if not loop.first %}style="margin-left:18px;border-left:2px solid var(--line);padding-left:10px"{% endif %}>
+<b>{{ {'question':'You asked','feedback':'Your feedback','challenge':'You challenged the thesis','check':'You asked to check a source'}.get(x.kind, 'You asked') }}{% if not loop.first %} (follow-up){% endif %}</b>
+<span class="muted">· #{{ x.id }} · {{ x.asked_at|d }} · via {{ x.via }}</span>
+<div class="body">{{ x.text }}{% if x.url %} <a href="{{ x.url }}" target="_blank" rel="noopener">source</a>{% endif %}</div>
 {% if x.status == 'answered' %}<div class="cmt" style="color:var(--ink)"><b>Claude</b> <span class="muted">· {{ x.answered_at|d }}</span><div class="body">{{ x.answer }}</div>
+{% set dt_ = x.details or {} %}
+{% if dt_.claims %}<table style="margin-top:6px"><thead><tr><th>Claim in the source</th><th>Verdict</th><th>Evidence</th></tr></thead><tbody>
+{% for c in dt_.claims %}<tr><td>{{ c.claim }}</td><td><span class="chip {{ {'supported':'good','contradicted':'bad','partly':'warn'}.get((c.verdict or '')|lower, '') }}">{{ c.verdict }}</span>{% if c.grade %} <span class="chip">{{ c.grade }}</span>{% endif %}</td><td class="muted">{{ c.evidence }}</td></tr>{% endfor %}</tbody></table>{% endif %}
+{% if dt_.scores %}<p style="margin:6px 0">{% for k, v in dt_.scores.items() %}<span class="chip {{ 'good' if v|int >= 4 else ('bad' if v|int <= 2 else 'warn') }}">{{ k|replace('_',' ') }} {{ v }}/5</span>{% endfor %} <a href="#second">full review</a></p>{% endif %}
 {% for src in x.sources or [] %}<div class="muted" style="font-size:12px">· {% if src.url %}<a href="{{ src.url }}" target="_blank" rel="noopener">{{ src.title or src.url }}</a>{% else %}{{ src.title }}{% endif %}{% if src.date %} ({{ src.date }}){% endif %}</div>{% endfor %}
 {% if x.proposal %}<div class="flash" style="margin-top:6px">Proposed thesis change ({{ x.proposal.priority or 'medium' }}): {{ x.proposal.change }}</div>{% endif %}</div>
-{% else %}<div class="muted"><span class="chip warn">waiting for Claude</span></div>{% endif %}</div>{% else %}<p class="empty">No questions yet.</p>{% endfor %}
+{% else %}<div class="muted"><span class="chip warn">waiting for Claude</span></div>{% endif %}</div>{% endfor %}
+{% set last = (kids[-1] if kids else root) %}{% if last.status == 'answered' %}<details style="margin-left:18px"><summary>Follow up</summary>
+<form method="post" action="{{ url_for('ask') }}" class="row"><input type="hidden" name="ticker" value="{{ n.ticker }}"><input type="hidden" name="parent_id" value="{{ last.id }}">
+<input name="text" required placeholder="But what about…" style="flex:1;min-width:240px"><button>Send</button></form></details>{% endif %}
+</div>{% else %}<p class="empty">No questions or challenges yet.</p>{% endfor %}
 </div>
 {% if val.evidence or val.moat_source or sections.change_my_mind %}<div class="grid g2" style="margin-top:12px" id="evidence">
 <div class="card"><h3>Evidence behind the thesis</h3>
@@ -1645,9 +1660,21 @@ def name(ticker):
     import valuation as _V
     sa, _sr, sbasis, sscen = sim_basis(ticker)
     sdr = round((_V.discount_rate_of(sa) if sa else 0.10) * 100, 2)
-    qa_rows = qsafe("SELECT * FROM v2_questions WHERE ticker = %s ORDER BY asked_at DESC LIMIT 10", (ticker,))
+    qa_rows = qsafe("SELECT * FROM v2_questions WHERE ticker = %s ORDER BY id DESC LIMIT 60", (ticker,))
+    by_id = {x["id"]: x for x in qa_rows}
+
+    def _root(x):
+        seen = 0
+        while x.get("parent_id") and x["parent_id"] in by_id and seen < 20:
+            x, seen = by_id[x["parent_id"]], seen + 1
+        return x["id"]
+    kids_of = {}
+    for x in sorted(qa_rows, key=lambda x: x["id"]):
+        if x.get("parent_id"):
+            kids_of.setdefault(_root(x), []).append(x)
+    qa_tree = [(x, kids_of.get(x["id"], [])) for x in qa_rows if not x.get("parent_id") or x["parent_id"] not in by_id][:10]
     extra = Markup(render_template_string(
-        NAME_EXTRA_TPL, sim_ok=bool(sa), sim_basis=sbasis, sim_scen=sscen, sim_dr=sdr, qa=qa_rows,
+        NAME_EXTRA_TPL, sim_ok=bool(sa), sim_basis=sbasis, sim_scen=sscen, sim_dr=sdr, qa_tree=qa_tree,
         tam_rows=tam_calc(val.get("tam"), price), r=r, me=me, ps=ps, stale=stale, val=val, price=price, n=n, so=so, rebuttals=rebuttals,
         sections=(thesis or {}).get("sections") or {}, GRADES=GRADES, big=big, fx=fx,
         holders=((r or {}).get("ownership") or {}).get("top_holders") or [],
@@ -1794,8 +1821,10 @@ def ask():
     from ideas import add_question
     with db() as conn, conn.cursor() as c:
         _es(c)
+        pid = request.form.get("parent_id")
         ok, msg = add_question(c, request.form.get("text"), "app", ticker=request.form.get("ticker") or None,
-                               kind=request.form.get("kind") if request.form.get("kind") in ("question", "feedback") else "question")
+                               kind=request.form.get("kind") if request.form.get("kind") in ("question", "feedback", "challenge", "check") else "question",
+                               parent_id=int(pid) if pid and pid.isdigit() else None, url=request.form.get("url") or None)
     flash(msg)
     t = request.form.get("ticker")
     return redirect(url_for("name", ticker=t) + "#qa") if t else back(url_for("decide"))
@@ -1816,7 +1845,7 @@ def telegram_webhook():
             with conn.cursor() as c:
                 _es(c)
             conn.commit()
-            reply = handle_message(conn, chat, m.get("text") or "")
+            reply = handle_message(conn, chat, m.get("text") or "", (m.get("reply_to_message") or {}).get("message_id"))
         if reply:
             _tg("sendMessage", chat_id=chat, text=reply, disable_web_page_preview=True)
     return {"ok": True}
@@ -2010,7 +2039,7 @@ Last loaded from Claude: {{ st.inbox|d if st.inbox else 'never' }} · daily chec
 <form class="inline" method="post" action="{{ url_for('brief_send') }}"><button>Send summary to Telegram</button></form>
 <form class="inline" method="post" action="{{ url_for('telegram_setup') }}"><button title="Make /add and /ideas answer instantly">Connect Telegram commands</button></form></span></div>
 <form method="post" action="{{ url_for('ask') }}" class="row" style="margin:10px 0">
-<select name="kind"><option value="question">Question</option><option value="feedback">Feedback</option></select>
+<select name="kind"><option value="question">Question</option><option value="challenge">Challenge a thesis</option><option value="check">Check a source (paste the link)</option><option value="feedback">Feedback</option></select>
 <input name="ticker" placeholder="Ticker (optional)" style="width:130px;text-transform:uppercase">
 <input name="text" required placeholder="Ask Claude anything about your stocks, the market or the app; or give feedback" style="flex:1;min-width:260px">
 <button class="primary">Send to Claude</button></form>

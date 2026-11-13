@@ -462,10 +462,19 @@ def load(cur, name, d):
                 qid = int(it.get("id"))
             except (TypeError, ValueError):
                 continue
-            cur.execute("""UPDATE v2_questions SET status = 'answered', answer = %s, sources = %s, proposal = %s, answered_at = now()
-                           WHERE id = %s RETURNING ticker""",
-                        ((it.get("answer") or "")[:6000], J(it.get("sources") or []), J(it.get("proposal")) if it.get("proposal") else None, qid))
+            det = {k: it[k] for k in ("claims", "scores", "verdict") if it.get(k)}
+            if isinstance(it.get("review"), dict):
+                det["scores"] = it["review"].get("scores") or det.get("scores")
+            cur.execute("""UPDATE v2_questions SET status = 'answered', answer = %s, sources = %s, proposal = %s, details = %s,
+                           answered_at = now() WHERE id = %s RETURNING ticker, kind""",
+                        ((it.get("answer") or "")[:8000], J(it.get("sources") or []), J(it.get("proposal")) if it.get("proposal") else None,
+                         J(det) if det else None, qid))
             row = cur.fetchone()
+            if row and row["ticker"] and isinstance(it.get("review"), dict):   # an on-demand challenge feeds the review card
+                try:
+                    load_second_opinion(cur, {**it["review"], "ticker": row["ticker"], "model": "claude-challenge"})
+                except Later:
+                    pass
             if row:
                 n += 1
                 if row["ticker"]:
