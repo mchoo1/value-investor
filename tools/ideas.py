@@ -91,6 +91,27 @@ def _reply(chat, text):
     _tg("sendMessage", chat_id=chat, text=text, disable_web_page_preview=True)
 
 
+def add_question(cur, text, via, ticker=None, kind="question"):
+    """A question or feedback for Claude. Answered by the 2-hourly Q&A task (08:00-22:00 SGT); the answer is pushed
+    to Telegram and kept on the stock page (or the Decide page for general questions)."""
+    text = (text or "").strip()
+    if not text:
+        return False, "Write the question after the command, e.g. /ask NOW what happens if AI agents replace seats?"
+    t = (ticker or "").upper().lstrip("$") or None
+    if t is None:                                   # first word a known ticker? then it is about that stock
+        first = text.split()[0].strip(",:;?").lstrip("$")
+        if TICKER.match(first.upper()) and (first.isupper() or first.startswith("$")):
+            cur.execute("SELECT 1 FROM v2_names WHERE ticker = %s", (first.upper(),))
+            if cur.fetchone():
+                t = first.upper()
+    cur.execute("INSERT INTO v2_questions (ticker, kind, text, via) VALUES (%s,%s,%s,%s) RETURNING id",
+                (t, kind, text[:2000], via))
+    qid = cur.fetchone()["id"]
+    return True, (f"Got it (#{qid}{', ' + t if t else ''}). Claude researches it and replies here, usually within 2 hours "
+                  f"between 08:00 and 22:00." if kind == "question" else
+                  f"Feedback noted (#{qid}{', ' + t if t else ''}). Claude reviews it within 2 hours and tells you what it changes.")
+
+
 def handle_message(conn, chat, text):
     """Act on one Telegram message from Ming's chat. Returns the reply text (or None to stay silent)."""
     cur = conn.cursor()
@@ -117,8 +138,19 @@ def handle_message(conn, chat, text):
                 + ("\nResearched in the last 2 weeks: " + ", ".join(f"{r['ticker']} {r['verdict'] or ''}".strip() for r in done)
                    if done else ""))
     if low.startswith(("/help", "/start")):
-        return ("Add stock ideas: /add TICKER [TICKER ...] note (e.g. /add CRWV ASTS podcast on AI cloud). "
-                "Each goes on your Watchlist and gets a full deep dive tonight. /ideas lists ideas waiting and done.")
+        return ("Commands:\n/add TICKER [TICKER ...] note: research new ideas (full deep dive tonight)\n"
+                "/ideas: ideas waiting and done\n/ask [TICKER] question: Claude researches and replies within ~2 hours\n"
+                "/feedback [TICKER] text: tell Claude what you think of a thesis or the app\n"
+                "Any other message is treated as a question.")
+    for cmd, kind in (("/ask", "question"), ("/feedback", "feedback")):
+        if low.startswith(cmd):
+            ok, msg = add_question(cur, text.strip()[len(cmd):].strip(), "telegram", kind=kind)
+            conn.commit()
+            return msg
+    if not low.startswith("/"):
+        ok, msg = add_question(cur, text, "telegram")
+        conn.commit()
+        return msg
     return None
 
 
@@ -163,8 +195,10 @@ if __name__ == "__main__":
         cur.execute("""SELECT COUNT(*) AS c FROM v2_ideas i JOIN v2_names n USING (ticker)
                        WHERE i.status = 'pending' AND n.research_requested""")
         need = cur.fetchone()["c"]
+        cur.execute("SELECT COUNT(*) AS c FROM v2_questions WHERE status = 'open'")
+        openq = cur.fetchone()["c"]
         out = os.environ.get("GITHUB_OUTPUT")
         if out:
             with open(out, "a") as f:
-                f.write(f"new_ideas={'true' if need else 'false'}\n")
+                f.write(f"new_ideas={'true' if need else 'false'}\nopen_questions={'true' if openq else 'false'}\n")
     conn.close()

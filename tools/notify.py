@@ -171,7 +171,9 @@ def research(conn):
     theses = cur.fetchall()
     cur.execute("""SELECT * FROM v2_second_opinion WHERE kind = 'review' AND created_at > %s ORDER BY created_at""", (since,))
     reviews = cur.fetchall()
-    if not theses and not reviews:
+    cur.execute("SELECT * FROM v2_questions WHERE status = 'answered' AND answered_at > %s ORDER BY answered_at", (since,))
+    answers = cur.fetchall()
+    if not theses and not reviews and not answers:
         return
     f = lambda v: float(v) if v is not None else None
     blocks = []
@@ -213,7 +215,15 @@ def research(conn):
             + (f" · quality {avg:.1f}/5" if avg is not None else "") + (f" · value gap {gap:+.0%}" if gap is not None else ""),
             (f"Top fix: {esc(hi[0]['suggestion'][:200])}" if hi else esc((res.get('summary') or '')[:200])),
             f'<a href="{url}#second">Open the review</a>'] if x))
-    text = f"🔬 <b>New research ({len(blocks)})</b>\n\n" + "\n\n".join(blocks)
+    for q in answers:
+        where = f"{APP_URL}/name/{q['ticker']}#qa" if q["ticker"] else f"{APP_URL}/decide"
+        ans = q["answer"] or ""
+        prop = (q["proposal"] or {}).get("change") if isinstance(q["proposal"], dict) else None
+        blocks.append("\n".join(x for x in [
+            f"💬 <b>{'Your question' if q['kind'] == 'question' else 'Your feedback'}</b> #{q['id']}" + (f" · {esc(q['ticker'])}" if q["ticker"] else ""),
+            f"<i>{esc(q['text'][:200])}</i>", esc(ans[:900]) + ("…" if len(ans) > 900 else ""),
+            (f"Proposed thesis change: {esc(prop[:200])}" if prop else ""), f'<a href="{where}">Open in the app</a>'] if x))
+    text = f"🔬 <b>New research and answers ({len(blocks)})</b>\n\n" + "\n\n".join(blocks)
     if telegram(text):
         cur.execute("""UPDATE v2_alerts SET sent = TRUE, sent_via = 'research', sent_at = now()
                        WHERE NOT sent AND kind = ANY(%s) AND fired_at > %s""", (RESEARCH_KINDS, since))

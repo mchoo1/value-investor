@@ -323,6 +323,7 @@ form.inline{display:inline}.row{display:flex;gap:8px;align-items:center;flex-wra
 .sec .body{white-space:pre-wrap}.empty{color:var(--mute);font-style:italic}
 details summary{cursor:pointer;color:var(--mute)}.cmt{border-left:2px solid var(--line);padding:2px 10px;margin:6px 0;color:var(--mute)}
 .kv{display:grid;grid-template-columns:auto 1fr;gap:4px 14px}.kv .k{color:var(--mute)}
+.kv.sim input[type=range]{width:180px;vertical-align:middle}
 .search{width:220px}
 </style></head><body>
 <header><div class="bar"><span class="brand">ValueInvestor</span>
@@ -1376,6 +1377,90 @@ NAME_EXTRA_TPL = r"""
 {% for x in val.engine_notes or [] %}<p class="warn" style="margin:6px 0 0">{{ x }}</p>{% endfor %}
 </div>
 
+
+<div class="card" style="margin-top:12px" id="simulator"><h3>Simulator: what would it be worth if… <span class="muted" style="font-weight:400;font-size:13px">same engine as the thesis</span></h3>
+{% if not sim_ok %}<p class="empty" style="margin-top:0">Not enough data yet: the simulator needs thesis assumptions or 3 years of history from the weekly research run.</p>
+{% else %}<p class="muted" style="margin-top:0" id="sim-basis">Starting point: {{ sim_basis }}.</p>
+<div class="grid g2">
+<div>
+<div class="kv sim">
+<span class="k">Revenue growth, years 1–5</span><span><input type="range" min="-15" max="15" step="0.5" value="0" data-k="g"> <b data-o="g">+0.0 pts</b></span>
+<span class="k">Operating margin by year 10</span><span><input type="range" min="-15" max="15" step="0.5" value="0" data-k="m"> <b data-o="m">+0.0 pts</b></span>
+<span class="k">Share count a year</span><span><input type="range" min="-3" max="3" step="0.25" value="0" data-k="sh"> <b data-o="sh">+0.0 pts</b></span>
+<span class="k">Revenue shock</span><span><input type="range" min="-40" max="40" step="1" value="0" data-k="rs"> <b data-o="rs">0%</b>
+ from year <select data-k="ry">{% for y in range(1,6) %}<option>{{ y }}</option>{% endfor %}</select> over <select data-k="rp">{% for y in range(1,5) %}<option {{ 'selected' if y == 2 }}>{{ y }}</option>{% endfor %}</select> yrs</span>
+<span class="k">Discount rate</span><span><input type="range" min="7" max="14" step="0.25" value="{{ sim_dr }}" data-k="dr"> <b data-o="dr">{{ sim_dr }}%</b></span>
+</div>
+{% if sim_scen %}<h3 style="margin-top:12px">Claude's what-if scenarios <span class="muted" style="font-weight:400;font-size:13px">tick to stack them</span></h3>
+<table><thead><tr><th></th><th>Scenario</th><th class="r">Chance</th><th class="r">Value impact</th></tr></thead><tbody>
+{% for x in sim_scen %}<tr><td><input type="checkbox" data-s="{{ x.id }}"></td><td><b>{{ x.name }}</b> <span class="chip">{{ x.kind }}</span>{% if x.grade %} <span class="chip">{{ x.grade }}</span>{% endif %}<br><span class="muted">{{ x.description }}</span>{% if x.watch %}<br><span class="muted">Watch: {{ x.watch }}</span>{% endif %}</td>
+<td class="r">{{ x.probability|pct }}</td><td class="r" data-each="{{ x.id }}">…</td></tr>{% endfor %}</tbody></table>
+<p class="muted" style="font-size:12px" id="sim-ev"></p>
+{% else %}<p class="muted">Claude's ready-made scenarios (pricing changes, key risks, TAM upside) are written for this name within a day or two.</p>{% endif %}
+</div>
+<div>
+<div class="grid g2">
+<div class="card tile"><div class="k">Value today</div><div class="v" data-o="val">…</div><div class="k" data-o="vsb"></div></div>
+<div class="card tile"><div class="k">vs price {{ price|money }}</div><div class="v" data-o="vsp">…</div><div class="k">upside or downside</div></div>
+<div class="card tile"><div class="k">Value in 5 years</div><div class="v" data-o="v5">…</div><div class="k" data-o="ret"></div></div>
+<div class="card tile"><div class="k">Growth path</div><div class="v" style="font-size:16px" data-o="gp">…</div><div class="k" data-o="mp"></div></div>
+</div>
+<h3 style="margin-top:12px">Reverse: what does a price require?</h3>
+<p class="row">Price <input type="number" step="0.01" value="{{ '%.2f'|format(price) if price else '' }}" data-k="tgt" style="width:110px"> <button type="button" onclick="SIM.run()">Solve</button></p>
+<p data-o="rev" class="muted">…</p>
+<button type="button" onclick="SIM.reset()">Reset to the thesis</button>
+</div></div>
+{% if tam_rows %}<h3 style="margin-top:14px">TAM path (5-year case)</h3>
+<div class="kv sim">
+<span class="k">Market size</span><span><input type="range" min="50" max="150" step="5" value="100" data-t="tam"> <b data-to="tam">100%</b> of the thesis</span>
+<span class="k">Market share</span><span><input type="range" min="50" max="150" step="5" value="100" data-t="share"> <b data-to="share">100%</b> of the thesis</span>
+<span class="k">Net margin</span><span><input type="range" min="50" max="150" step="5" value="100" data-t="nm"> <b data-to="nm">100%</b> of the thesis</span>
+<span class="k">Exit P/E</span><span><input type="range" min="50" max="150" step="5" value="100" data-t="pe"> <b data-to="pe">100%</b> of the thesis</span>
+</div><p data-to="out"></p>{% endif %}
+<script>
+var SIM=(function(){var box=document.getElementById('simulator');if(!box)return{};
+var q=function(s){return box.querySelector(s)},qa=function(s){return box.querySelectorAll(s)};
+var m=function(v){return v==null?'—':'$'+Number(v).toLocaleString(undefined,{maximumFractionDigits:2})};
+var p=function(v,s){if(v==null)return'—';var t=(v*100).toFixed(1)+'%';return s&&v>0?'+'+t:t};
+var T=null;function val(k){var e=q('[data-k="'+k+'"]');return e?parseFloat(e.value):0}
+function body(){var g=val('g')/100,mm=val('m')/100,sh=val('sh')/100,rs=val('rs')/100,ch={growth_delta:g,margin_delta:mm,share_change_delta:sh};
+if(rs)ch.revenue_shocks=[{year:val('ry'),pct:rs,phase_years:val('rp')}];
+var sc=[];qa('[data-s]').forEach(function(c){if(c.checked)sc.push(c.dataset.s)});
+return{changes:ch,scenarios:sc,discount_rate:val('dr')/100,target:val('tgt')||null}}
+function labels(){q('[data-o="g"]').textContent=(val('g')>=0?'+':'')+val('g').toFixed(1)+' pts';q('[data-o="m"]').textContent=(val('m')>=0?'+':'')+val('m').toFixed(1)+' pts';
+q('[data-o="sh"]').textContent=(val('sh')>=0?'+':'')+val('sh').toFixed(2)+' pts';q('[data-o="rs"]').textContent=(val('rs')>0?'+':'')+val('rs')+'%';q('[data-o="dr"]').textContent=val('dr').toFixed(2)+'%'}
+function run(){labels();fetch('{{ url_for("sim", ticker=n.ticker) }}',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body())})
+.then(function(r){return r.json()}).then(function(d){if(d.error){q('[data-o="val"]').textContent='—';q('[data-o="rev"]').textContent=d.error;return}
+var c=d.current;q('[data-o="val"]').textContent=m(c.value);q('[data-o="vsb"]').textContent=p(c.change_vs_base,1)+' vs the starting point';
+var vp=q('[data-o="vsp"]');vp.textContent=p(c.vs_price,1);vp.className='v '+(c.vs_price>0?'good':'bad');
+q('[data-o="v5"]').textContent=m(c.value_y5);q('[data-o="ret"]').textContent=p(c.return_5y)+' a year from today’s price';
+q('[data-o="gp"]').textContent=p(c.growth_path[0])+' → '+p(c.growth_path[9]);q('[data-o="mp"]').textContent='margin '+p(c.margin_path[0])+' → '+p(c.margin_path[9]);
+var ev=0;(d.each||[]).forEach(function(e){var cell=q('[data-each="'+e.id+'"]');if(cell){cell.textContent=p(e.change,1)+' ('+m(e.value)+')';cell.className='r '+(e.change<0?'bad':'good')}ev+=e.weighted});
+var evb=q('#sim-ev');if(evb&&d.each&&d.each.length)evb.textContent='Probability-weighted impact of all scenarios: '+p(ev,1)+' on the starting value.';
+var r=d.reverse;q('[data-o="rev"]').textContent=r?('To be worth '+m(r.target)+': revenue growth of '+p(r.growth_needed)+' a year for 5 years at the current margins (now '+p(r.thesis_growth)+'), or a year-10 operating margin of '+p(r.margin_needed)+' at the current growth (now '+p(r.thesis_margin_end)+').'):'—'})}
+function later(){clearTimeout(T);T=setTimeout(run,250)}
+qa('input,select').forEach(function(e){if(e.dataset.k||e.dataset.s)e.addEventListener(e.type=='checkbox'||e.tagName=='SELECT'?'change':'input',later)});
+function reset(){qa('[data-k]').forEach(function(e){if(e.dataset.k=='dr')e.value={{ sim_dr }};else if(e.dataset.k=='ry')e.value=1;else if(e.dataset.k=='rp')e.value=2;else if(e.dataset.k!='tgt')e.value=0});qa('[data-s]').forEach(function(c){c.checked=false});run()}
+{% if tam_rows %}{% for t in tam_rows if t.years == 5 %}var TB={rev:{{ t.rev_bn }},ni:{{ t.ni_bn }},pe:{{ t.exit_pe }},sh:{{ t.shares_m }},dr:{{ t.dr }},yrs:{{ t.years }}};{% endfor %}
+function tam(){if(typeof TB=='undefined')return;var f=function(k){var e=box.querySelector('[data-t="'+k+'"]');box.querySelector('[data-to="'+k+'"]').textContent=e.value+'%';return e.value/100};
+var ni=TB.ni*f('tam')*f('share')*f('nm'),pe=TB.pe*f('pe'),fut=ni*pe*1000/TB.sh,today=fut/Math.pow(1+TB.dr/100,TB.yrs),pr={{ price or 0 }};
+var irr=pr?Math.pow(fut/pr,1/TB.yrs)-1:null;box.querySelector('[data-to="out"]').innerHTML='Net income in 5 years $'+ni.toFixed(1)+'B → value then <b>'+m(fut)+'</b>, today '+m(today)+(irr!=null?' · <b>'+p(irr)+'</b> a year from today’s price ('+(irr>=0.15?'inside':'outside')+' the 15% growth buy zone)':'')}
+box.querySelectorAll('[data-t]').forEach(function(e){e.addEventListener('input',tam)});tam();{% endif %}
+run();return{run:run,reset:reset}})();
+</script>{% endif %}
+</div>
+
+<div class="card" style="margin-top:12px" id="qa"><h3>Questions and feedback <span class="muted" style="font-weight:400;font-size:13px">Claude researches and replies within about 2 hours (08:00–22:00), also on Telegram</span></h3>
+<form method="post" action="{{ url_for('ask') }}" class="row"><input type="hidden" name="ticker" value="{{ n.ticker }}">
+<select name="kind"><option value="question">Question</option><option value="feedback">Feedback</option></select>
+<input name="text" required placeholder="e.g. What happens to revenue if AI agents replace seats? Is the 2027 margin target realistic?" style="flex:1;min-width:260px">
+<button class="primary">Send to Claude</button></form>
+{% for x in qa %}<div class="sec"><b>{{ 'You asked' if x.kind == 'question' else 'Your feedback' }}</b> <span class="muted">· {{ x.asked_at|d }} · via {{ x.via }}</span><div class="body">{{ x.text }}</div>
+{% if x.status == 'answered' %}<div class="cmt" style="color:var(--ink)"><b>Claude</b> <span class="muted">· {{ x.answered_at|d }}</span><div class="body">{{ x.answer }}</div>
+{% for src in x.sources or [] %}<div class="muted" style="font-size:12px">· {% if src.url %}<a href="{{ src.url }}" target="_blank" rel="noopener">{{ src.title or src.url }}</a>{% else %}{{ src.title }}{% endif %}{% if src.date %} ({{ src.date }}){% endif %}</div>{% endfor %}
+{% if x.proposal %}<div class="flash" style="margin-top:6px">Proposed thesis change ({{ x.proposal.priority or 'medium' }}): {{ x.proposal.change }}</div>{% endif %}</div>
+{% else %}<div class="muted"><span class="chip warn">waiting for Claude</span></div>{% endif %}</div>{% else %}<p class="empty">No questions yet.</p>{% endfor %}
+</div>
 {% if val.evidence or val.moat_source or sections.change_my_mind %}<div class="grid g2" style="margin-top:12px" id="evidence">
 <div class="card"><h3>Evidence behind the thesis</h3>
 {% if val.evidence %}{% set ev = val.evidence %}<p style="margin-top:0">{% for g, c in ev.counts.items() %}<span class="chip {{ 'good' if g in 'AB' else ('warn' if g in 'CD' else 'bad') }}" title="{{ GRADES[g] }}">{{ g }} · {{ c }}</span>{% endfor %}
@@ -1557,8 +1642,13 @@ def name(ticker):
     tg = [(num(a["mean"]), a["date"]) for a in q("SELECT date, mean FROM v2_analyst WHERE ticker = %s ORDER BY date", (ticker,)) if a["mean"]]
     si = [num(a["short_float"]) for a in qsafe("SELECT short_float FROM v2_short_interest WHERE ticker = %s ORDER BY date", (ticker,))
           if a["short_float"] is not None]
+    import valuation as _V
+    sa, _sr, sbasis, sscen = sim_basis(ticker)
+    sdr = round((_V.discount_rate_of(sa) if sa else 0.10) * 100, 2)
+    qa_rows = qsafe("SELECT * FROM v2_questions WHERE ticker = %s ORDER BY asked_at DESC LIMIT 10", (ticker,))
     extra = Markup(render_template_string(
-        NAME_EXTRA_TPL, r=r, me=me, ps=ps, stale=stale, val=val, price=price, n=n, so=so, rebuttals=rebuttals,
+        NAME_EXTRA_TPL, sim_ok=bool(sa), sim_basis=sbasis, sim_scen=sscen, sim_dr=sdr, qa=qa_rows,
+        tam_rows=tam_calc(val.get("tam"), price), r=r, me=me, ps=ps, stale=stale, val=val, price=price, n=n, so=so, rebuttals=rebuttals,
         sections=(thesis or {}).get("sections") or {}, GRADES=GRADES, big=big, fx=fx,
         holders=((r or {}).get("ownership") or {}).get("top_holders") or [],
         tgt_hist=Markup(sparkline([v for v, _ in tg], [("Price", price, "good")],
@@ -1638,6 +1728,77 @@ def deepdive(ticker):
     x("UPDATE v2_names SET status = 'deep_dive_requested', updated_at = now() WHERE ticker = %s", (ticker.upper(),))
     flash(f"Deep dive requested for {ticker.upper()}. The next deep-dive task picks it up.")
     return back(url_for("screen"))
+
+
+
+def _merge_changes(parts):
+    """Stack several change sets (user sliders + toggled scenarios) into one."""
+    out = {"growth_delta": [0.0] * 5, "margin_delta": 0.0, "margin_start_delta": 0.0, "share_change_delta": 0.0, "revenue_shocks": []}
+    for ch in parts:
+        if not ch:
+            continue
+        gd = ch.get("growth_delta") or 0
+        gd = gd if isinstance(gd, (list, tuple)) else [gd] * 5
+        for i in range(5):
+            out["growth_delta"][i] += float(gd[i] if i < len(gd) else (gd[-1] if gd else 0))
+        for k in ("margin_delta", "margin_start_delta", "share_change_delta"):
+            out[k] += float(ch.get(k) or 0)
+        out["revenue_shocks"] += list(ch.get("revenue_shocks") or [])
+        for k in ("terminal_growth", "exit_multiple", "reinvest_pct"):
+            if ch.get(k) is not None:
+                out[k] = ch[k]
+    return out
+
+
+def sim_basis(ticker):
+    """The assumptions the simulator starts from: Claude's engine assumptions, else the company's own history."""
+    import valuation as V
+    th = q1("SELECT valuation FROM v2_theses WHERE ticker = %s ORDER BY version DESC LIMIT 1", (ticker,)) or {}
+    v = th.get("valuation") or {}
+    a = (v.get("engine") or {}).get("assumptions")
+    r = latest_research(ticker) or {}
+    if a:
+        return a, r, "Claude's base case (thesis assumptions)", v.get("sim_scenarios") or []
+    d = V.default_assumptions(r)
+    return d, r, "the company's own last 3 years (no thesis assumptions yet)", v.get("sim_scenarios") or []
+
+
+@app.post("/sim/<ticker>")
+def sim(ticker):
+    import valuation as V
+    ticker = ticker.upper()
+    a, r, basis, scen = sim_basis(ticker)
+    if not a:
+        return {"error": "Not enough data to simulate yet (needs 3 years of history or thesis assumptions)."}, 400
+    body = request.get_json(silent=True) or {}
+    price = latest_prices([ticker]).get(ticker)
+    chosen = [x for x in scen if x.get("id") in (body.get("scenarios") or [])]
+    ch = _merge_changes([body.get("changes")] + [x["changes"] for x in chosen])
+    dr = body.get("discount_rate")
+    try:
+        cur = V.simulate(a, r, price, ch, discount_rate=dr)
+        each = []
+        for x in scen:
+            e = V.simulate(a, r, price, _merge_changes([x["changes"]]), discount_rate=dr)
+            each.append({"id": x.get("id"), "value": e["value"], "change": e["change_vs_base"],
+                         "weighted": (e["change_vs_base"] or 0) * float(x.get("probability") or 0)})
+        rev = V.reverse(a, r, price, target=body.get("target"), changes=ch)
+    except (ValueError, KeyError, TypeError, ZeroDivisionError) as e:
+        return {"error": f"{e.__class__.__name__}: {str(e)[:120]}"}, 400
+    return {"basis": basis, "current": cur, "each": each, "reverse": rev}
+
+
+@app.post("/ask")
+def ask():
+    from common import ensure_schema as _es
+    from ideas import add_question
+    with db() as conn, conn.cursor() as c:
+        _es(c)
+        ok, msg = add_question(c, request.form.get("text"), "app", ticker=request.form.get("ticker") or None,
+                               kind=request.form.get("kind") if request.form.get("kind") in ("question", "feedback") else "question")
+    flash(msg)
+    t = request.form.get("ticker")
+    return redirect(url_for("name", ticker=t) + "#qa") if t else back(url_for("decide"))
 
 
 @app.post("/telegram/webhook")
@@ -1848,6 +2009,12 @@ Last loaded from Claude: {{ st.inbox|d if st.inbox else 'never' }} · daily chec
 <span class="row"><form class="inline" method="post" action="{{ url_for('sync_now') }}"><button>Sync now</button></form>
 <form class="inline" method="post" action="{{ url_for('brief_send') }}"><button>Send summary to Telegram</button></form>
 <form class="inline" method="post" action="{{ url_for('telegram_setup') }}"><button title="Make /add and /ideas answer instantly">Connect Telegram commands</button></form></span></div>
+<form method="post" action="{{ url_for('ask') }}" class="row" style="margin:10px 0">
+<select name="kind"><option value="question">Question</option><option value="feedback">Feedback</option></select>
+<input name="ticker" placeholder="Ticker (optional)" style="width:130px;text-transform:uppercase">
+<input name="text" required placeholder="Ask Claude anything about your stocks, the market or the app; or give feedback" style="flex:1;min-width:260px">
+<button class="primary">Send to Claude</button></form>
+{% for x in qa_general %}<div class="cmt"><b>{{ x.ticker or 'General' }}</b> · {{ x.text[:140] }} {% if x.status == 'answered' %}<br><span style="color:var(--ink)">Claude: {{ x.answer[:400] }}{% if x.answer|length > 400 %}… {% if x.ticker %}<a href="{{ url_for('name', ticker=x.ticker) }}#qa">more</a>{% endif %}{% endif %}</span>{% else %}<span class="chip warn">waiting</span>{% endif %}</div>{% endfor %}
 <details class="card" style="margin-bottom:14px" open><summary><b>At a glance</b> <span class="muted">(same as the Telegram brief)</span></summary>
 <div style="margin-top:8px;line-height:1.6">{{ glance|safe }}</div></details>
 <p class="sub">Everything that needs a decision, most urgent first. Each item shows why, the numbers that matter, Claude's check and a suggested size. Done or Skip records it in the decision journal.</p>
@@ -1977,7 +2144,8 @@ def decide():
     except Exception as e:
         glance = f"<span class='muted'>Summary unavailable ({e.__class__.__name__}).</span>"
     return page("decide", "Decide", DECIDE_TPL, items=items, pf=pf, journal=journal, limits=LIMITS, sizing=SIZING,
-                glance=Markup(glance), st=sync_status())
+                glance=Markup(glance), st=sync_status(),
+                qa_general=qsafe("SELECT * FROM v2_questions ORDER BY asked_at DESC LIMIT 5"))
 
 
 def expected_of(ticker):

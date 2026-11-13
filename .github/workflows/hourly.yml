@@ -39,6 +39,9 @@ jobs:
       - name: Research new ideas and hand them to tonight's deep dive
         if: steps.ideas.outputs.new_ideas == 'true'
         run: python tools/research.py --requested && python tools/monitor.py export
+      - name: Hand open questions to Claude's Q&A task
+        if: steps.ideas.outputs.new_ideas != 'true' && steps.ideas.outputs.open_questions == 'true'
+        run: python tools/monitor.py export
       - name: Push new research to Telegram (with links to the reports)
         run: python tools/notify.py research
       - name: Send Telegram alerts

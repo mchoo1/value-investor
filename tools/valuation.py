@@ -88,12 +88,18 @@ def scenario(s, ctx, dr):
     g = _path(s.get("growth"), 0.05, end=tg)
     m = _path(s.get("margin"), 0.15)
     tax, rein = float(s.get("tax", 0.21)), float(s.get("reinvest_pct", 0.05))
+    shocks = s.get("revenue_shocks") or []
     rev, flows, ebits = float(ctx["revenue0"]), [], []
     for t in range(YEARS):
         rev *= 1 + g[t]
-        ebit = rev * m[t]
+        lvl = 1.0
+        for sh in shocks:                      # level shifts: pct of revenue lost or gained from `year`, phased in
+            y0, ph = int(sh.get("year", 1)), max(1, int(sh.get("phase_years", 1)))
+            if t + 1 >= y0:
+                lvl *= 1 + float(sh.get("pct", 0)) * min(1.0, (t + 2 - y0) / ph)
+        ebit = rev * lvl * m[t]
         ebits.append(ebit)
-        flows.append(ebit * (1 - tax) - rev * rein)
+        flows.append(ebit * (1 - tax) - rev * lvl * rein)
     if s.get("exit_multiple"):
         tv = ebits[-1] * float(s["exit_multiple"])
     else:
@@ -241,3 +247,101 @@ def evidence_summary(claims):
     return {"counts": counts, "total": sum(counts.values()), "pillar_claims": len(pillar),
             "pillar_weak_share": round(share, 3) if share is not None else None,
             "weak_flag": bool(share is not None and share > 0.40), "unsourced": len(unsourced)}
+
+
+# ------------------------------------------------------------------ simulator (stock page)
+def apply_changes(base, ch):
+    """Return a copy of a scenario with changes applied. Changes (all optional):
+    growth (list, years 1-5) | growth_delta (pts added to years 1-5) | margin_end | margin_delta (added to year-10 margin)
+    | margin_start_delta | reinvest_pct | share_change | share_change_delta | terminal_growth | exit_multiple
+    | revenue_shocks [{year, pct, phase_years}] (added to any existing)"""
+    import copy
+    s = copy.deepcopy(base)
+    ch = ch or {}
+    tg = float(s.get("terminal_growth", 0.025))
+    if ch.get("growth") is not None:
+        s["growth"] = [float(x) for x in ch["growth"]]
+    if ch.get("growth_delta"):
+        g = _path(s.get("growth"), 0.05, end=tg)[:5]
+        d = ch["growth_delta"]
+        d = d if isinstance(d, (list, tuple)) else [d] * 5
+        s["growth"] = [g[i] + float(d[i] if i < len(d) else d[-1]) for i in range(5)]
+    m = _path(s.get("margin"), 0.15)
+    m0, m1 = m[0], m[-1]
+    if ch.get("margin_end") is not None:
+        m1 = float(ch["margin_end"])
+    m1 += float(ch.get("margin_delta") or 0)
+    m0 += float(ch.get("margin_start_delta") or 0)
+    s["margin"] = [m0, m1]
+    for k in ("reinvest_pct", "share_change", "terminal_growth", "exit_multiple", "tax"):
+        if ch.get(k) is not None:
+            s[k] = ch[k]
+    if ch.get("share_change_delta"):
+        s["share_change"] = float(s.get("share_change", 0)) + float(ch["share_change_delta"])
+    if ch.get("revenue_shocks"):
+        s["revenue_shocks"] = list(s.get("revenue_shocks") or []) + list(ch["revenue_shocks"])
+    return s
+
+
+def simulate(assumptions, research=None, price=None, changes=None, case="base", discount_rate=None):
+    """Value one case of the thesis assumptions after applying changes. Same engine as the thesis."""
+    ctx = context_from(assumptions, research, price)
+    dr = float(discount_rate) if discount_rate else discount_rate_of(assumptions)
+    base = (assumptions.get("scenarios") or {}).get(case) or assumptions["scenarios"]["base"]
+    out = scenario(apply_changes(base, changes), ctx, dr)
+    ref = scenario(base, ctx, dr)
+    out.update(base_value=ref["value"], change_vs_base=(out["value"] / ref["value"] - 1) if ref["value"] else None,
+               vs_price=(out["value"] / ctx["price"] - 1) if ctx.get("price") else None, price=ctx.get("price"))
+    return out
+
+
+def discount_rate_of(assumptions):
+    return discount_rate(assumptions.get("profile") or {})
+
+
+def reverse(assumptions, research=None, price=None, target=None, changes=None, case="base"):
+    """What it takes to be worth `target` (default: today's price): the uniform revenue growth for years 1-5 at the
+    case's margins, and the year-10 operating margin needed at the case's growth."""
+    ctx = context_from(assumptions, research, price)
+    target = float(target or ctx.get("price") or 0)
+    if not target:
+        return None
+    dr = discount_rate_of(assumptions)
+    base = apply_changes((assumptions.get("scenarios") or {}).get(case) or assumptions["scenarios"]["base"], changes)
+
+    def solve(fn, lo, hi):
+        try:
+            if not (fn(lo) <= target <= fn(hi)):
+                return None
+            for _ in range(60):
+                mid = (lo + hi) / 2
+                lo, hi = (mid, hi) if fn(mid) < target else (lo, mid)
+            return round((lo + hi) / 2, 4)
+        except (ValueError, ZeroDivisionError):
+            return None
+    g = solve(lambda x: scenario(dict(base, growth=[x] * 5), ctx, dr)["value"], -0.30, 0.80)
+    m0 = _path(base.get("margin"), 0.15)[0]
+    mm = solve(lambda x: scenario(dict(base, margin=[m0, x]), ctx, dr)["value"], -0.20, 0.80)
+    return {"target": target, "growth_needed": g, "margin_needed": mm,
+            "thesis_growth": round(sum(_path(base.get("growth"), 0.05, end=float(base.get("terminal_growth", 0.025)))[:5]) / 5, 4),
+            "thesis_margin_end": round(_path(base.get("margin"), 0.15)[-1], 4)}
+
+
+def default_assumptions(research):
+    """A neutral starting point from the company's own history when no thesis assumptions exist yet
+    (3-year revenue CAGR capped at 30%, latest operating margin, reinvestment from cash flow). Labelled 'from history'."""
+    hist = [h for h in (research or {}).get("history") or [] if h.get("revenue")]
+    if len(hist) < 3:
+        return None
+    r = [h["revenue"] for h in hist[-4:]]
+    cagr = (r[-1] / r[0]) ** (1 / (len(r) - 1)) - 1 if r[0] and r[0] > 0 else 0.05
+    g = max(min(cagr, 0.30), -0.05)
+    om = next((h.get("op_margin") for h in reversed(hist) if h.get("op_margin") is not None), 0.15) or 0.15
+    fcfm = next((h.get("fcf_margin") for h in reversed(hist) if h.get("fcf_margin") is not None), None)
+    rein = max(0.0, min(0.30, om * 0.79 - fcfm)) if fcfm is not None else 0.05
+    sh = [h.get("shares") for h in hist[-4:] if h.get("shares")]
+    sc = ((sh[-1] / sh[0]) ** (1 / (len(sh) - 1)) - 1) if len(sh) >= 2 else 0.0
+    path = [round(g - (g - 0.05) * i / 8, 4) for i in range(5)]
+    base = {"growth": path, "margin": [round(om, 4), round(om, 4)], "reinvest_pct": round(rein, 4), "tax": 0.21,
+            "share_change": round(sc, 4), "terminal_growth": 0.025, "grade": "A", "why": "company's own last 3 years"}
+    return {"profile": {"moat": "unproven"}, "scenarios": {"base": base}, "source": "history"}

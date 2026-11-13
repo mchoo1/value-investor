@@ -25,7 +25,7 @@ UNPROVEN_MOAT_CAP = 60    # conviction cap when the moat source has no grade A-C
 REQUIRED = {"thesis": ["ticker"], "refresh": ["items"], "book": ["items"], "newsletter_tags": [],
             "exec_summary": ["items"], "tam": ["items"], "reason_cards": ["items"], "news_tags": ["items"],
             "filing_tags": ["items"], "buy_checks": ["items"], "outlook": ["theme"], "week_ahead": [],
-            "second_opinion": ["ticker"], "idea": ["ticker"]}
+            "second_opinion": ["ticker"], "idea": ["ticker"], "scenarios": ["items"], "answers": ["items"]}
 
 
 class Later(Exception):
@@ -133,6 +133,8 @@ def load_thesis(cur, d):
         if d.get(k):
             sections[k] = d[k]
     val = dict(d.get("valuation") or {})
+    if isinstance(d.get("sim_scenarios"), list):
+        val["sim_scenarios"] = [x for x in d["sim_scenarios"] if isinstance(x, dict) and isinstance(x.get("changes"), dict)][:10]
     entry, cap, notes = apply_engine(cur, t, d, val, (d.get("style") or n.get("style")))
     entry = entry if entry is not None else d.get("entry_target")
     conv = capped(d.get("conviction"), cap)
@@ -442,6 +444,40 @@ def load(cur, name, d):
         return load_thesis(cur, d)
     if kind == "second_opinion":
         return load_second_opinion(cur, d)
+    if kind == "scenarios":               # Claude's ready-made what-if scenarios for the stock-page simulator
+        n = 0
+        for it in d.get("items", []):
+            t = (it.get("ticker") or "").upper()
+            sc = [x for x in (it.get("scenarios") or []) if isinstance(x, dict) and x.get("name") and isinstance(x.get("changes"), dict)]
+            if t and sc:
+                cur.execute("""UPDATE v2_theses SET valuation = COALESCE(valuation, '{}'::jsonb) || jsonb_build_object('sim_scenarios', %s::jsonb)
+                               WHERE ticker = %s AND version = (SELECT MAX(version) FROM v2_theses WHERE ticker = %s)""",
+                            (J(sc[:10]), t, t))
+                n += cur.rowcount
+        return f"what-if scenarios for {n} name(s)"
+    if kind == "answers":                 # Claude's replies to Ming's questions and feedback
+        n = 0
+        for it in d.get("items", []):
+            try:
+                qid = int(it.get("id"))
+            except (TypeError, ValueError):
+                continue
+            cur.execute("""UPDATE v2_questions SET status = 'answered', answer = %s, sources = %s, proposal = %s, answered_at = now()
+                           WHERE id = %s RETURNING ticker""",
+                        ((it.get("answer") or "")[:6000], J(it.get("sources") or []), J(it.get("proposal")) if it.get("proposal") else None, qid))
+            row = cur.fetchone()
+            if row:
+                n += 1
+                if row["ticker"]:
+                    cur.execute("INSERT INTO v2_comments (ticker, section, body) VALUES (%s, 'qa', %s)",
+                                (row["ticker"], f"Claude answered #{qid}"))
+        for it in d.get("scenarios") or []:      # an answer may come with new what-if scenarios
+            t = (it.get("ticker") or "").upper()
+            if t and it.get("scenarios"):
+                cur.execute("""UPDATE v2_theses SET valuation = COALESCE(valuation, '{}'::jsonb) || jsonb_build_object('sim_scenarios', %s::jsonb)
+                               WHERE ticker = %s AND version = (SELECT MAX(version) FROM v2_theses WHERE ticker = %s)""",
+                            (J(it["scenarios"][:10]), t, t))
+        return f"{n} answer(s)"
     if kind == "idea":                    # a stock idea Ming gave Claude in a chat
         from ideas import add_idea
         ok, msg = add_idea(cur, d["ticker"], "chat", note=d.get("note"), source=d.get("source"), url=d.get("url"))

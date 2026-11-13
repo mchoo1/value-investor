@@ -74,6 +74,21 @@ def test_inbox_validate():
     assert inbox.capped(80, 60) == 60 and inbox.capped(50, 60) == 50 and inbox.capped(80, None) == 80
 
 
+
+def test_simulator():
+    r0 = V.simulate(A, price=200)
+    assert abs(r0["change_vs_base"]) < 1e-9
+    up = V.simulate(A, price=200, changes={"growth_delta": 0.05})
+    dn = V.simulate(A, price=200, changes={"revenue_shocks": [{"year": 2, "pct": -0.2, "phase_years": 2}]})
+    assert up["value"] > r0["value"] > dn["value"]
+    rv = V.reverse(A, price=200)
+    chk = V.simulate(A, price=200, changes={"growth": [rv["growth_needed"]] * 5})
+    assert abs(chk["value"] - 200) < 0.5
+    d = V.default_assumptions({"history": [{"revenue": 100, "op_margin": .2, "fcf_margin": .15, "shares": 10},
+                                           {"revenue": 110}, {"revenue": 121}, {"revenue": 133, "op_margin": .22, "fcf_margin": .16, "shares": 10}]})
+    assert d and 0.09 < d["scenarios"]["base"]["growth"][0] < 0.11
+
+
 if __name__ == "__main__":
     for k, f in list(globals().items()):
         if k.startswith("test_"):
