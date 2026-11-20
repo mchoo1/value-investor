@@ -991,6 +991,9 @@ def export(conn):
             q["thesis"] = {"version": th.get("version"), "verdict": th.get("verdict"), "conviction": th.get("conviction"),
                            "entry_target": th.get("entry_target"), "exec_summary": (th.get("sections") or {}).get("exec_summary"),
                            "pillars": (th.get("sections") or {}).get("pillars"), "variant_view": (th.get("sections") or {}).get("variant_view"),
+                           "bull_bear_tests": (th.get("sections") or {}).get("bull_bear_tests"),
+                           "controversy": (th.get("sections") or {}).get("controversy"),
+                           "latest_quarter": (th.get("sections") or {}).get("latest_quarter"),
                            "assumptions": (v.get("engine") or {}).get("assumptions"), "sim_scenarios": v.get("sim_scenarios")}
     scen_queue = [n["ticker"] for n in sorted(names, key=lambda n: n["level"] != "book")
                   if theses.get(n["ticker"]) and not (theses[n["ticker"]].get("valuation") or {}).get("sim_scenarios")][:2]
@@ -1026,6 +1029,8 @@ def export(conn):
                 "entry_target": entry, "entry_source": src, "thesis_version": th.get("version"),
                 "thesis_date": str(th.get("created_at"))[:10] if th else None, "conviction": th.get("conviction"),
                 "variant_view": s.get("variant_view"), "pillars": s.get("pillars"),
+                "bull_bear_tests": s.get("bull_bear_tests"),
+                "controversy": (str(s["controversy"])[:700] if s.get("controversy") else None),
                 "kill": (th.get("valuation") or {}).get("kill"),
                 "legacy_thesis": None if th else ((n.get("legacy") or {}).get("thesis") or {}).get("investment_case")}
 
