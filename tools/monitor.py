@@ -723,6 +723,16 @@ RESEARCH_RULES = [
     "Every thesis carries 3-6 'sim_scenarios' (SIM_SCENARIO_EXAMPLE shape): one per key risk, any pricing-model change "
     "(e.g. per-seat to usage or AI-agent pricing: revenue_shocks for the transition dip and growth_delta for the new run-rate), "
     "and the TAM upside; each with a probability, an evidence grade and the KPI to watch.",
+    "Deep-dive coverage (every thesis, and every section_backfill_queue item as a refresh with reason 'section_backfill' and these "
+    "'sections'): 'technology' = the technical moat or unique differentiator, and why it is innovative or physically hard to produce; "
+    "'latest_quarter' = most recent quarter, GAAP vs non-GAAP side by side (revenue, gross and operating margin, EPS, FCF, and the "
+    "biggest adjustments such as stock comp), revenue growth, margin trend over 4-8 quarters and revenue mix by source "
+    "(e.g. hardware vs cloud or services), with the filing date; 'controversy' = recent short-seller reports and public criticism, "
+    "each with source, date and whether the claim holds, plus customer concentration, supply-chain dependencies and "
+    "regulatory or geopolitical exposure; 'strategic_outlook' = major partnerships, backlog or RPO trend and book-to-bill, and how "
+    "revenue is being diversified; 'bull_bear_tests' = a balanced view of growth potential vs operational risk, and the specific, "
+    "measurable evidence (KPI, threshold, date) that would validate a bullish stance and that would validate a bearish one. "
+    "Grade claims as usual; say 'none found' rather than leaving a section blank.",
     "Second opinion: write your own assumptions from the data pack BEFORE reading Claude's thesis; then attack it. Never average values.",
 ]
 
@@ -742,7 +752,8 @@ INBOX_FORMAT = {
                                                  "industry_risks", "outlook", "winners", "business", "right_to_win",
                                                  "moat", "tam_competitors", "management", "financials",
                                                  "company_risks", "variant_view", "valuation", "pillars",
-                                                 "catalysts_flow", "premortem"]}},
+                                                 "catalysts_flow", "premortem", "technology", "latest_quarter",
+                                                 "controversy", "strategic_outlook", "bull_bear_tests"]}},
     "thesis_v2_additions": {
         "note": "Add these keys to every thesis and refresh item (9 Nov 2026 revisions). The app's valuation engine computes "
                 "iv_low/base/high, entry_target and the growth zone from 'assumptions'; typed-in values are only a fallback.",
@@ -992,6 +1003,12 @@ def export(conn):
         r["research"] = {k: rr.get(k) for k in ("as_of", "price", "shares", "mcap", "sector", "industry", "valuation", "moat",
                                                 "risk", "red_flags", "peers", "analysts", "history", "business", "insiders",
                                                 "ownership")} if rr else None
+    from inbox import NEW_SECTIONS
+    section_backfill = [{"ticker": n["ticker"], "level": n["level"], "price": px.get(n["ticker"]),
+                         "thesis_version": theses[n["ticker"]].get("version"),
+                         "missing": [k for k in NEW_SECTIONS if not (theses[n["ticker"]].get("sections") or {}).get(k)]}
+                        for n in sorted(names, key=lambda n: n["level"] != "book") if theses.get(n["ticker"])]
+    section_backfill = [x for x in section_backfill if x["missing"]][:3]
     backfill = [{"ticker": n["ticker"], "level": n["level"], "style": n.get("style"),
                  "thesis_version": (theses.get(n["ticker"]) or {}).get("version"),
                  "iv_base_typed": ((theses.get(n["ticker"]) or {}).get("valuation") or {}).get("iv_base"),
@@ -1051,7 +1068,8 @@ def export(conn):
              "calendar_next_21d": calendar, "macro": macro,
              "newsletters_7d": newsletters, "research_rules": RESEARCH_RULES,
              "second_opinion_queue": so_queue, "open_red_team_points": open_attacks, "engine_backfill_queue": backfill, "idea_queue": idea_queue,
-             "open_questions": open_q, "sim_scenario_queue": scen_queue}
+             "open_questions": open_q, "sim_scenario_queue": scen_queue,
+             "section_backfill_queue": section_backfill}
     text = json.dumps(state, default=str, indent=1)
     out = Path(__file__).parent.parent / "outbox"
     out.mkdir(exist_ok=True)

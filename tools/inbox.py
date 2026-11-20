@@ -15,7 +15,9 @@ import valuation as V
 WATCH_CAP = 50
 SECTION_KEYS = {"industry_map", "size_growth", "structure", "demand_supply", "industry_risks", "outlook", "winners",
                 "business", "right_to_win", "moat", "tam_competitors", "management", "financials", "company_risks",
-                "variant_view", "valuation", "pillars", "catalysts_flow", "premortem"}
+                "variant_view", "valuation", "pillars", "catalysts_flow", "premortem",
+                "technology", "latest_quarter", "controversy", "strategic_outlook", "bull_bear_tests"}
+NEW_SECTIONS = ["technology", "latest_quarter", "controversy", "strategic_outlook", "bull_bear_tests"]   # added 19 Nov 2026
 TAGS = {"no change", "strengthens", "weakens", "breaks"}
 SPLIT_GAP = 0.25          # second opinion: a base-value gap above 25% is a split
 SPLIT_CAP = 74            # conviction cap while a split is unresolved (half size at most)
@@ -330,6 +332,9 @@ def load(cur, name, d):
             verdict = it.get("verdict") or last["verdict"]
             entry = e_entry if e_entry is not None else it.get("entry_target", last["entry_target"])
             secs = dict(last["sections"] or {})
+            for k, v in (it.get("sections") or {}).items():          # refresh may fill or update sections
+                if k in SECTION_KEYS and v:
+                    secs[k] = v
             for k in ("change_my_mind", "expected"):
                 if it.get(k):
                     secs[k] = it[k]
@@ -338,7 +343,7 @@ def load(cur, name, d):
             cur.execute("""INSERT INTO v2_theses (ticker, version, author, approval, sections, valuation, conviction, verdict, entry_target)
                            VALUES (%s, %s, 'claude-refresh', 'pending', %s, %s, %s, %s, %s)""",
                         (t, last["version"] + 1, J(secs), J(val), conv, verdict, entry))
-            if it.get("reason") != "engine_backfill":
+            if it.get("reason") not in ("engine_backfill", "section_backfill"):
                 cur.execute("UPDATE v2_names SET refresh_due = NULL, updated_at = now() WHERE ticker = %s", (t,))
             changed = verdict != last["verdict"] or bool(breached)
             if it.get("full_reunderwrite") or breached:

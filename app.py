@@ -21,11 +21,15 @@ SECTIONS = [
         ("demand_supply", "Demand and supply"), ("industry_risks", "Risk map"),
         ("outlook", "Outlook by horizon"), ("winners", "What winners look like")]),
     ("Company", [
-        ("business", "Business"), ("right_to_win", "Right to win"), ("moat", "Moat"),
-        ("tam_competitors", "TAM and competitors"), ("management", "Management fit"),
-        ("financials", "Financial quality"), ("company_risks", "Company risks")]),
+        ("business", "Business"), ("technology", "Core technology and innovation"),
+        ("right_to_win", "Right to win"), ("moat", "Moat"),
+        ("tam_competitors", "TAM and competitors"), ("strategic_outlook", "Partnerships, backlog and diversification"),
+        ("management", "Management fit"), ("financials", "Financial quality"),
+        ("latest_quarter", "Latest quarter: GAAP vs non-GAAP"), ("company_risks", "Company risks"),
+        ("controversy", "Controversy and short-seller view")]),
     ("Decision", [
         ("variant_view", "Variant view"), ("valuation", "Valuation"),
+        ("bull_bear_tests", "What would prove the bull or the bear case"),
         ("pillars", "Pillars and kill criteria"), ("catalysts_flow", "Catalysts and flow map"),
         ("premortem", "Pre-mortem and conviction")]),
 ]
