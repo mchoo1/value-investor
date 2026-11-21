@@ -89,6 +89,24 @@ def test_simulator():
     assert d and 0.09 < d["scenarios"]["base"]["growth"][0] < 0.11
 
 
+def test_report_maths():
+    r = V.run(A, price=200)
+    pj = V.projection(A, price=200)
+    assert len(pj["rows"]) == 10 and pj["rows"][0]["revenue"] > A["revenue0"]
+    d = V.dcf_breakdown(A, price=200)
+    assert abs(d["value_per_share"] - r["iv_base"]) < 0.02            # same maths as the engine
+    assert abs(d["pv_stage1"] + d["pv_stage2"] + d["pv_terminal"] - d["firm_value"]) < 1
+    u = V.uncertainty(A, r["scenarios"])
+    assert u["rating"] in V.UNCERTAINTY
+    st = V.stars(69.17, 59.0, "Very High")                            # Morningstar HOOD, 18 Nov 2026: 3 stars, 29.50 / 103.25
+    assert st["stars"] == 3 and st["five_star"] == 29.5 and st["one_star"] == 103.25
+    assert V.stars(20, 59, "Very High")["stars"] == 5 and V.stars(120, 59, "Very High")["stars"] == 1
+    b = copy.deepcopy(A)
+    b["scenarios"]["base"]["growth"] = [0.12] * 5
+    rv = V.revisions(A, b)
+    assert rv[0]["revenue"][0] > rv[0]["revenue"][1]
+
+
 if __name__ == "__main__":
     for k, f in list(globals().items()):
         if k.startswith("test_"):

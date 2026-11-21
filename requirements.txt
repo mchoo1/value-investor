@@ -2,3 +2,4 @@ flask>=3.0
 psycopg2-binary>=2.9
 requests>=2.31
 google-auth>=2.29
+fpdf2>=2.7

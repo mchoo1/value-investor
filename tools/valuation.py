@@ -345,3 +345,137 @@ def default_assumptions(research):
     base = {"growth": path, "margin": [round(om, 4), round(om, 4)], "reinvest_pct": round(rein, 4), "tax": 0.21,
             "share_change": round(sc, 4), "terminal_growth": 0.025, "grade": "A", "why": "company's own last 3 years"}
     return {"profile": {"moat": "unproven"}, "scenarios": {"base": base}, "source": "history"}
+
+
+# ------------------------------------------------------------------ research report (Morningstar-style detail, 21 Nov 2026)
+# Fair-value bands by uncertainty: (5-star price, 1-star price) as multiples of fair value. Same idea as Morningstar's
+# uncertainty-driven star bands; the app's own entry target (risk-based margin of safety) stays the buy rule.
+UNCERTAINTY = ["Low", "Medium", "High", "Very High", "Extreme"]
+BANDS = {"Low": (0.80, 1.25), "Medium": (0.70, 1.35), "High": (0.60, 1.55), "Very High": (0.50, 1.75), "Extreme": (0.35, 2.25)}
+
+
+def uncertainty(assumptions, res=None):
+    """Uncertainty rating from the spread of the bear-bull values and the business profile (code, not opinion).
+    Spread = (bull - bear) / base: <0.5 Low, <0.8 Medium, <1.2 High, <2.0 Very High, else Extreme.
+    Floors: pre-profit at least Very High; cyclical or leverage above 3x at least High; unproven or narrowing moat at least
+    Medium. A thesis may set profile.uncertainty one notch higher (never lower)."""
+    p = (assumptions or {}).get("profile") or {}
+    res = res or {}
+    base, bear, bull = ((res.get(k) or {}).get("value") for k in ("base", "bear", "bull"))
+    i, why = 1, ["no bear/bull spread: Medium by default"]
+    if base and base > 0 and bear is not None and bull is not None:
+        spread = (bull - bear) / base
+        i = 0 if spread < 0.5 else 1 if spread < 0.8 else 2 if spread < 1.2 else 3 if spread < 2.0 else 4
+        why = [f"bear-to-bull spread {spread:.0%} of the base value"]
+    floors = []
+    if p.get("pre_profit"):
+        floors.append((3, "pre-profit"))
+    if p.get("cyclical"):
+        floors.append((2, "cyclical"))
+    if (p.get("nd_ebitda") or 0) > 3:
+        floors.append((2, "net debt above 3x EBITDA"))
+    if (p.get("moat") or "unproven").lower() in ("unproven", "narrowing"):
+        floors.append((1, f"moat {p.get('moat') or 'unproven'}"))
+    for lvl, w in floors:
+        if lvl > i:
+            i, why = lvl, why + [f"floor: {w}"]
+    ai = str(p.get("uncertainty") or "").title().replace("Very high", "Very High")
+    if ai in UNCERTAINTY and UNCERTAINTY.index(ai) == i + 1:
+        i, why = i + 1, why + ["raised one notch by the thesis"]
+    return {"rating": UNCERTAINTY[i], "why": "; ".join(why), "bands": BANDS[UNCERTAINTY[i]]}
+
+
+def stars(price, fair_value, rating):
+    """1-5 stars from price vs fair value and the uncertainty bands, plus the band prices."""
+    lo, hi = BANDS.get(rating, BANDS["High"])
+    if not price or not fair_value or fair_value <= 0:
+        return {"stars": None}
+    cuts = [fair_value * lo, fair_value * (1 + lo) / 2, fair_value * (1 + hi) / 2, fair_value * hi]
+    s = 5 if price <= cuts[0] else 4 if price <= cuts[1] else 3 if price <= cuts[2] else 2 if price < cuts[3] else 1
+    return {"stars": s, "p_fv": round(price / fair_value, 3), "five_star": round(cuts[0], 2), "four_star": round(cuts[1], 2),
+            "two_star": round(cuts[2], 2), "one_star": round(cuts[3], 2),
+            "assessment": "Undervalued" if s >= 4 else "Fairly valued" if s == 3 else "Overvalued"}
+
+
+def projection(assumptions, research=None, price=None, case="base"):
+    """Year-by-year forecast behind a scenario's value: revenue, margin, EBIT, after-tax operating profit, reinvestment,
+    free cash flow to the firm, shares, per-share figures and the multiples today's price implies. Same maths as scenario()."""
+    ctx = context_from(assumptions, research, price)
+    s = (assumptions.get("scenarios") or {}).get(case) or assumptions["scenarios"]["base"]
+    dr = discount_rate_of(assumptions)
+    tg = float(s.get("terminal_growth", 0.025))
+    g, m = _path(s.get("growth"), 0.05, end=tg), _path(s.get("margin"), 0.15)
+    tax, rein, sc = float(s.get("tax", 0.21)), float(s.get("reinvest_pct", 0.05)), float(s.get("share_change", 0.0))
+    shocks = s.get("revenue_shocks") or []
+    rev, rows, prev_nopat, prev_rein = float(ctx["revenue0"]), [], None, None
+    mcap = (ctx.get("price") or 0) * ctx["shares0"]
+    for t in range(YEARS):
+        rev *= 1 + g[t]
+        lvl = 1.0
+        for sh in shocks:
+            y0, ph = int(sh.get("year", 1)), max(1, int(sh.get("phase_years", 1)))
+            if t + 1 >= y0:
+                lvl *= 1 + float(sh.get("pct", 0)) * min(1.0, (t + 2 - y0) / ph)
+        r_ = rev * lvl
+        ebit = r_ * m[t]
+        nopat = ebit * (1 - tax)
+        reinv = r_ * rein
+        fcff = nopat - reinv
+        shares = ctx["shares0"] * (1 + sc) ** (t + 1)
+        row = {"year": t + 1, "revenue": r_, "growth": (r_ / rows[-1]["revenue"] - 1) if rows else (r_ / ctx["revenue0"] - 1),
+               "op_margin": m[t], "ebit": ebit, "nopat": nopat, "reinvestment": reinv, "fcff": fcff, "fcf_margin": fcff / r_ if r_ else None,
+               "shares": shares, "eps": nopat / shares, "fcf_ps": fcff / shares,
+               "roni": (nopat - prev_nopat) / prev_rein if prev_rein else None,     # return on new investment
+               "pv": fcff / (1 + dr) ** (t + 1)}
+        if ctx.get("price"):
+            row.update(pe=ctx["price"] / row["eps"] if row["eps"] > 0 else None,
+                       ev_ebit=(mcap + ctx["net_debt"]) / ebit if ebit > 0 else None,
+                       fcf_yield=row["fcf_ps"] / ctx["price"])
+        rows.append(row)
+        prev_nopat, prev_rein = nopat, reinv
+    def cagr(a, b, n):
+        return (b / a) ** (1 / n) - 1 if a and b and a > 0 and b > 0 else None
+    r0 = ctx["revenue0"]
+    summary = {"rev_cagr_5y": cagr(r0, rows[4]["revenue"], 5), "rev_cagr_10y": cagr(r0, rows[-1]["revenue"], 10),
+               "ebit_cagr_10y": cagr(rows[0]["ebit"] / (1 + g[0]), rows[-1]["ebit"], 10),
+               "eps_cagr_9y": cagr(rows[0]["eps"], rows[-1]["eps"], 9)}
+    return {"case": case, "rows": rows, "summary": summary, "discount_rate": dr, "context": ctx}
+
+
+def dcf_breakdown(assumptions, research=None, price=None, case="base"):
+    """Where the value comes from: present value of years 1-5, years 6-10 and the terminal value; the bridge from firm
+    value to equity value per share; and the key drivers."""
+    pj = projection(assumptions, research, price, case)
+    s = (assumptions.get("scenarios") or {}).get(case) or assumptions["scenarios"]["base"]
+    ctx, dr, rows = pj["context"], pj["discount_rate"], pj["rows"]
+    tg = float(s.get("terminal_growth", 0.025))
+    if s.get("exit_multiple"):
+        tv, tv_how = rows[-1]["ebit"] * float(s["exit_multiple"]), f"{float(s['exit_multiple']):.1f}x year-10 EBIT"
+    else:
+        tv, tv_how = rows[-1]["fcff"] * (1 + tg) / (dr - tg), f"perpetual growth {tg:.1%}"
+    pv1, pv2 = sum(r["pv"] for r in rows[:5]), sum(r["pv"] for r in rows[5:])
+    pv3 = tv / (1 + dr) ** YEARS
+    firm = pv1 + pv2 + pv3
+    shares5 = ctx["shares0"] * (1 + float(s.get("share_change", 0.0))) ** RETURN_YEARS
+    equity = firm - ctx["net_debt"]
+    reinv = [r["reinvestment"] for r in rows[5:]]
+    return {"pv_stage1": pv1, "pv_stage2": pv2, "pv_terminal": pv3, "firm_value": firm, "net_debt": ctx["net_debt"],
+            "equity_value": equity, "shares": shares5, "value_per_share": round(equity / shares5, 2),
+            "terminal_share": pv3 / firm if firm else None, "terminal_value": tv, "terminal_how": tv_how,
+            "drivers": {"discount_rate": dr, "terminal_growth": tg, "tax": float(s.get("tax", 0.21)),
+                        "reinvest_pct": float(s.get("reinvest_pct", 0.05)),
+                        "stage2_growth": sum(r["growth"] for r in rows[5:]) / 5,
+                        "stage2_investment_rate": sum(reinv) / sum(r["nopat"] for r in rows[5:]) if sum(r["nopat"] for r in rows[5:]) else None,
+                        "share_change": float(s.get("share_change", 0.0)), "op_margin_y10": rows[-1]["op_margin"]}}
+
+
+def revisions(prev_assumptions, cur_assumptions, research=None, price=None, years=3):
+    """Forecast revisions between two thesis versions: revenue, operating profit and EPS for years 1-3, current vs prior."""
+    if not prev_assumptions or not cur_assumptions:
+        return None
+    try:
+        a, b = projection(prev_assumptions, research, price)["rows"], projection(cur_assumptions, research, price)["rows"]
+    except (ValueError, KeyError, ZeroDivisionError, TypeError):
+        return None
+    return [{"year": i + 1, "revenue": (b[i]["revenue"], a[i]["revenue"]), "ebit": (b[i]["ebit"], a[i]["ebit"]),
+             "eps": (b[i]["eps"], a[i]["eps"])} for i in range(years)]

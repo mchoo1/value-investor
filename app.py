@@ -1365,6 +1365,104 @@ f.addEventListener('input',calc);calc()})();
 """
 
 
+REPORT_DETAIL_TPL = r"""
+{% macro p1(v) %}{% if v is none %}—{% else %}{{ '%.1f%%'|format(v * 100) }}{% endif %}{% endmacro %}
+{% macro x1(v) %}{% if v is none %}—{% else %}{{ '%.1f'|format(v) }}{% endif %}{% endmacro %}
+{% macro mm(v) %}{% if v is none %}—{% else %}{{ '{:,.0f}'.format(v / 1e6) }}{% endif %}{% endmacro %}
+{% macro star(k) %}{% if k %}<span style="color:#e0a43a;letter-spacing:1px">{{ '★' * k }}</span><span class="muted">{{ '★' * (5 - k) }}</span>{% else %}—{% endif %}{% endmacro %}
+{% set st = rep.stars or {} %}{% set u = rep.uncertainty or {} %}{% set ca = rep.capital_allocation or {} %}
+<div class="card" style="margin-top:12px" id="research-report"><div class="row" style="justify-content:space-between;align-items:center">
+<h3 style="margin:0">Research report <span class="muted" style="font-weight:400;font-size:13px">fair value, model, DCF, moat, peers, capital allocation, notes</span></h3>
+<a class="no-print" href="{{ url_for('report_pdf', ticker=rep.ticker) }}"><button class="primary">Download PDF report</button></a></div>
+{% if not rep.has_assumptions %}<p class="warn" style="margin:8px 0 0">Model built from {{ rep.basis }}. The next deep dive, refresh or overnight backfill adds Claude's assumptions.</p>{% endif %}
+{% if rep.engine_note %}<p class="warn" style="margin:8px 0 0">{{ rep.engine_note }}</p>{% endif %}
+<div class="grid g4" style="margin-top:10px">
+<div class="card tile"><div class="k">Price · fair value</div><div class="v" style="font-size:18px">{{ rep.price|money }} · {{ rep.fair_value|money }}</div><div class="k">price / fair value {{ x1(st.get('p_fv')) if st.get('p_fv') else '—' }}</div></div>
+<div class="card tile"><div class="k">Rating</div><div class="v" style="font-size:18px">{{ star(st.get('stars')) }}</div><div class="k">{{ st.get('assessment') or '' }}</div></div>
+<div class="card tile"><div class="k">Uncertainty · moat</div><div class="v" style="font-size:18px">{{ u.get('rating') or '—' }} · {{ (rep.moat_width or 'moat not rated')|capitalize }}{% if rep.moat_profile %} ({{ rep.moat_profile }}){% endif %}</div><div class="k">{{ u.get('why') or '' }}</div></div>
+<div class="card tile"><div class="k">Capital allocation · entry target</div><div class="v" style="font-size:18px">{{ ca.get('rating') or '—' }} · {{ rep.entry_target|money }}</div><div class="k">entry = your margin-of-safety rule</div></div>
+</div>
+{% if st.get('stars') %}<p class="muted" style="font-size:13px;margin:8px 0 4px">Star bands ({{ u.get('rating') }} uncertainty): ★★★★★ at or below <b>{{ st.get('five_star')|money }}</b> · ★★★★ to {{ st.get('four_star')|money }} · ★★★ to {{ st.get('two_star')|money }} · ★★ below {{ st.get('one_star')|money }} · ★ at or above <b>{{ st.get('one_star')|money }}</b></p>{% endif %}
+{% if chart %}<div style="margin-top:6px">{{ chart }}</div><p class="muted" style="font-size:12px;margin:2px 0 0"><span style="color:#4aa3ff">■</span> price · <span style="color:#e0a43a">■</span> Claude's fair value (steps at each thesis version), shaded = 5-star to 1-star band</p>{% endif %}
+
+{% set pj = rep.projection %}{% if pj %}{% set rows = pj.rows[:5] %}{% set ya = (rep.actuals[-1].year if rep.actuals else none) %}
+<h4 style="margin:16px 0 6px">Financial model <span class="muted" style="font-weight:400">USD millions · actuals from SEC filings, forecast = base case</span></h4>
+<div style="overflow-x:auto"><table><thead><tr><th></th>{% for h in rep.actuals %}<th class="r">{{ h.get('year') }}A</th>{% endfor %}{% for rw in rows %}<th class="r">{{ (ya + rw.year) if ya else 'Y' ~ rw.year }}E</th>{% endfor %}</tr></thead><tbody>
+<tr><td>Revenue</td>{% for h in rep.actuals %}<td class="r">{{ mm(h.get('revenue')) }}</td>{% endfor %}{% for rw in rows %}<td class="r">{{ mm(rw.revenue) }}</td>{% endfor %}</tr>
+<tr><td>Revenue growth</td>{% for h in rep.actuals %}<td class="r">{{ p1(h.get('rev_growth')) }}</td>{% endfor %}{% for rw in rows %}<td class="r">{{ p1(rw.growth) }}</td>{% endfor %}</tr>
+<tr><td>Operating margin</td>{% for h in rep.actuals %}<td class="r">{{ p1(h.get('op_margin')) }}</td>{% endfor %}{% for rw in rows %}<td class="r">{{ p1(rw.op_margin) }}</td>{% endfor %}</tr>
+<tr><td>Operating profit</td>{% for h in rep.actuals %}<td class="r">{{ mm(h.get('revenue') * h.get('op_margin')) if h.get('op_margin') is not none else '—' }}</td>{% endfor %}{% for rw in rows %}<td class="r">{{ mm(rw.ebit) }}</td>{% endfor %}</tr>
+<tr><td>Net income (A) · after-tax operating profit (E)</td>{% for h in rep.actuals %}<td class="r">{{ mm(h.get('net_income')) }}</td>{% endfor %}{% for rw in rows %}<td class="r">{{ mm(rw.nopat) }}</td>{% endfor %}</tr>
+<tr><td>Free cash flow (A) · to the firm (E)</td>{% for h in rep.actuals %}<td class="r">{{ mm(h.get('fcf')) }}</td>{% endfor %}{% for rw in rows %}<td class="r">{{ mm(rw.fcff) }}</td>{% endfor %}</tr>
+<tr><td>FCF margin</td>{% for h in rep.actuals %}<td class="r">{{ p1(h.get('fcf_margin')) }}</td>{% endfor %}{% for rw in rows %}<td class="r">{{ p1(rw.fcf_margin) }}</td>{% endfor %}</tr>
+<tr><td>Diluted shares (M)</td>{% for h in rep.actuals %}<td class="r">{{ mm(h.get('shares')) }}</td>{% endfor %}{% for rw in rows %}<td class="r">{{ mm(rw.shares) }}</td>{% endfor %}</tr>
+<tr><td>EPS (A) · operating EPS (E)</td>{% for h in rep.actuals %}<td class="r">{{ '%.2f'|format(h.get('eps')) if h.get('eps') is not none else '—' }}</td>{% endfor %}{% for rw in rows %}<td class="r">{{ '%.2f'|format(rw.eps) }}</td>{% endfor %}</tr>
+<tr><td>ROIC (A) · return on new investment (E)</td>{% for h in rep.actuals %}<td class="r">{{ p1(h.get('roic')) }}</td>{% endfor %}{% for rw in rows %}<td class="r">{{ p1(rw.roni) }}</td>{% endfor %}</tr>
+<tr><td>P/E at today's price</td>{% for h in rep.actuals %}<td class="r">{{ x1(rep.price / h.get('eps')) if h.get('eps') and h.get('eps') > 0 and rep.price else '—' }}</td>{% endfor %}{% for rw in rows %}<td class="r">{{ x1(rw.pe) }}</td>{% endfor %}</tr>
+<tr><td>EV/EBIT at today's price</td>{% for h in rep.actuals %}<td class="r">—</td>{% endfor %}{% for rw in rows %}<td class="r">{{ x1(rw.ev_ebit) }}</td>{% endfor %}</tr>
+<tr><td>FCF yield at today's price</td>{% for h in rep.actuals %}<td class="r">—</td>{% endfor %}{% for rw in rows %}<td class="r">{{ p1(rw.fcf_yield) }}</td>{% endfor %}</tr>
+</tbody></table></div>
+<p class="muted" style="font-size:12px;margin:4px 0 0">10-year growth a year in the base case: revenue {{ p1(pj.summary.rev_cagr_10y) }}, operating profit {{ p1(pj.summary.ebit_cagr_10y) }}, operating EPS {{ p1(pj.summary.eps_cagr_9y) }}. Forecast EPS is after-tax operating profit per share (before interest).</p>
+{% endif %}
+
+{% set d = rep.dcf %}{% if d %}<div class="grid g2" style="margin-top:14px">
+<div><h4 style="margin:0 0 6px">DCF breakdown <span class="muted" style="font-weight:400">base case, USD millions</span></h4><table><tbody>
+<tr><td>Present value, years 1-5</td><td class="r">{{ mm(d.pv_stage1) }}</td></tr>
+<tr><td>Present value, years 6-10</td><td class="r">{{ mm(d.pv_stage2) }}</td></tr>
+<tr><td>Present value, terminal ({{ d.terminal_how }})</td><td class="r">{{ mm(d.pv_terminal) }}</td></tr>
+<tr><td><b>Firm value</b></td><td class="r"><b>{{ mm(d.firm_value) }}</b></td></tr>
+<tr><td>Less net debt (net cash adds)</td><td class="r">{{ mm(-d.net_debt) }}</td></tr>
+<tr><td><b>Equity value</b></td><td class="r"><b>{{ mm(d.equity_value) }}</b></td></tr>
+<tr><td>Diluted shares in year 5 (M)</td><td class="r">{{ mm(d.shares) }}</td></tr>
+<tr><td><b>Value per share</b></td><td class="r"><b>{{ d.value_per_share|money }}</b></td></tr>
+</tbody></table><p class="muted" style="font-size:12px">{{ p1(d.terminal_share) }} of the firm value is the terminal value.</p></div>
+<div><h4 style="margin:0 0 6px">Key valuation drivers</h4><table><tbody>
+<tr><td>Discount rate (fixed method)</td><td class="r">{{ p1(d.drivers.discount_rate) }}</td></tr>
+<tr><td>Terminal growth</td><td class="r">{{ p1(d.drivers.terminal_growth) }}</td></tr>
+<tr><td>Tax rate</td><td class="r">{{ p1(d.drivers.tax) }}</td></tr>
+<tr><td>Reinvestment, % of revenue</td><td class="r">{{ p1(d.drivers.reinvest_pct) }}</td></tr>
+<tr><td>Years 6-10 revenue growth</td><td class="r">{{ p1(d.drivers.stage2_growth) }}</td></tr>
+<tr><td>Years 6-10 investment rate (of after-tax profit)</td><td class="r">{{ p1(d.drivers.stage2_investment_rate) }}</td></tr>
+<tr><td>Operating margin, year 10</td><td class="r">{{ p1(d.drivers.op_margin_y10) }}</td></tr>
+<tr><td>Share count change a year</td><td class="r">{{ p1(d.drivers.share_change) }}</td></tr>
+</tbody></table></div></div>{% endif %}
+
+{% if rep.revisions %}<h4 style="margin:14px 0 6px">Forecast revisions <span class="muted" style="font-weight:400">current vs the version of {{ rep.revisions_since|d }}, USD millions</span></h4>
+<table><thead><tr><th></th>{% for rv in rep.revisions %}<th class="r">Year {{ rv.year }} now</th><th class="r">prior</th>{% endfor %}</tr></thead><tbody>
+{% for k, lab in [('revenue','Revenue'),('ebit','Operating profit')] %}<tr><td>{{ lab }}</td>{% for rv in rep.revisions %}<td class="r">{{ mm(rv[k][0]) }}</td><td class="r muted">{{ mm(rv[k][1]) }}</td>{% endfor %}</tr>{% endfor %}
+<tr><td>Operating EPS</td>{% for rv in rep.revisions %}<td class="r">{{ '%.2f'|format(rv.eps[0]) }}</td><td class="r muted">{{ '%.2f'|format(rv.eps[1]) }}</td>{% endfor %}</tr></tbody></table>{% endif %}
+
+<h4 style="margin:16px 0 6px">Moat by the numbers</h4>
+{% if rep.moat_metrics %}<table><thead><tr><th>Metric</th><th>{{ rep.ticker }}</th><th>Peers</th><th>What it shows</th><th>Grade · source</th></tr></thead><tbody>
+{% for m in rep.moat_metrics if m is mapping %}<tr><td>{{ m.get('metric') }}</td><td><b>{{ m.get('company') }}</b></td><td>{% for k, v in (m.get('peers') or {}).items() %}{{ k }} {{ v }}{% if not loop.last %} · {% endif %}{% endfor %}</td><td>{{ m.get('reads') or '' }}</td><td class="muted">{{ m.get('grade') or '' }} · {{ m.get('source') or '' }}{% if m.get('date') %} ({{ m.get('date') }}){% endif %}</td></tr>{% endfor %}</tbody></table>
+{% else %}<p class="empty">Not written yet: the overnight task adds 3-6 moat numbers against named peers.</p>{% endif %}
+
+<h4 style="margin:16px 0 6px">Competitors</h4>
+{% if rep.peer_table %}<div style="overflow-x:auto"><table><thead><tr><th>Company</th><th>Moat</th><th class="r">Price</th><th class="r">Claude FV · P/FV</th><th class="r">P/E</th><th class="r">P/S</th><th class="r">P/B</th><th class="r">EV/EBITDA</th><th class="r">Div yield</th><th class="r">Mkt cap</th><th class="r">52-week range</th><th class="r">Growth</th><th class="r">Op margin</th><th class="r">ROIC</th></tr></thead><tbody>
+<tr style="background:var(--hl,#ffffff08)"><td><b>{{ rep.ticker }}</b></td><td>{{ (rep.moat_width or '—')|capitalize }}</td><td class="r">{{ rep.price|money }}</td><td class="r">{{ rep.fair_value|money }} · {{ x1(st.get('p_fv')) if st.get('p_fv') else '—' }}</td><td colspan="10" class="muted">see the snapshot and model above</td></tr>
+{% for pp in rep.peer_table if pp is mapping %}{% set fv = rep.peer_fv.get(pp.get('ticker')) %}<tr><td><b>{{ pp.get('ticker') }}</b> <span class="muted">{{ pp.get('name') or '' }}</span>{% if pp.get('why_peer') %}<div class="muted" style="font-size:12px">{{ pp.get('why_peer') }}</div>{% endif %}</td>
+<td>{{ (pp.get('moat') or '—')|capitalize }}</td><td class="r">{{ pp.get('price')|money }}</td><td class="r">{% if fv %}{{ fv|money }} · {{ x1(pp.get('price') / fv) if pp.get('price') else '—' }}{% else %}—{% endif %}</td>
+<td class="r">{{ x1(pp.get('pe')) }}</td><td class="r">{{ x1(pp.get('ps')) }}</td><td class="r">{{ x1(pp.get('pb')) }}</td><td class="r">{{ x1(pp.get('ev_ebitda')) }}</td><td class="r">{{ p1(pp.get('div_yield')) }}</td>
+<td class="r">{{ ('$%.1fB'|format(pp.get('mcap_bn'))) if pp.get('mcap_bn') is not none else '—' }}</td><td class="r">{% if pp.get('low_52w') %}{{ pp.get('low_52w')|money }}–{{ pp.get('high_52w')|money }}{% else %}—{% endif %}</td>
+<td class="r">{{ p1(pp.get('rev_growth')) }}</td><td class="r">{{ p1(pp.get('op_margin')) }}</td><td class="r">{{ p1(pp.get('roic')) }}</td></tr>{% endfor %}</tbody></table></div>
+<p class="muted" style="font-size:12px;margin:4px 0 0">Chosen by Claude as true competitors (same customers), with figures as dated in the thesis. Claude FV shows only where a peer has its own thesis.</p>
+{% else %}<p class="empty">Not written yet: the overnight task adds 3-5 true competitors with multiples and moats.</p>{% endif %}
+
+<h4 style="margin:16px 0 6px">Capital allocation {% if ca.get('rating') %}<span class="chip {{ {'Exemplary':'good','Standard':'','Poor':'bad'}.get(ca.get('rating'), '') }}">{{ ca.get('rating') }}</span>{% endif %}</h4>
+{% if ca %}<div class="kv">{% for k, lab in [('balance_sheet','Balance sheet'),('investment_efficiency','Investment efficiency'),('distributions','Shareholder distributions')] %}{% set it = ca.get(k) %}{% if it %}
+<span class="k">{{ lab }}{% if it is mapping and it.rating %} · <b>{{ it.rating }}</b>{% endif %}</span><span>{{ it.text if it is mapping else it }}</span>{% endif %}{% endfor %}
+{% if ca.get('governance') %}<span class="k">Governance</span><span>{{ ca.get('governance') }}</span>{% endif %}</div>
+{% else %}<p class="empty">Not written yet: the overnight task rates capital allocation (Exemplary, Standard or Poor).</p>{% endif %}
+
+<h4 style="margin:16px 0 6px">Research notes archive <span class="muted" style="font-weight:400">one note per thesis version</span></h4>
+{% for nt in rep.notes %}<div class="sec" style="padding:8px 0;border-top:1px solid var(--line,#3334)"><b>{{ nt.get('title') }}</b> <span class="muted">· v{{ nt.get('version') }} · {{ nt.get('date')|d }} · {{ nt.get('author') or 'claude' }} · {{ nt.get('approval') }}</span>
+<div class="muted" style="font-size:13px">{{ nt.get('verdict') or '' }}{% if nt.get('conviction') %} · conviction {{ nt.get('conviction')|n1 }}{% endif %}{% if nt.get('fv') %} · fair value {% if nt.get('fv_prev') and nt.get('fv_prev') != nt.get('fv') %}{{ nt.get('fv_prev')|money }} → {% endif %}<b>{{ nt.get('fv')|money }}</b>{% endif %}</div>
+{% if nt.get('why_it_matters') %}<div><b>Why it matters:</b> {{ nt.get('why_it_matters') }}</div>{% endif %}{% if nt.get('bottom_line') %}<div><b>Bottom line:</b> {{ nt.get('bottom_line') }}</div>{% endif %}</div>
+{% else %}<p class="empty">No thesis yet.</p>{% endfor %}
+</div>
+"""
+
+
 NAME_EXTRA_TPL = r"""
 {% set e = val.engine or {} %}
 {% if r %}<div class="grid g4" style="margin-top:12px" id="snapshot">
@@ -1688,7 +1786,15 @@ def name(ticker):
         if x.get("parent_id"):
             kids_of.setdefault(_root(x), []).append(x)
     qa_tree = [(x, kids_of.get(x["id"], [])) for x in qa_rows if not x.get("parent_id") or x["parent_id"] not in by_id][:10]
-    extra = Markup(render_template_string(
+    rep_html = ""
+    try:
+        import report as _R
+        with db() as _c, _c.cursor() as _cur:
+            _rep = _R.build(_cur, ticker)
+        rep_html = render_template_string(REPORT_DETAIL_TPL, rep=_rep, chart=Markup(_R.svg_price_fv(_rep)))
+    except Exception as _e:          # the report must never break the stock page
+        rep_html = f'<p class="warn">Research report unavailable: {str(_e)[:160]}</p>'
+    extra = Markup(rep_html) + Markup(render_template_string(
         NAME_EXTRA_TPL, sim_ok=bool(sa), sim_basis=sbasis, sim_scen=sscen, sim_dr=sdr, qa_tree=qa_tree,
         tam_rows=tam_calc(val.get("tam"), price), r=r, me=me, ps=ps, stale=stale, val=val, price=price, n=n, so=so, rebuttals=rebuttals,
         sections=(thesis or {}).get("sections") or {}, GRADES=GRADES, big=big, fx=fx,
@@ -1929,6 +2035,19 @@ def cancel_deep_dive(tickers):
                   updated_at = now()
                 WHERE n.ticker = ANY(%s) AND n.status = 'deep_dive_requested' RETURNING n.ticker""", (tickers,))
     return len(rows)
+
+
+@app.get("/name/<ticker>/report.pdf")
+def report_pdf(ticker):
+    """Morningstar-style research report as a PDF download."""
+    import report as R
+    import report_pdf as RP
+    with db() as conn, conn.cursor() as c:
+        rep = R.build(c, ticker.upper())
+    data = RP.build_pdf(rep)
+    fn = f"{ticker.upper()}-research-{dt.date.today().isoformat()}.pdf"
+    return app.response_class(data, mimetype="application/pdf",
+                              headers={"Content-Disposition": f'attachment; filename="{fn}"'})
 
 
 @app.post("/name/<ticker>/deepdive/cancel")

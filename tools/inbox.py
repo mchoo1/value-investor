@@ -16,8 +16,11 @@ WATCH_CAP = 50
 SECTION_KEYS = {"industry_map", "size_growth", "structure", "demand_supply", "industry_risks", "outlook", "winners",
                 "business", "right_to_win", "moat", "tam_competitors", "management", "financials", "company_risks",
                 "variant_view", "valuation", "pillars", "catalysts_flow", "premortem",
-                "technology", "latest_quarter", "controversy", "strategic_outlook", "bull_bear_tests"}
-NEW_SECTIONS = ["technology", "latest_quarter", "controversy", "strategic_outlook", "bull_bear_tests"]   # added 19 Nov 2026
+                "technology", "latest_quarter", "controversy", "strategic_outlook", "bull_bear_tests",
+                "moat_metrics", "peer_table", "capital_allocation"}
+STRUCTURED = ("moat_metrics", "peer_table", "capital_allocation")            # lists/dicts, rendered as tables (21 Nov 2026)
+NEW_SECTIONS = ["technology", "latest_quarter", "controversy", "strategic_outlook", "bull_bear_tests",
+                "moat_metrics", "peer_table", "capital_allocation"]         # backfilled overnight on older theses
 TAGS = {"no change", "strengthens", "weakens", "breaks"}
 SPLIT_GAP = 0.25          # second opinion: a base-value gap above 25% is a split
 SPLIT_CAP = 74            # conviction cap while a split is unresolved (half size at most)
@@ -100,6 +103,8 @@ def apply_engine(cur, t, blk, val, style=None):
         if not proven:
             cap = UNPROVEN_MOAT_CAP
             notes.append(f"Moat source not shown with grade A-C evidence: conviction capped at {cap}")
+    if ms is not None and not blk.get("moat_metrics") and not (blk.get("sections") or {}).get("moat_metrics"):
+        notes.append("Moat not backed by numbers yet (no moat_metrics): the overnight task adds them")
     if notes:
         val["engine_notes"] = notes
     return entry, cap, notes
@@ -125,6 +130,11 @@ def load_thesis(cur, d):
                     (t, TODAY, TODAY))
         n = known(cur, t)
     sections = {k: v for k, v in (d.get("sections") or {}).items() if k in SECTION_KEYS and v}
+    for k in STRUCTURED:                       # accepted at the top level too
+        if d.get(k) and k not in sections:
+            sections[k] = d[k]
+    if isinstance(d.get("note"), dict):
+        sections["note"] = d["note"]
     missing = sorted(SECTION_KEYS - set(sections))
     es = d.get("exec_summary") or (d.get("sections") or {}).get("exec_summary")
     if isinstance(es, dict):
@@ -335,6 +345,10 @@ def load(cur, name, d):
             for k, v in (it.get("sections") or {}).items():          # refresh may fill or update sections
                 if k in SECTION_KEYS and v:
                     secs[k] = v
+            for k in STRUCTURED:
+                if it.get(k):
+                    secs[k] = it[k]
+            secs["note"] = it["note"] if isinstance(it.get("note"), dict) else {"title": None, "bottom_line": it.get("summary")}
             for k in ("change_my_mind", "expected"):
                 if it.get(k):
                     secs[k] = it[k]

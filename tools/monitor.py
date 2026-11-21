@@ -733,6 +733,24 @@ RESEARCH_RULES = [
     "revenue is being diversified; 'bull_bear_tests' = a balanced view of growth potential vs operational risk, and the specific, "
     "measurable evidence (KPI, threshold, date) that would validate a bullish stance and that would validate a bearish one. "
     "Grade claims as usual; say 'none found' rather than leaving a section blank.",
+    "Research-report detail (21 Nov 2026, Morningstar standard): every thesis carries 'moat_metrics' (3-6 numbers that prove or "
+    "disprove the moat, each compared with 2-3 named peers: ROIC vs cost of capital, unit economics such as lifetime value / "
+    "acquisition cost or payback, cost ratios, pricing, retention or share trends, revenue per employee); 'peer_table' (3-5 true "
+    "competitors that sell to the same customers, NOT just same-industry codes, with price, P/E, P/S, P/B, EV/EBITDA, dividend "
+    "yield, market cap, 52-week range, growth, margin, ROIC and moat, dated); 'capital_allocation' (Exemplary, Standard or Poor "
+    "from balance sheet, investment efficiency and distributions, plus governance such as dual-class voting control); and a "
+    "'note' {title, why_it_matters, bottom_line}. Results refreshes also write a 'note' that says how and why the value moved. "
+    "The engine turns 'assumptions' into a year-by-year forecast, a DCF breakdown, an uncertainty rating and star bands, so "
+    "make the base case a genuine forecast (it is shown as a 5-year financial model); profile.uncertainty may raise the "
+    "code's rating by one notch, never lower it.",
+    "Economic moat deep dive (every thesis, Morningstar standard): the 'moat' section covers (1) the moat source(s) and "
+    "moat_source.width wide (excess returns very likely for 20+ years), narrow (10+ years) or none; (2) the evidence in numbers, "
+    "mirrored in 'moat_metrics': returns on capital vs the cost of capital over time, unit economics (lifetime value / acquisition "
+    "cost, payback, retention or churn), cost position (cost per unit, cost / assets or revenue vs peers, revenue per employee), "
+    "pricing power (price rises vs volume, gross margin vs peers), share trend; (3) where no hard number exists, a BASIC ASSUMPTION "
+    "stated openly with its arithmetic, graded E (e.g. 'acquisition cost ~ marketing spend $X / net new accounts Y = $Z'), never "
+    "a bare adjective; (4) why rivals cannot copy it and what would erode it, with the KPI that would show erosion first; "
+    "(5) the trend (widening, stable, narrowing). A moat claim with no number and no stated assumption is 'unproven'.",
     "Second opinion: write your own assumptions from the data pack BEFORE reading Claude's thesis; then attack it. Never average values.",
 ]
 
@@ -763,10 +781,26 @@ INBOX_FORMAT = {
         "claims": [{"claim": "Revenue grew 16% in FY25", "grade": "A", "source": "10-K FY25", "date": "2025-07-30", "pillar": 1},
                    {"claim": "Can reach 25% share of the market by 2030", "grade": "E", "source": None, "pillar": 2}],
         "moat_source": {"type": "pricing power|switching costs|network effects|cost advantage|distribution|IP or regulation",
-                        "grade": "A|B|C", "evidence": "the fact that proves it, with its source"},
+                        "grade": "A|B|C", "evidence": "the fact that proves it, with its source",
+                        "width": "wide|narrow|none", "trend": "widening|stable|narrowing"},
         "change_my_mind": "the evidence that would invalidate the thesis even if the price rises",
         "drivers": ["hyperscaler capex", "rates", "China", "oil", "consumer spending", "enterprise IT spend"],
         "expected": {"revenue_growth_next_year": 0.12, "op_margin_next_year": 0.30, "notes": "what must be true in 12 months"},
+        "moat_metrics": [{"metric": "ROIC vs cost of capital", "company": "34% (2026-30 est.) vs 11%", "peers": {"SCHW": "18%", "IBKR": "25%"},
+                          "reads": "returns well above the cost of capital support a moat", "source": "10-K FY25; own estimate", "date": "2026-10-28", "grade": "B"},
+                         {"metric": "Customer lifetime value / acquisition cost", "company": "17x ($160 per account, 9-month payback)", "peers": {},
+                          "reads": "...", "source": "...", "date": "...", "grade": "C"}],
+        "peer_table": [{"ticker": "SCHW", "name": "Charles Schwab", "why_peer": "same customers and products", "moat": "wide|narrow|none",
+                        "price": 92.56, "pe": 15.8, "ps": 6.0, "pb": 3.5, "ev_ebitda": None, "div_yield": 0.0138, "mcap_bn": 159.8,
+                        "low_52w": 83.96, "high_52w": 114.53, "rev_growth": 0.12, "op_margin": 0.45, "roic": 0.18,
+                        "source": "company filings and Yahoo, date"}],
+        "capital_allocation": {"rating": "Exemplary|Standard|Poor",
+                               "balance_sheet": {"rating": "Sound|Fair|Weak", "text": "cash, debt, liquidity with numbers"},
+                               "investment_efficiency": {"rating": "Excellent|Fair|Poor", "text": "returns on past investments and M&A, outlook"},
+                               "distributions": {"rating": "Appropriate|Fair|Poor", "text": "buybacks vs value, dividends, dilution, SBC"},
+                               "governance": "voting control, dual-class shares, board independence, insider selling"},
+        "note": {"title": "headline of this research note, e.g. 'Solid Q3 fails to meet lofty expectations; shares expensive'",
+                 "why_it_matters": "2-3 lines", "bottom_line": "what changed in the value and the call, and why"},
         "sim_scenarios": "3-6 ready-made what-if scenarios for the stock-page simulator, each exactly SIM_SCENARIO_EXAMPLE: "
                          "the key risks, any pricing-model change, the TAM upside; changes are deltas to the base case"},
     "second_opinion": {"type": "second_opinion", "run_id": "so-<TICKER>-<YYYYMMDD>", "ticker": "AMAT",

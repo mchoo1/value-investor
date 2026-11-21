@@ -149,6 +149,7 @@ COMMANDS = [
     ("challenge", "TICKER [focus]: Claude tries to break the thesis"),
     ("check", "TICKER link: test a bear report or article"),
     ("feedback", "[TICKER] text: your view on a thesis or the app"),
+    ("report", "TICKER: the full research report as a PDF"),
     ("sections", "the thesis sections you can open with /thesis"),
     ("help", "all commands"),
 ]
@@ -257,7 +258,7 @@ def thesis_text(cur, t, section=None):
     plan = es.get("plan")
     if isinstance(plan, dict) and plan:
         lines.append("\nPlan: " + _txt(plan, 350))
-    lines.append(f"\nMore: /thesis {t} quarter · controversy · tech · strategy · valuation\nFull thesis: {link}")
+    lines.append(f"\nMore: /thesis {t} quarter · controversy · tech · strategy · valuation · /report {t} (PDF)\nFull thesis: {link}")
     return _txt("\n".join(lines), 4000)
 
 
@@ -304,6 +305,23 @@ def cancel_text(cur, t):
     return f"Deep dive for {t} cancelled." if hit else f"{t} has no deep dive waiting."
 
 
+def send_report(cur, chat, t):
+    """Build the PDF research report and send it to the chat as a document."""
+    import requests, report, report_pdf
+    rep = report.build(cur, t)
+    data = report_pdf.build_pdf(rep)
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    if not token or os.environ.get("TELEGRAM_DRY"):
+        return f"(dry run) {t} report built, {len(data) // 1024} KB."
+    st = (rep.get("stars") or {})
+    cap = (f"{t} research report · fair value ${rep['fair_value']:,.2f}" if rep.get("fair_value") else f"{t} research report") + \
+          (f" · {'★' * st['stars']} · {(rep.get('uncertainty') or {}).get('rating', '')} uncertainty" if st.get("stars") else "")
+    r = requests.post(f"https://api.telegram.org/bot{token}/sendDocument", data={"chat_id": chat, "caption": cap[:1000]},
+                      files={"document": (f"{t}-research-{TODAY}.pdf", data, "application/pdf")}, timeout=60)
+    ok = r.ok and (r.json() or {}).get("ok")
+    return None if ok else f"Could not send the PDF ({r.status_code}). Open it in the app: {APP_URL}/name/{t}/report.pdf"
+
+
 def handle_message(conn, chat, text, reply_to=None):
     """Act on one Telegram message from Ming's chat. Returns the reply text (or None to stay silent).
     reply_to: the Telegram message id Ming replied to; a reply to one of Claude's answers is a follow-up in that thread."""
@@ -335,6 +353,13 @@ def handle_message(conn, chat, text, reply_to=None):
         if not bits:
             return "Send: /thesis TICKER, or /thesis TICKER section (e.g. /thesis NOW controversy). /sections lists them."
         return thesis_text(cur, bits[0].upper().lstrip("$"), bits[1] if len(bits) > 1 else None)
+    if cmd0 == "/report":
+        if not arg:
+            return "Send: /report TICKER (the full research report as a PDF)"
+        t = arg.split()[0].upper().lstrip("$")
+        if not _latest(cur, t):
+            return f"{t}: no thesis yet. Send /deepdive {t} first."
+        return send_report(cur, chat, t)
     if cmd0 == "/sections":
         return ("Open one section with /thesis TICKER <name>:\ntech · quarter (GAAP vs non-GAAP) · controversy (short reports) · "
                 "strategy (partnerships, backlog) · bull (bull/bear tests) · valuation · moat · variant · pillars · risks · "
@@ -377,6 +402,7 @@ def handle_message(conn, chat, text, reply_to=None):
             pass
         return ("Commands:\n/deepdive TICKER [note]: full deep dive and investment thesis tonight (same as /add)\n"
                 "/thesis TICKER [section]: the thesis summary, or one section (/sections lists them)\n"
+                "/report TICKER: the full research report as a PDF (model, DCF, moat numbers, peers, notes)\n"
                 "/watchlist: names closest to their buy level · /book: your holdings\n"
                 "/cancel TICKER: cancel a requested deep dive\n/add TICKER [TICKER ...] note: research new ideas (full deep dive tonight)\n"
                 "/ideas: ideas waiting and done\n/ask [TICKER] question: Claude researches and replies within ~2 hours\n"
