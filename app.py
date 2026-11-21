@@ -1892,6 +1892,11 @@ def telegram_setup():
     if by:
         url += f"?x-vercel-protection-bypass={by}"
     res = _tg("setWebhook", url=url, secret_token=os.environ["TELEGRAM_WEBHOOK_SECRET"], allowed_updates=["message"]) or {}
+    try:
+        from ideas import set_commands
+        set_commands()                      # the "/" menu in Telegram
+    except Exception:
+        pass
     info = _tg("getWebhookInfo") or {}
     flash("Telegram connected: messages to the bot are now answered instantly." if res.get("ok") else
           f"Telegram refused the webhook: {res.get('description')}")

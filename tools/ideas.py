@@ -14,7 +14,7 @@ import os, re, sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from common import db, J, alert, ensure_schema, _tg, TODAY
+from common import db, J, alert, ensure_schema, _tg, TODAY, APP_URL
 
 WATCH_CAP = 50
 TICKER = re.compile(r"^[A-Z]{1,5}([.-][A-Z]{1,2})?$")
@@ -137,6 +137,173 @@ def _qref(text):
     return (int(m.group(1)), m.group(2)) if m else (None, text)
 
 
+# Telegram menu (shown when Ming types "/" in the chat); set by the app's "Connect Telegram commands" button and on /help
+COMMANDS = [
+    ("deepdive", "TICKER [note]: full deep dive and investment thesis tonight"),
+    ("thesis", "TICKER [section]: the investment thesis summary, or one section"),
+    ("watchlist", "names closest to their buy level"),
+    ("book", "holdings: call, conviction and price vs value"),
+    ("ideas", "deep dives waiting and done"),
+    ("cancel", "TICKER: cancel a requested deep dive"),
+    ("ask", "[TICKER] question: Claude replies within ~2 hours"),
+    ("challenge", "TICKER [focus]: Claude tries to break the thesis"),
+    ("check", "TICKER link: test a bear report or article"),
+    ("feedback", "[TICKER] text: your view on a thesis or the app"),
+    ("sections", "the thesis sections you can open with /thesis"),
+    ("help", "all commands"),
+]
+SECTION_ALIASES = {"tech": "technology", "quarter": "latest_quarter", "earnings": "latest_quarter", "q": "latest_quarter",
+                   "gaap": "latest_quarter", "short": "controversy", "risks": "company_risks", "risk": "company_risks",
+                   "strategy": "strategic_outlook", "backlog": "strategic_outlook", "bull": "bull_bear_tests",
+                   "bear": "bull_bear_tests", "tests": "bull_bear_tests", "valuation": "valuation", "moat": "moat",
+                   "variant": "variant_view", "pillars": "pillars", "kill": "pillars", "premortem": "premortem",
+                   "catalysts": "catalysts_flow", "management": "management", "financials": "financials",
+                   "business": "business", "tam": "tam_competitors", "industry": "industry_map", "outlook": "outlook"}
+
+
+def set_commands():
+    return _tg("setMyCommands", commands=[{"command": c, "description": d[:256]} for c, d in COMMANDS])
+
+
+def _n(v):
+    try:
+        return float(v) if v is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _money(v):
+    v = _n(v)
+    return f"${v:,.2f}" if v is not None and v < 1000 else (f"${v:,.0f}" if v is not None else "n/a")
+
+
+def _txt(v, limit=None):
+    """A thesis field (string, list or dict) as plain text."""
+    if v is None:
+        return ""
+    if isinstance(v, str):
+        out = v
+    elif isinstance(v, list):
+        out = "\n".join("• " + _txt(x) for x in v)
+    elif isinstance(v, dict):
+        out = "; ".join(f"{k.replace('_', ' ')}: {_txt(x)}" for k, x in v.items() if x not in (None, "", []))
+    else:
+        out = str(v)
+    return out if not limit or len(out) <= limit else out[:limit - 1].rstrip() + "…"
+
+
+def _latest(cur, t):
+    cur.execute("SELECT * FROM v2_theses WHERE ticker = %s ORDER BY version DESC LIMIT 1", (t,))
+    return cur.fetchone()
+
+
+def _price(cur, t):
+    cur.execute("SELECT close FROM v2_prices WHERE ticker = %s ORDER BY date DESC LIMIT 1", (t,))
+    r = cur.fetchone()
+    return _n(r["close"]) if r else None
+
+
+def thesis_text(cur, t, section=None):
+    """/thesis TICKER: the executive summary in under a minute's read; /thesis TICKER controversy: one section in full."""
+    from inbox import SECTION_KEYS
+    th = _latest(cur, t)
+    link = f"{APP_URL}/name/{t}#thesis"
+    if not th:
+        cur.execute("SELECT level, status FROM v2_names WHERE ticker = %s", (t,))
+        n = cur.fetchone()
+        if n and n["status"] == "deep_dive_requested":
+            return f"{t}: no thesis yet; its deep dive is queued (tonight 02:13 SGT for your ideas, Monday 03:13 otherwise)."
+        return f"{t}: no thesis yet. Send /deepdive {t} to get a full deep dive and investment thesis tonight."
+    secs = th["sections"] or {}
+    if section:
+        key = SECTION_ALIASES.get(section.lower(), section.lower())
+        if key not in SECTION_KEYS and key not in ("exec_summary", "change_my_mind"):
+            return f"Unknown section '{section}'. Send /sections for the list."
+        body = _txt(secs.get(key))
+        if not body:
+            return (f"{t}: the '{key.replace('_', ' ')}' section is not written yet"
+                    + (" (it is being backfilled overnight)." if key in ("technology", "latest_quarter", "controversy",
+                                                                          "strategic_outlook", "bull_bear_tests") else "."))
+        head = f"{t} · {key.replace('_', ' ').capitalize()} (thesis v{th['version']}, {str(th['created_at'])[:10]})\n\n"
+        tail = f"\n\nFull thesis: {link.replace('#thesis', '#sec-' + key)}"
+        return head + _txt(body, 3900 - len(head) - len(tail)) + tail
+    es = secs.get("exec_summary") if isinstance(secs.get("exec_summary"), dict) else {}
+    val = th["valuation"] or {}
+    px = _price(cur, t)
+    base, entry = _n(val.get("iv_base")), _n(th["entry_target"])
+    lines = [f"{t} · {th['verdict'] or '?'} · conviction {int(_n(th['conviction']) or 0)} · v{th['version']} "
+             f"{str(th['created_at'])[:10]} ({th['approval']})"]
+    if es.get("recommendation") or es.get("one_line"):
+        lines.append(f"\nCall: {es.get('recommendation') or ''} {('— ' + _txt(es.get('one_line'), 400)) if es.get('one_line') else ''}".rstrip())
+    pv = [f"Price {_money(px)}"]
+    if base:
+        pv.append(f"base value {_money(base)}" + (f" ({(base / px - 1):+.0%})" if px else ""))
+    if entry:
+        pv.append(f"buy below {_money(entry)}" + (" ✅ in range" if px and px <= entry else ""))
+    if _n(val.get("growth_zone_engine")):
+        pv.append(f"growth zone {_money(val['growth_zone_engine'])}")
+    lines.append(" · ".join(pv))
+    if es.get("why"):
+        lines.append("\nWhy:\n" + _txt(es["why"][:3] if isinstance(es["why"], list) else es["why"], 700))
+    if es.get("key_risks"):
+        kr = es["key_risks"][:3] if isinstance(es["key_risks"], list) else es["key_risks"]
+        if isinstance(kr, list):
+            kr = [f"{r.get('risk')} (watch: {r.get('watch')})" if isinstance(r, dict) else r for r in kr]
+        lines.append("\nKey risks:\n" + _txt(kr, 700))
+    if secs.get("bull_bear_tests"):
+        lines.append("\nWhat would prove it right or wrong:\n" + _txt(secs["bull_bear_tests"], 700))
+    elif secs.get("variant_view"):
+        lines.append("\nVariant view: " + _txt(secs["variant_view"], 400))
+    plan = es.get("plan")
+    if isinstance(plan, dict) and plan:
+        lines.append("\nPlan: " + _txt(plan, 350))
+    lines.append(f"\nMore: /thesis {t} quarter · controversy · tech · strategy · valuation\nFull thesis: {link}")
+    return _txt("\n".join(lines), 4000)
+
+
+def watchlist_text(cur, level="watchlist"):
+    cur.execute("SELECT ticker, status FROM v2_names WHERE level = %s ORDER BY ticker", (level,))
+    names = cur.fetchall()
+    rows = []
+    for n in names:
+        th = _latest(cur, n["ticker"]) or {}
+        px = _price(cur, n["ticker"])
+        entry, base = _n(th.get("entry_target")), _n((th.get("valuation") or {}).get("iv_base"))
+        es = (th.get("sections") or {}).get("exec_summary") or {}
+        rows.append({"t": n["ticker"], "px": px, "entry": entry, "base": base, "conv": _n(th.get("conviction")),
+                     "call": (es.get("recommendation") if isinstance(es, dict) else None) or th.get("verdict"),
+                     "gap": (px / entry - 1) if px and entry else None, "pending": n["status"] == "deep_dive_requested"})
+    if not rows:
+        return f"No names in the {level.capitalize()}."
+    if level == "watchlist":
+        rows.sort(key=lambda r: (r["gap"] is None, r["gap"] if r["gap"] is not None else 0))
+        out = ["Watchlist, closest to the buy level first:"]
+        for r in rows[:15]:
+            g = ("✅ in buy range" if r["gap"] <= 0 else f"{r['gap']:.0%} above buy {_money(r['entry'])}") if r["gap"] is not None else "no buy level yet"
+            out.append(f"{r['t']} {_money(r['px'])} · {g}" + (f" · {r['call']} {int(r['conv'])}" if r["call"] and r["conv"] else "")
+                       + (" · deep dive queued" if r["pending"] else ""))
+        if len(rows) > 15:
+            out.append(f"…and {len(rows) - 15} more: {APP_URL}/watchlist")
+    else:
+        out = ["Book:"]
+        for r in rows:
+            vs = f" · value {_money(r['base'])} ({(r['base'] / r['px'] - 1):+.0%})" if r["base"] and r["px"] else ""
+            out.append(f"{r['t']} {_money(r['px'])}{vs}" + (f" · {r['call']} {int(r['conv'])}" if r["call"] and r["conv"] else ""))
+    out.append("Send /thesis TICKER for any name.")
+    return "\n".join(out)
+
+
+def cancel_text(cur, t):
+    cur.execute("""UPDATE v2_names n SET status = CASE n.level WHEN 'book' THEN 'holding' WHEN 'watchlist' THEN 'watching'
+                     ELSE CASE WHEN EXISTS (SELECT 1 FROM v2_theses x WHERE x.ticker = n.ticker) THEN 'deep_dive_done' ELSE 'new' END END,
+                     updated_at = now()
+                   WHERE n.ticker = %s AND n.status = 'deep_dive_requested' RETURNING n.ticker""", (t,))
+    hit = cur.fetchone()
+    cur.execute("UPDATE v2_ideas SET status = 'cancelled', done_at = now() WHERE ticker = %s AND status = 'pending' RETURNING id", (t,))
+    hit = hit or cur.fetchone()
+    return f"Deep dive for {t} cancelled." if hit else f"{t} has no deep dive waiting."
+
+
 def handle_message(conn, chat, text, reply_to=None):
     """Act on one Telegram message from Ming's chat. Returns the reply text (or None to stay silent).
     reply_to: the Telegram message id Ming replied to; a reply to one of Claude's answers is a follow-up in that thread."""
@@ -149,6 +316,39 @@ def handle_message(conn, chat, text, reply_to=None):
             conn.commit()
             return msg
     low = (text or "").strip().lower()
+    cmd0 = low.split()[0].split("@")[0] if low else ""
+    arg = text.strip().split(None, 1)[1] if len(text.strip().split(None, 1)) > 1 else ""
+    if cmd0 in ("/deepdive", "/dd", "/research"):
+        tickers, note = parse_tickers(arg)
+        if not tickers:
+            return "Send: /deepdive TICKER [why or where you heard it], e.g. /deepdive ASTS satellite direct-to-phone"
+        url = next((w for w in (note or "").split() if w.startswith("http")), None)
+        msgs = []
+        for t in tickers[:5]:
+            ok, msg = add_idea(cur, t, "telegram", note=note or "Deep dive requested", url=url)
+            conn.commit()
+            msgs.append(msg)
+        return ("\n".join(msgs) + "\nThe full investment thesis (executive summary, three layers, valuation, bull and bear tests) "
+                "is pushed here when it is ready; or send /thesis " + tickers[0] + " tomorrow.")
+    if cmd0 == "/thesis":
+        bits = arg.split()
+        if not bits:
+            return "Send: /thesis TICKER, or /thesis TICKER section (e.g. /thesis NOW controversy). /sections lists them."
+        return thesis_text(cur, bits[0].upper().lstrip("$"), bits[1] if len(bits) > 1 else None)
+    if cmd0 == "/sections":
+        return ("Open one section with /thesis TICKER <name>:\ntech · quarter (GAAP vs non-GAAP) · controversy (short reports) · "
+                "strategy (partnerships, backlog) · bull (bull/bear tests) · valuation · moat · variant · pillars · risks · "
+                "catalysts · management · financials · business · tam · industry · outlook · premortem")
+    if cmd0 == "/watchlist":
+        return watchlist_text(cur, "watchlist")
+    if cmd0 == "/book":
+        return watchlist_text(cur, "book")
+    if cmd0 == "/cancel":
+        if not arg:
+            return "Send: /cancel TICKER"
+        msg = cancel_text(cur, arg.split()[0].upper().lstrip("$"))
+        conn.commit()
+        return msg
     if low.startswith(("/add", "add ")):
         rest = text.strip().split(None, 1)
         tickers, note = parse_tickers(rest[1] if len(rest) > 1 else "")
@@ -171,7 +371,14 @@ def handle_message(conn, chat, text, reply_to=None):
                 + ("\nResearched in the last 2 weeks: " + ", ".join(f"{r['ticker']} {r['verdict'] or ''}".strip() for r in done)
                    if done else ""))
     if low.startswith(("/help", "/start")):
-        return ("Commands:\n/add TICKER [TICKER ...] note: research new ideas (full deep dive tonight)\n"
+        try:
+            set_commands()
+        except Exception:
+            pass
+        return ("Commands:\n/deepdive TICKER [note]: full deep dive and investment thesis tonight (same as /add)\n"
+                "/thesis TICKER [section]: the thesis summary, or one section (/sections lists them)\n"
+                "/watchlist: names closest to their buy level · /book: your holdings\n"
+                "/cancel TICKER: cancel a requested deep dive\n/add TICKER [TICKER ...] note: research new ideas (full deep dive tonight)\n"
                 "/ideas: ideas waiting and done\n/ask [TICKER] question: Claude researches and replies within ~2 hours\n"
                 "/feedback [TICKER] text: tell Claude what you think of a thesis or the app\n"
                 "/challenge TICKER [focus]: Claude tries hard to break the thesis (scorecard, counter-arguments, fixes)\n"
