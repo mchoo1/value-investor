@@ -283,7 +283,17 @@ def build(cur, html=True):
         return [f"{run['run_date']:%d %b} · value: {', '.join(a(t) for t in v)} · growth: {', '.join(a(t) for t in g)} · "
                 + link(f"{APP_URL}/screen", "Screen")]
 
-    sections = [("Market", _safe(market, cur), 3), ("Key news", _safe(key_news, cur), 1), ("Your Book", _safe(book, cur), 1),
+    def system(cur):
+        """Files from Claude that the loader rejected in the last day: shown first so a silent failure cannot hide."""
+        cur.execute("""SELECT name, result FROM v2_inbox_log WHERE kind = 'error' AND loaded_at > now() - interval '26 hours'
+                       ORDER BY loaded_at DESC""")
+        rows = cur.fetchall()
+        if not rows:
+            return []
+        return [f"⚠️ {len(rows)} file(s) from Claude were rejected by the app in the last day, e.g. "
+                f"{e(rows[0]['name'])}: {e((rows[0]['result'] or '')[:120])}. Research may be missing until this is fixed."]
+
+    sections = [("System", _safe(system, cur), 0), ("Market", _safe(market, cur), 3), ("Key news", _safe(key_news, cur), 1), ("Your Book", _safe(book, cur), 1),
                 ("To decide", _safe(decide, cur), 0), ("Holdings", _safe(holdings, cur), 2),
                 ("Risk check", _safe(risk, cur), 2), ("Watchlist near buy", _safe(near_buy, cur), 4),
                 ("Thesis activity", _safe(activity, cur), 5), ("Next 7 days", _safe(week, cur), 4),

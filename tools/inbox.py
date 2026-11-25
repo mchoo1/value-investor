@@ -563,7 +563,7 @@ def main(dir_=None, conn=None, log=print):
     conn.commit()
     args = argparse.Namespace(dir=dir_)
     if args.dir:
-        import hashlib  # keyed by file name and content, so a checked-in folder loads once however often it is checked out
+        # keyed by file name and content, so a checked-in folder loads once however often it is checked out
         files = [{"id": "dir:" + p.name, "name": p.name, "modifiedTime": hashlib.sha1(p.read_bytes()).hexdigest()[:16], "path": p}
                  for p in sorted(Path(args.dir).glob("*.json"))] if Path(args.dir).is_dir() else []
     else:
@@ -573,10 +573,29 @@ def main(dir_=None, conn=None, log=print):
             return {"loaded": 0, "files": [], "note": "no Drive credentials"}
         files = [f for f in files if f["name"].lower().endswith(".json")]
     done, loaded = 0, []
+    # a thesis file superseded by a newer thesis file for the same ticker (e.g. a backlog) is skipped, not loaded twice
+    latest_thesis = {}
     for f in files:
-        cur.execute("SELECT 1 FROM v2_inbox_log WHERE file_id = %s AND modified = %s", (f["id"], f["modifiedTime"]))
+        nm = f["name"].lower()
+        if nm.startswith("thesis-") and nm.count("-") >= 4:
+            tk = nm.rsplit("-", 1)[-1].replace(".json", "")
+            latest_thesis[tk] = max(latest_thesis.get(tk, ""), nm)
+    for f in files:
+        # already handled: any non-error row; error rows are final too, except the 13-25 Nov 2026 loader bug
+        # (UnboundLocalError on hashlib) which rejected every Drive file, so those are retried once
+        cur.execute("""SELECT 1 FROM v2_inbox_log WHERE file_id = %s AND modified = %s
+                       AND NOT (kind = 'error' AND result LIKE %s)""", (f["id"], f["modifiedTime"], "%UnboundLocalError%hashlib%"))
         if cur.fetchone():
             continue
+        nm = f["name"].lower()
+        if nm.startswith("thesis-") and nm.count("-") >= 4:
+            tk = nm.rsplit("-", 1)[-1].replace(".json", "")
+            if latest_thesis.get(tk) and latest_thesis[tk] > nm:
+                cur.execute("""INSERT INTO v2_inbox_log (file_id, modified, name, kind, result) VALUES (%s,%s,%s,%s,%s)
+                               ON CONFLICT (file_id, modified) DO UPDATE SET kind = EXCLUDED.kind, result = EXCLUDED.result""",
+                            (f["id"], f["modifiedTime"], f["name"], "duplicate", f"superseded by {latest_thesis[tk]}: skipped"))
+                conn.commit()
+                continue
         chash, run_id = None, None
         try:
             text = f["path"].read_text() if "path" in f else drive_read(f["id"])
@@ -598,7 +617,9 @@ def main(dir_=None, conn=None, log=print):
             conn.rollback()
             result, kind = f"ERROR {e.__class__.__name__}: {str(e)[:150]}", "error"
             alert(cur, "SYSTEM", "Inbox file rejected", "info", f"{f['name']}: {result}", f"inbox-{f['id']}-{f['modifiedTime']}")
-        cur.execute("INSERT INTO v2_inbox_log (file_id, modified, name, kind, result, content_hash, run_id) VALUES (%s,%s,%s,%s,%s,%s,%s)",
+        cur.execute("""INSERT INTO v2_inbox_log (file_id, modified, name, kind, result, content_hash, run_id) VALUES (%s,%s,%s,%s,%s,%s,%s)
+                       ON CONFLICT (file_id, modified) DO UPDATE SET kind = EXCLUDED.kind, result = EXCLUDED.result,
+                       content_hash = EXCLUDED.content_hash, run_id = EXCLUDED.run_id, loaded_at = now()""",
                     (f["id"], f["modifiedTime"], f["name"], kind, result, chash if kind != "error" else None, run_id))
         conn.commit()
         done += 1

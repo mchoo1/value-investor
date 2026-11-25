@@ -75,6 +75,12 @@ def test_inbox_validate():
 
 
 
+def test_inbox_main_has_no_local_imports():
+    """13 Nov 2026 bug: a function-level 'import hashlib' made hashlib local to main(), so every Drive file failed."""
+    import inbox
+    assert "hashlib" not in inbox.main.__code__.co_varnames
+
+
 def test_simulator():
     r0 = V.simulate(A, price=200)
     assert abs(r0["change_vs_base"]) < 1e-9
