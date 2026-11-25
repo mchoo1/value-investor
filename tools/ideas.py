@@ -138,20 +138,20 @@ def _qref(text):
 
 
 # Telegram menu (shown when Ming types "/" in the chat); set by the app's "Connect Telegram commands" button and on /help
-COMMANDS = [
+COMMANDS = [                         # menu order = the simple guide: find, read, check, then the rest
     ("deepdive", "TICKER [note]: full deep dive and investment thesis tonight"),
-    ("thesis", "TICKER [section]: the investment thesis summary, or one section"),
-    ("watchlist", "names closest to their buy level"),
+    ("thesis", "TICKER [section]: the thesis summary, or one section"),
+    ("report", "TICKER: the full research report as a PDF"),
     ("book", "holdings: call, conviction and price vs value"),
-    ("ideas", "deep dives waiting and done"),
-    ("cancel", "TICKER: cancel a requested deep dive"),
+    ("watchlist", "names closest to their buy level"),
     ("ask", "[TICKER] question: Claude replies within ~2 hours"),
     ("challenge", "TICKER [focus]: Claude tries to break the thesis"),
     ("check", "TICKER link: test a bear report or article"),
+    ("ideas", "deep dives waiting and done"),
+    ("cancel", "TICKER: cancel a requested deep dive"),
     ("feedback", "[TICKER] text: your view on a thesis or the app"),
-    ("report", "TICKER: the full research report as a PDF"),
     ("sections", "the thesis sections you can open with /thesis"),
-    ("help", "all commands"),
+    ("help", "how to use ValueInvestor and all commands"),
 ]
 SECTION_ALIASES = {"tech": "technology", "quarter": "latest_quarter", "earnings": "latest_quarter", "q": "latest_quarter",
                    "gaap": "latest_quarter", "short": "controversy", "risks": "company_risks", "risk": "company_risks",
@@ -400,17 +400,16 @@ def handle_message(conn, chat, text, reply_to=None):
             set_commands()
         except Exception:
             pass
-        return ("Commands:\n/deepdive TICKER [note]: full deep dive and investment thesis tonight (same as /add)\n"
-                "/thesis TICKER [section]: the thesis summary, or one section (/sections lists them)\n"
-                "/report TICKER: the full research report as a PDF (model, DCF, moat numbers, peers, notes)\n"
-                "/watchlist: names closest to their buy level · /book: your holdings\n"
-                "/cancel TICKER: cancel a requested deep dive\n/add TICKER [TICKER ...] note: research new ideas (full deep dive tonight)\n"
-                "/ideas: ideas waiting and done\n/ask [TICKER] question: Claude researches and replies within ~2 hours\n"
-                "/feedback [TICKER] text: tell Claude what you think of a thesis or the app\n"
-                "/challenge TICKER [focus]: Claude tries hard to break the thesis (scorecard, counter-arguments, fixes)\n"
-                "/check TICKER link [note]: Claude tests a bear report, analyst note or article against the facts\n"
-                "Reply to any of Claude's answers to follow up in the same thread (or /ask #12 your follow-up).\n"
-                "Any other message is treated as a question.")
+        return ("How it works: find (screen or /deepdive) → read (/thesis, /report) → check (/challenge, /check) → "
+                "approve in the app → monitor (alerts and refreshes).\n\n"
+                "Most used:\n/deepdive TICKER [note]: full deep dive and thesis tonight\n"
+                "/thesis TICKER [section]: the summary, or one section (/sections lists them)\n"
+                "/report TICKER: the full research report as a PDF\n"
+                "/book · /watchlist: holdings, and names closest to their buy level\n"
+                "/ask [TICKER] question: Claude replies within ~2 hours (09:00-21:00); reply to an answer to follow up\n"
+                "/challenge TICKER [focus] · /check TICKER link: break the thesis, or test a source\n\n"
+                "Also: /ideas (queue) · /cancel TICKER · /feedback text. Any other message is treated as a question.\n\n"
+                f"Guide: {APP_URL}/help")
     for cmd, kind in (("/ask", "question"), ("/feedback", "feedback"), ("/challenge", "challenge"), ("/check", "check")):
         if low.startswith(cmd):
             body = text.strip()[len(cmd):].strip()

@@ -15,7 +15,7 @@ import yfinance as yf
 
 sys.path.insert(0, str(Path(__file__).parent))
 from common import (db, J, alert, ensure_schema, heartbeat, HEARTBEAT_MAX_H, week_key, TODAY, THEMES, APP_URL, DRIVE_STATE_FILE,
-                    DRIVE_INBOX, drive_update)
+                    DRIVE_INBOX, drive_update, drive_list)
 
 MODE = sys.argv[1] if len(sys.argv) > 1 else "daily"
 UA = os.environ.get("SEC_USER_AGENT", "")
@@ -1034,6 +1034,22 @@ def export(conn):
     cur.execute("""SELECT i.ticker, i.via, i.source, i.note, i.url, i.added_at, n.level, n.name, n.sector, n.industry
                    FROM v2_ideas i JOIN v2_names n USING (ticker) WHERE i.status = 'pending' ORDER BY i.added_at""")
     idea_queue = [dict(r) for r in cur.fetchall()]
+    # a thesis already saved to the inbox in the last 3 days but not loaded yet is not researched again (25 Nov 2026:
+    # a loader bug made the nightly task redo the same names for days)
+    written = {}
+    try:
+        cutoff = (dt.datetime.utcnow() - dt.timedelta(days=3)).isoformat()
+        for f in drive_list(DRIVE_INBOX) or []:
+            nm = f["name"].lower()
+            if nm.startswith("thesis-") and f.get("modifiedTime", "") >= cutoff:
+                written[nm.rsplit("-", 1)[-1].replace(".json", "").upper()] = f["name"]
+    except Exception as e:                       # Drive unreachable: research as normal
+        print("Inbox listing failed:", e.__class__.__name__)
+    cur.execute("SELECT DISTINCT ticker FROM v2_theses WHERE created_at > now() - interval '3 days'")
+    loaded = {r["ticker"] for r in cur.fetchall()}
+    waiting_load = {t: n for t, n in written.items() if t not in loaded}
+    idea_queue = [r for r in idea_queue if r["ticker"] not in waiting_load]
+    dd = [r for r in dd if r.get("ticker") not in waiting_load]
     for r in idea_queue:
         cur.execute("SELECT data FROM v2_research WHERE ticker = %s ORDER BY as_of DESC LIMIT 1", (r["ticker"],))
         rr = (cur.fetchone() or {}).get("data") or {}
@@ -1108,7 +1124,8 @@ def export(conn):
              "newsletters_7d": newsletters, "research_rules": RESEARCH_RULES,
              "second_opinion_queue": so_queue, "open_red_team_points": open_attacks, "engine_backfill_queue": backfill, "idea_queue": idea_queue,
              "open_questions": open_q, "sim_scenario_queue": scen_queue,
-             "section_backfill_queue": section_backfill}
+             "section_backfill_queue": section_backfill,
+             "thesis_written_not_loaded": waiting_load}
     text = json.dumps(state, default=str, indent=1)
     out = Path(__file__).parent.parent / "outbox"
     out.mkdir(exist_ok=True)

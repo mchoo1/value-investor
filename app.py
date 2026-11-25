@@ -336,7 +336,8 @@ details summary{cursor:pointer;color:var(--mute)}.cmt{border-left:2px solid var(
 <a href="{{ url_for('screen') }}" class="{{ 'on' if tab=='screen' }}">Screen</a>
 <a href="{{ url_for('watchlist') }}" class="{{ 'on' if tab=='watchlist' }}">Watchlist</a>
 <a href="{{ url_for('book') }}" class="{{ 'on' if tab=='book' }}">Book</a>
-<a href="{{ url_for('outlook') }}" class="{{ 'on' if tab=='outlook' }}">Outlook</a></nav></div></header>
+<a href="{{ url_for('outlook') }}" class="{{ 'on' if tab=='outlook' }}">Outlook</a>
+<a href="{{ url_for('help_page') }}" class="{{ 'on' if tab=='help' }}">Help</a></nav></div></header>
 <main>{% with m = get_flashed_messages() %}{% for x in m %}<div class="flash">{{ x }}</div>{% endfor %}{% endwith %}
 {{ body }}</main>
 <script>
@@ -2755,6 +2756,65 @@ def latest_research(ticker):
     except psycopg2.Error:
         return None
     return row["data"] if row else None
+
+
+MANUAL_URL = "https://claude.ai/artifact/SYhz8pyk4pBg3MAbkRXXPV"
+HELP_TPL = r"""
+<h1>How to use ValueInvestor</h1>
+<p class="sub">One repeatable path for every stock. Automation gathers information and drafts the analysis, the valuation engine calculates the numbers, and you approve every thesis and decision.
+Full manual with the schedule, every Telegram message and the 10-stage process: <a href="{{ manual }}" target="_blank" rel="noopener">ValueInvestor Operating Manual</a>.</p>
+<div class="grid g4">
+<div class="card"><div class="muted">1 · Find</div><h3>Screen or request</h3><p class="muted" style="margin:0">Weekly shortlist on Screen, or <code>/deepdive TICKER</code> for anything you hear about.</p></div>
+<div class="card"><div class="muted">2 · Research</div><h3>Read the case</h3><p class="muted" style="margin:0">Thesis, evidence, moat numbers, risks. <code>/thesis</code> or the stock page's research report.</p></div>
+<div class="card"><div class="muted">3 · Check</div><h3>Challenge it</h3><p class="muted" style="margin:0"><code>/challenge TICKER</code> or <code>/check TICKER link</code>; comment on any thesis section.</p></div>
+<div class="card"><div class="muted">4 · Decide</div><h3>Approve or pass</h3><p class="muted" style="margin:0">Approve the pending version on the stock page. A draft or an alert is never an approval.</p></div>
+<div class="card"><div class="muted">5 · Monitor</div><h3>Revisit on change</h3><p class="muted" style="margin:0">Results, filings, alerts and price levels. Re-underwrite when a pillar breaks.</p></div>
+</div>
+<div class="grid g2" style="margin-top:12px">
+<div class="card"><h3>Before a name moves on</h3><ul style="margin:0;padding-left:18px">
+<li><b>Screen → candidate:</b> balance-sheet checks pass; value names also pass at least 55% of the value tests.</li>
+<li><b>Candidate → deep dive:</b> a reason card answers four questions with evidence.</li>
+<li><b>Deep dive → decision:</b> claims carry a source and date, the moat is backed by numbers, values come from the engine.</li></ul></div>
+<div class="card"><h3>Choosing the call</h3><ul style="margin:0;padding-left:18px">
+<li><b>BUY</b> conviction 70+, price at or below the engine's buy level, and a dated catalyst.</li>
+<li><b>WATCH</b> conviction 50–69, or a good business above its buy level.</li>
+<li><b>PASS</b> conviction below 50, a failed gate, or a broken case.</li>
+<li><b>ADD · HOLD · TRIM · CUT</b> for names you own, with add-below and trim-above prices.</li></ul></div>
+</div>
+<h2>Telegram commands</h2>
+<table><tbody>
+<tr><td>Request research</td><td><code>/deepdive TICKER</code> · <code>/ideas</code> · <code>/cancel TICKER</code></td></tr>
+<tr><td>Read a thesis</td><td><code>/thesis TICKER</code> · one section: <code>/thesis TICKER quarter</code> (<code>/sections</code> lists them)</td></tr>
+<tr><td>Full report (PDF)</td><td><code>/report TICKER</code></td></tr>
+<tr><td>Holdings and Watchlist</td><td><code>/book</code> · <code>/watchlist</code></td></tr>
+<tr><td>Ask a question</td><td><code>/ask TICKER question</code>, answered within about 2 hours, 09:00–21:00; reply to an answer to follow up</td></tr>
+<tr><td>Challenge a thesis or source</td><td><code>/challenge TICKER topic</code> · <code>/check TICKER link</code> · <code>/feedback text</code></td></tr>
+</tbody></table>
+<h2>What to expect</h2>
+<div class="grid g2"><div class="card"><ul style="margin:0;padding-left:18px">
+<li><b>Tuesday to Saturday, 07:07:</b> a 2–3 minute brief on Telegram and email.</li>
+<li><b>Through the day:</b> new research and alerts within about 2 hours of each result, and Claude's answers.</li>
+<li><b>Weekly:</b> Saturday shortlist, Sunday reason cards and digest, Monday deep dives.</li>
+<li><b>Quiet hours 23:00–07:00:</b> messages wait for the next run.</li></ul></div>
+<div class="card"><p style="margin:0"><b>In short:</b> weekly screen → reason cards → selected deep dives → your review. A name on the screen is only a lead.</p>
+<p class="muted" style="margin:8px 0 0">If something expected is missing, check the System line in the morning brief and the status line on Decide.
+Last loaded from Claude: {{ st.inbox|d if st.inbox else 'never' }}{% if errors %} · <span class="bad">{{ errors }} file(s) rejected in the last day</span>{% endif %}.</p></div></div>
+<h2>Safeguards</h2>
+<div class="grid g2"><div class="card"><ul style="margin:0;padding-left:18px">
+<li>Code computes values, the model, DCF, star bands and entry targets; Claude writes assumptions and evidence.</li>
+<li>Every claim has a source and date (graded A–E); a moat without grade A–C evidence caps conviction at 60.</li>
+<li>Moats are backed by numbers against named peers, or by stated assumptions with their arithmetic.</li></ul></div>
+<div class="card"><ul style="margin:0;padding-left:18px">
+<li>A second-opinion split (values 25% apart or a different call) caps conviction at 74 until resolved.</li>
+<li>Every new thesis version is pending until you approve it; Claude proposes, never edits.</li>
+<li>Limits: 10% per name, 35% per sector, 40% per shared driver; drawdown alert past 15%; sizes halve above limits.</li></ul></div></div>
+"""
+
+
+@app.route("/help")
+def help_page():
+    errs = qsafe("SELECT COUNT(*) AS c FROM v2_inbox_log WHERE kind = 'error' AND loaded_at > now() - interval '26 hours'")
+    return page("help", "Help", HELP_TPL, manual=MANUAL_URL, st=sync_status(), errors=(errs[0]["c"] if errs else 0))
 
 
 @app.route("/health")
