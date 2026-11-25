@@ -5,7 +5,7 @@
   App:      Watchlist tab → "Add an idea"
 
 Every idea goes on the Watchlist at once, tagged "pending research", gets the weekly research data within ~2 hours,
-and a full deep dive (same standard as Monday's) the next night. The thesis and its BUY/WAIT/PASS arrive in the next
+and a full deep dive the next night (the same 02:13 task that writes every thesis). The thesis and its BUY/WAIT/PASS arrive in the next
 morning's brief. A PASS is flagged on the Decide tab for you to remove.
 
   python tools/ideas.py telegram     read new Telegram messages and add ideas (run by the 2-hourly job)
@@ -213,7 +213,7 @@ def thesis_text(cur, t, section=None):
         cur.execute("SELECT level, status FROM v2_names WHERE ticker = %s", (t,))
         n = cur.fetchone()
         if n and n["status"] == "deep_dive_requested":
-            return f"{t}: no thesis yet; its deep dive is queued (tonight 02:13 SGT for your ideas, Monday 03:13 otherwise)."
+            return f"{t}: no thesis yet; its deep dive is queued for tonight (02:13 SGT)."
         return f"{t}: no thesis yet. Send /deepdive {t} to get a full deep dive and investment thesis tonight."
     secs = th["sections"] or {}
     if section:

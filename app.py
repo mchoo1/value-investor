@@ -1887,8 +1887,10 @@ def pin(ticker):
 def deepdive(ticker):
     if not ensure_name(ticker.upper()):
         abort(404)
-    x("UPDATE v2_names SET status = 'deep_dive_requested', updated_at = now() WHERE ticker = %s", (ticker.upper(),))
-    flash(f"Deep dive requested for {ticker.upper()}. The next deep-dive task picks it up.")
+    from ideas import add_idea          # one path for every request: same queue as Telegram /deepdive
+    with db() as conn, conn.cursor() as c:
+        ok, msg = add_idea(c, ticker.upper(), "app", note="Deep dive requested in the app")
+    flash(msg)
     return back(url_for("screen"))
 
 
@@ -2794,7 +2796,7 @@ Full manual with the schedule, every Telegram message and the 10-stage process: 
 <div class="grid g2"><div class="card"><ul style="margin:0;padding-left:18px">
 <li><b>Tuesday to Saturday, 07:07:</b> a 2–3 minute brief on Telegram and email.</li>
 <li><b>Through the day:</b> new research and alerts within about 2 hours of each result, and Claude's answers.</li>
-<li><b>Weekly:</b> Saturday shortlist, Sunday reason cards and digest, Monday deep dives.</li>
+<li><b>Weekly:</b> Saturday shortlist, Sunday reason cards and digest, deep dives on the screen picks Monday night. Your own requests are researched every night.</li>
 <li><b>Quiet hours 23:00–07:00:</b> messages wait for the next run.</li></ul></div>
 <div class="card"><p style="margin:0"><b>In short:</b> weekly screen → reason cards → selected deep dives → your review. A name on the screen is only a lead.</p>
 <p class="muted" style="margin:8px 0 0">If something expected is missing, check the System line in the morning brief and the status line on Decide.
